@@ -1,0 +1,17 @@
+[package]
+name = "rusn_dos"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.54", features = ["env", "debug", "derive"] }
+env_logger = "0.11.8"
+log = { version = "0.4.29", features = ["max_level_info", "std", "release_max_level_info"] }
+serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
+serde_json = "1.0.149"
+toml = "0.9.11"
+dos_core = { path = "libs/dos_core"}
+
+[workspace]
+members = ['libs/*']
+resolver = "2"

@@ -1,0 +1,46 @@
+{
+    // Используйте IntelliSense, чтобы узнать о возможных атрибутах.
+    // Наведите указатель мыши, чтобы просмотреть описания существующих атрибутов.
+    // Для получения дополнительной информации посетите: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'rusn_dos'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=rusn_dos",
+                    "--package=rusn_dos"
+                ],
+                "filter": {
+                    "name": "rusn_dos",
+                    "kind": "bin"
+                }
+            },
+            "args": ["run", "./app/test/test"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'rusn_dos'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=rusn_dos",
+                    "--package=rusn_dos"
+                ],
+                "filter": {
+                    "name": "rusn_dos",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
