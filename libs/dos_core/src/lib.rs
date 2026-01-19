@@ -10,6 +10,7 @@ mod memory;
 mod machine;
 mod dos_api;
 mod consts;
+mod modrm;
 
 pub mod loader;
 pub mod instructions;

@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct Registers {
     eax: u32,
-    bx: u16,
+    ebx: u32,
     cx: u16,
     dx: u16,
     si: u16,
@@ -37,8 +37,52 @@ impl Registers {
         self.eax as u16
     }
 
+    pub fn eax(&self) -> u32 {
+        self.eax
+    }
+
+    pub fn bh(&self) -> u8 {
+        (self.bx() >> 8) as u8
+    }
+
+    pub fn bl(&self) -> u8 {
+        (self.bx() >> 0) as u8
+    }
+
+    pub fn bx(&self) -> u16 {
+        self.ebx as u16
+    }
+
+    pub fn ebx(&self) -> u32 {
+        self.ebx
+    }
+
     pub fn set_eax(&mut self, eax: u32) {
         self.eax = eax;
+    }
+    pub fn set_ax(&mut self, val: u16) {
+        self.eax = (self.eax & 0xFFFF0000) | (val as u32);
+    }
+
+    pub fn set_al(&mut self, val: u8) {
+        self.set_ax((self.ax() & 0xFF00) | (val as u16));
+    }
+    pub fn set_ah(&mut self, val: u8) {
+        self.set_ax(((val as u16) << 8) | (self.ax() & 0x00FF));
+    }
+
+    pub fn set_ebx(&mut self, ebx: u32) {
+        self.ebx = ebx;
+    }
+    pub fn set_bx(&mut self, val: u16) {
+        self.ebx = (self.ebx & 0xFFFF0000) | (val as u32);
+    }
+
+    pub fn set_bl(&mut self, val: u8) {
+        self.set_bx((self.bx() & 0xFF00) | (val as u16));
+    }
+    pub fn set_bh(&mut self, val: u8) {
+        self.set_bx(((val as u16) << 8) | (self.bx() & 0x00FF));
     }
 
     pub fn set_dx(&mut self, dx: u16) {
@@ -51,38 +95,12 @@ impl Registers {
     pub fn dl(&self) -> u8 {
         (self.dx >> 0) as u8
     }
-    pub fn bl(&self) -> u8 {
-        (self.bx >> 0) as u8
-    }
 
     pub fn ch(&self) -> u8 {
         (self.cx >> 8) as u8
     }
     pub fn dh(&self) -> u8 {
         (self.dx >> 8) as u8
-    }
-    pub fn bh(&self) -> u8 {
-        (self.bx >> 8) as u8
-    }
-
-    pub fn set_ah(&mut self, val: u8) {
-        self.set_ax(((val as u16) << 8) | (self.ax() & 0x00FF));
-    }
-
-    pub fn set_ax(&mut self, val: u16) {
-        self.eax = (self.eax & 0xFFFF0000) | (val as u32);
-    }
-
-    pub fn set_al(&mut self, val: u8) {
-        self.set_ax((self.ax() & 0xFF00) | (val as u16));
-    }
-
-    pub fn set_bl(&mut self, val: u8) {
-        self.bx = (self.bx & 0xFF00) | (val as u16);
-    }
-
-    pub fn set_bh(&mut self, val: u8) {
-        self.bx = ((val as u16) << 8) | (self.bx & 0x00FF);
     }
 
     pub fn set_cl(&mut self, val: u8) {
@@ -118,10 +136,6 @@ impl Registers {
 
     pub fn dx(&self) -> u16 {
         self.dx
-    }
-
-    pub fn bx(&self) -> u16 {
-        self.bx
     }
 
     pub fn sp(&self) -> u16 {
@@ -162,10 +176,6 @@ impl Registers {
 
     pub fn set_cx(&mut self, cx: u16) {
         self.cx = cx;
-    }
-
-    pub fn set_bx(&mut self, bx: u16) {
-        self.bx = bx;
     }
 
     pub fn set_bp(&mut self, bp: u16) {

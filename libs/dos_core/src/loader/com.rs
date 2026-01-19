@@ -2,7 +2,12 @@ use std::fs::File;
 
 use log::info;
 
-use crate::{DosMachine, consts::{DOS_MEMORY_SIZE, SEGMENT_SIZE}, loader::MzHeader, registers::Registers};
+use crate::{
+    DosMachine,
+    consts::{DOS_MEMORY_SIZE, SEGMENT_SIZE},
+    loader::MzHeader,
+    registers::Registers,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct DosExecutable {
@@ -65,34 +70,79 @@ impl DosExecutable {
         } else {
             None // это .COM или другой формат
         };
-        let data = if let Some(hdr) = &header {
-            let header_size = (hdr.e_cparhdr as usize) * SEGMENT_SIZE;
-            data[header_size..].to_vec()
-        } else {
-            data.to_vec()
-        };
         Ok(Self {
             header: header,
-            data: data,
+            data: data.to_vec(),
         })
     }
+
+    pub fn relocation(&self, memory: &mut Box<[u8]>) {
+        let load_segment = 0x1000;
+        if let Some(hdr) = &self.header {
+            let reloc_table_offset = hdr.e_lfarlc as usize;
+            let reloc_count = hdr.e_relc as usize;
+
+            for i in 0..reloc_count {
+                let entry_offset = reloc_table_offset + i * 4;
+                if entry_offset + 4 > self.data.len() {
+                    break;
+                }
+
+                let offset =
+                    u16::from_le_bytes([self.data[entry_offset], self.data[entry_offset + 1]]);
+                let segment =
+                    u16::from_le_bytes([self.data[entry_offset + 2], self.data[entry_offset + 3]]);
+
+                let fixup_addr = (load_segment as u32 + segment as u32) * 16 + offset as u32;
+                let fixup_idx = fixup_addr as usize;
+
+                if fixup_idx + 2 > memory.len() {
+                    continue;
+                }
+
+                let current = u16::from_le_bytes([memory[fixup_idx], memory[fixup_idx + 1]]);
+                let corrected = current.wrapping_add(load_segment);
+
+                memory[fixup_idx] = corrected as u8;
+                memory[fixup_idx + 1] = (corrected >> 8) as u8;
+            }
+        }
+    }
+
     pub fn exec(&self) -> Result<crate::DosMachine, Box<dyn std::error::Error>> {
         let mut memory = vec![0u8; DOS_MEMORY_SIZE].into_boxed_slice();
+        memory[0x00] = 0xCD; // INT
+        memory[0x01] = 0x20; // 20h
+        // Указать размер доступной памяти (например, 640 KiB = 0xA000 параграфов)
+        let mem_size_para = (DOS_MEMORY_SIZE / 16) as u16;
+        memory[0x02] = (mem_size_para & 0xFF) as u8;
+        memory[0x03] = ((mem_size_para >> 8) & 0xFF) as u8;
+        // INT 21h / RETF для возврата
+        memory[0x08] = 0xCD; // INT
+        memory[0x09] = 0x21; // 21h
+        memory[0x0A] = 0xCB; // RETF
         let mut dos: crate::DosMachine;
         if let Some(hdr) = &self.header {
-            let load_segment = 0x10;
-            let header_size = (hdr.e_cparhdr as usize) * SEGMENT_SIZE;
-            let code_start_offset = (load_segment * 16) + header_size;
-            if code_start_offset + self.data.len() > DOS_MEMORY_SIZE {
-                return Err("Program too large for DOS memory".into());
+            //let load_segment = hdr.e_minep;//0x1000;
+            let load_segment = 0x1000;
+            let header_size = (hdr.e_cparhdr as usize) * 16;
+
+            // Копируем по физическому адресу 0x100
+            let load_physical = load_segment as usize * 16;
+            if load_physical + self.data.len() > DOS_MEMORY_SIZE {
+                return Err("Program too large".into());
             }
-            memory[code_start_offset..code_start_offset + self.data.len()]
-                .copy_from_slice(&self.data.as_slice());
-            let cs = (load_segment as u16) + hdr.e_cparhdr;
+            let data = self.data[header_size..].to_vec();
+            memory[load_physical..load_physical + data.len()].copy_from_slice(&data);
+            self.relocation(&mut memory);
+            // Регистры
+            let cs = load_segment + hdr.cs; //load_segment + hdr.e_cparhdr;
             let ip = hdr.ip;
-            let ss = (load_segment as u16) + hdr.e_minep;
+            let ss = load_segment + hdr.ss; //load_segment + hdr.e_cparhdr + hdr.e_minep;
             let sp = hdr.sp;
 
+            // PSP
+            let code_start_offset = (load_segment as u32 * 16 ) + header_size as u32;
             println!("Loaded .EXE file:");
             println!("  CS:IP = {:#04x}:{:#04x}", cs, ip);
             println!("  SS:SP = {:#04x}:{:#04x}", ss, sp);
@@ -100,22 +150,20 @@ impl DosExecutable {
                 "  Code loaded at physical address: {:#x}",
                 code_start_offset
             );
-            let psp_base = 0x100;
-            memory[psp_base] = 0xCD;
-            memory[psp_base + 1] = 0x20;
-            memory[0x00] = 0xCD; // INT 20h
-            memory[0x01] = 0x20;
+
             dos = crate::DosMachine {
                 memory: memory,
                 halted: false,
                 registers: Registers::default(),
                 logfile: File::create("logopcode_exe.txt")?,
+                has_address_size_prefix: false,
+                has_operand_size_prefix: false,
             };
             dos.registers.set_cs(cs);
             //dos.registers.ds = load_segment as u16;
             //dos.registers.es = load_segment as u16;
-            dos.registers.set_ds(0x0000);
-            dos.registers.set_es(0x0000);
+            dos.registers.set_ds(load_segment);
+            dos.registers.set_es(load_segment);
             dos.registers.set_ip(ip);
             dos.registers.set_ss(ss);
             dos.registers.set_sp(sp);
@@ -123,13 +171,13 @@ impl DosExecutable {
             info!("Assuming .COM file (starts at 0x100)");
             let com_start = 0x100;
             memory[com_start..com_start + self.data.len()].copy_from_slice(&self.data);
-            memory[0] = 0xCD; // int
-            memory[1] = 0x20; // 0x20
             dos = DosMachine {
                 memory: memory,
                 halted: false,
                 registers: Registers::default(),
                 logfile: File::create("logopcode_com.txt")?,
+                has_address_size_prefix: false,
+                has_operand_size_prefix: false,
             };
             dos.registers.set_cs(0);
             dos.registers.set_ds(dos.registers.cs());
