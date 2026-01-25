@@ -170,38 +170,41 @@ fn update_flags(flags: &mut u16, result: u32, cf: bool, of: bool) {
 
 pub fn or(machine: &mut DosMachine, prev: &[u8]) {
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None); // IP += 1 (ModR/M прочитан)
+    machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
+    machine.log_instruction(&bytes).ok();
 
     let modrm = ModRm::from_byte(modrm_byte);
 
     if modrm.is_register_mode() {
-        // Регистровый режим: OR r32, r32
+        // OR reg32, reg32 — 0x67 игнорируется
         let src = machine.read_reg32(modrm.reg_field);
         let dst = machine.read_reg32(modrm.rm_field);
         let result = dst | src;
         machine.write_reg32(modrm.rm_field, result);
-
-        // Установка флагов
+        // Установка флагов...
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11); // CF=0, OF=0
-        if result == 0 { flags |= 1 << 6; } // ZF
-        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; } // SF
-        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; } // PF
+        flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
+        if result == 0 { flags |= 1 << 6; }
+        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
+        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
         machine.registers.set_flags(flags);
-
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
+        // [disp32] — разрешено ТОЛЬКО если был 0x67
+        if !machine.has_address_size_prefix {
+            log::error!("Invalid memory mode for OR without address-size prefix");
+            machine.halted = true;
+            return;
+        }
         let addr = machine.read_u32(machine.registers.cs(), machine.registers.ip());
-        bytes.extend_from_slice(&addr.to_le_bytes());
-        machine.registers.step(Some(4)); // IP += 4
-
+        machine.registers.step(Some(4));
         let src_val = machine.read_reg32(modrm.reg_field);
         let dst_val = machine.read_phys_u32(addr as u32);
         let result = dst_val | src_val;
-
         machine.write_phys_u32(addr as u32, result);
+        // Установка флагов...
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
         if result == 0 { flags |= 1 << 6; }
@@ -209,8 +212,69 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
         machine.registers.set_flags(flags);
     } else {
-        machine.log_instruction(&bytes).ok();
-        todo!("поддержать другие режимы памяти");
+        log::error!("Unsupported memory mode in OR r/m32, r32");
+        machine.halted = true;
     }
+}
+
+pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
     machine.log_instruction(&bytes).ok();
+
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    if modrm.is_register_mode() {
+        // ADD reg32, reg32
+        let src = machine.read_reg32(modrm.reg_field);
+        let dst = machine.read_reg32(modrm.rm_field);
+        let res = (dst as u64) + (src as u64);
+        let result = res as u32;
+        let cf = res > 0xFFFFFFFF;
+        let af = ((dst & 0x0F) + (src & 0x0F)) > 0x0F;
+        let of = (((dst ^ src) & 0x8000_0000) == 0) && ((dst ^ result) & 0x8000_0000) != 0;
+        machine.write_reg32(modrm.rm_field, result);
+        // Установка флагов...
+        let mut flags = machine.registers.flags();
+        flags &= !(1 << 0 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
+        if result == 0 { flags |= 1 << 6; }
+        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
+        if cf { flags |= 1 << 0; }
+        if of { flags |= 1 << 11; }
+        if af { flags |= 1 << 4; }
+        machine.registers.set_flags(flags);
+    } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b110 {
+        // [disp16] — разрешено ТОЛЬКО если НЕТ 0x67
+        if machine.has_address_size_prefix {
+            log::error!("Invalid memory mode for ADD with address-size prefix");
+            machine.halted = true;
+            return;
+        }
+        let disp16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(Some(2));
+        let phys_addr = (machine.registers.ds() as u32) * 16 + (disp16 as u32);
+        let dst_val = machine.read_phys_u32(phys_addr);
+        let src_val = machine.read_reg32(modrm.reg_field);
+        let res = (dst_val as u64) + (src_val as u64);
+        let result = res as u32;
+        let cf = res > 0xFFFFFFFF;
+        let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
+        let of = (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
+        machine.write_phys_u32(phys_addr, result);
+        // Установка флагов...
+        let mut flags = machine.registers.flags();
+        flags &= !(1 << 0 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
+        if result == 0 { flags |= 1 << 6; }
+        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
+        if cf { flags |= 1 << 0; }
+        if of { flags |= 1 << 11; }
+        if af { flags |= 1 << 4; }
+        machine.registers.set_flags(flags);
+    } else {
+        log::error!("Unsupported memory mode in ADD r/m32, r32");
+        machine.halted = true;
+    }
 }

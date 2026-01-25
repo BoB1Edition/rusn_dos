@@ -182,7 +182,7 @@ impl DosMachine {
                 /*if self.has_operand_size_prefix {
                     extended::movzx_r16_rm16(self, &full_bytes);
                 } else {*/
-                    extended32::movzx_r32_rm16(self, &full_bytes);
+                extended32::movzx_r32_rm16(self, &full_bytes);
                 //}
 
                 /*let modrm = self.read_u8(self.registers.cs(), self.registers.ip());
@@ -260,7 +260,6 @@ impl DosMachine {
     fn execute(&mut self, opcode: u8) {
         let mut full_bytes = Vec::new();
 
-        
         if self.has_operand_size_prefix {
             full_bytes.push(0x66);
         }
@@ -335,7 +334,7 @@ impl DosMachine {
                 }
             }
             0x8C => {
-                mov::mov(self, &full_bytes);
+                mov::mov_rm16_sreg(self, &full_bytes);
             }
 
             0xE8 => {
@@ -365,7 +364,7 @@ impl DosMachine {
                 system::int(self, &full_bytes);
             }
             0x00 => {
-                alu::add(self, &full_bytes);
+                alu::add_rm8_r8(self, &full_bytes);
             }
             0xFA => {
                 let _ = self.log_instruction(&full_bytes);
@@ -380,6 +379,20 @@ impl DosMachine {
                     alu32::or(self, &full_bytes);
                 } else {
                     self.print_error_exit(opcode);
+                }
+            }
+            0x89 => {
+                if !self.has_operand_size_prefix {
+                    mov::mov_rm16_r16(self, &full_bytes);
+                } else {
+                    mov32::mov_rm32_r32(self, &full_bytes);
+                }
+            }
+            0x01 => {
+                if self.has_operand_size_prefix {
+                    alu32::add_rm32_r32(self, &full_bytes);
+                } else {
+                    alu::add_rm16_r16(self, &full_bytes);
                 }
             }
             _ => {
@@ -462,6 +475,29 @@ impl DosMachine {
         } else {
             0xFF // или panic, или лог ошибки
         }
+    }
+
+    pub fn compute_flags_u16(result: u16, cf: bool, of: bool, af: bool) -> u16 {
+        let mut flags = 0u16;
+        if result == 0 {
+            flags |= 1 << 6;
+        } // ZF
+        if (result & 0x8000) != 0 {
+            flags |= 1 << 7;
+        } // SF
+        if result.count_ones() % 2 == 0 {
+            flags |= 1 << 2;
+        } // PF
+        if cf {
+            flags |= 1 << 0;
+        }
+        if of {
+            flags |= 1 << 11;
+        }
+        if af {
+            flags |= 1 << 4;
+        }
+        flags
     }
 
     #[inline(always)]

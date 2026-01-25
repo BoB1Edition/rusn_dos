@@ -1,4 +1,4 @@
-use crate::machine::DosMachine;
+use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = Vec::new();
@@ -8,7 +8,6 @@ pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
         let addr = machine.read_phys_u32(linear_ip);
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.registers.step(Some(4));
-        machine.has_address_size_prefix = false;
         addr
     } else {
         let linear_ip = (machine.registers.cs() as u32) * 16 + (machine.registers.ip() as u32);
@@ -46,5 +45,33 @@ pub fn mov_ebx_data(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         machine.print_error_exit(prev.last().unwrap().clone());
     }
+}
+
+pub fn mov_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
     
+
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    if modrm.is_register_mode() {
+        // MOV reg32, reg32
+        let src = machine.read_reg32(modrm.reg_field);
+        machine.write_reg32(modrm.rm_field, src);
+    } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
+        // MOV [disp32], reg32
+        let addr = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(Some(4));
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let src_val = machine.read_reg32(modrm.reg_field);
+        machine.write_phys_u32(addr as u32, src_val);
+    } else {
+        machine.log_instruction(&bytes).ok();
+        log::error!("Unsupported memory mode in MOV r/m32, r32");
+        machine.halted = true;
+    }
+    machine.log_instruction(&bytes).ok();
 }
