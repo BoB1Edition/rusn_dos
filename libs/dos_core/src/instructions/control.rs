@@ -32,7 +32,7 @@ pub fn jz(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None);
 
     if (machine.registers.flags() & (1 << 6)) != 0 {
-        let new_ip = (machine.registers.ip() as i32 + rel8 as i32) as u16;
+        let new_ip = (machine.registers.ip() as u32 + rel8 as u32) as u16;
         machine.registers.set_ip(new_ip);
     }
 }

@@ -3,14 +3,14 @@ use log::error;
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
+    let mut bytes = prev.to_vec();
+    //if !machine.has_address_size_prefix {
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
         machine.registers.ip().wrapping_add(1),
     );
     machine.registers.step(Some(2));
-
-    let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     bytes.push(imm8);
     machine.log_instruction(&bytes).ok();
@@ -169,47 +169,48 @@ fn update_flags(flags: &mut u16, result: u32, cf: bool, of: bool) {
 }
 
 pub fn or(machine: &mut DosMachine, prev: &[u8]) {
-    //if !machine.has_address_size_prefix {
-        let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-        machine.registers.step(None);
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // IP += 1 (ModR/M прочитан)
 
-        let mut bytes = prev.to_vec();
-        bytes.push(0x09);
-        bytes.push(modrm_byte);
-        machine.log_instruction(&bytes).ok();
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
 
-        let modrm = ModRm::from_byte(modrm_byte);
-        // Поддерживаем только [disp32] (Mod=00, R/M=101)
-        if modrm.mod_field != 0b00 || modrm.rm_field != 0b101 {
-            error!("Unsupported ModR/M for OR r/m32, r32: {:#02x}", modrm_byte);
-            machine.halted = true;
-            return;
-        }
+    let modrm = ModRm::from_byte(modrm_byte);
 
-        let linear_ip = (machine.registers.cs() as u32) * 16 + (machine.registers.ip() as u32);
-        let addr = machine.read_phys_u32(linear_ip);
-        machine.registers.step(Some(4));
+    if modrm.is_register_mode() {
+        // Регистровый режим: OR r32, r32
+        let src = machine.read_reg32(modrm.reg_field);
+        let dst = machine.read_reg32(modrm.rm_field);
+        let result = dst | src;
+        machine.write_reg32(modrm.rm_field, result);
 
-        let src_val = machine.read_reg32(modrm.reg_field); // источник
-        let dst_val = machine.read_phys_u32(addr); // приёмник из памяти
-        let result = dst_val | src_val;
-
-        // Обновление флагов (логическая операция)
+        // Установка флагов
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11); // CF=0, OF=0
-        if result == 0 {
-            flags |= 1 << 6;
-        } // ZF
-        if (result & 0x8000) != 0 {
-            flags |= 1 << 7;
-        } // SF (бит 15 — real mode!)
-        if (result as u8).count_ones() % 2 == 0 {
-            flags |= 1 << 2;
-        } // PF
-
-        machine.write_phys_u32(addr, result);
+        if result == 0 { flags |= 1 << 6; } // ZF
+        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; } // SF
+        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; } // PF
         machine.registers.set_flags(flags);
-    //} else {
-    //    machine.print_error_exit_address(prev.last().unwrap().clone());
-    //}
+
+    } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
+        let addr = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.registers.step(Some(4)); // IP += 4
+
+        let src_val = machine.read_reg32(modrm.reg_field);
+        let dst_val = machine.read_phys_u32(addr as u32);
+        let result = dst_val | src_val;
+
+        machine.write_phys_u32(addr as u32, result);
+        let mut flags = machine.registers.flags();
+        flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
+        if result == 0 { flags |= 1 << 6; }
+        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
+        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
+        machine.registers.set_flags(flags);
+    } else {
+        machine.log_instruction(&bytes).ok();
+        todo!("поддержать другие режимы памяти");
+    }
+    machine.log_instruction(&bytes).ok();
 }

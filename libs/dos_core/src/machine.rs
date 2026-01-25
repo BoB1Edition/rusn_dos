@@ -4,7 +4,7 @@ use log::error;
 
 use crate::{
     consts::SEGMENT_SIZE,
-    instructions::{alu, alu32, control, mov, mov32, stack, system},
+    instructions::{alu, alu32, control, extended, extended32, mov, mov32, stack, system},
 };
 
 #[derive(Debug)]
@@ -15,6 +15,7 @@ pub struct DosMachine {
     pub logfile: File,
     pub has_address_size_prefix: bool,
     pub has_operand_size_prefix: bool,
+    pub has_extended_prefix: bool,
 }
 
 impl DosMachine {
@@ -109,7 +110,7 @@ impl DosMachine {
             0 => self.registers.set_eax(value),
             1 => todo!("self.registers.set_ecx(value)"),
             2 => todo!("self.registers.set_edx(value)"),
-            3 => todo!("self.registers.set_ebx(value)"),
+            3 => self.registers.set_ebx(value),
             4 => todo!("self.registers.set_esp(value)"),
             5 => todo!("self.registers.set_ebp(value)"),
             6 => todo!("self.registers.set_esi(value)"),
@@ -165,10 +166,26 @@ impl DosMachine {
         writeln!(self.logfile, "{}", hex_bytes.join(" "))
     }
 
-    fn execute0f(&mut self, opcode: u8, prev: &[u8]) {
+    fn execute_0f(&mut self, opcode: u8) {
+        let mut full_bytes = Vec::new();
+
+        if self.has_operand_size_prefix {
+            full_bytes.push(0x66);
+        }
+        if self.has_address_size_prefix {
+            full_bytes.push(0x67);
+        }
+        full_bytes.push(0x0F);
+        full_bytes.push(opcode);
         match opcode {
             0xB7 => {
-                let modrm = self.read_u8(self.registers.cs(), self.registers.ip());
+                /*if self.has_operand_size_prefix {
+                    extended::movzx_r16_rm16(self, &full_bytes);
+                } else {*/
+                    extended32::movzx_r32_rm16(self, &full_bytes);
+                //}
+
+                /*let modrm = self.read_u8(self.registers.cs(), self.registers.ip());
                 self.registers.step(None);
                 let mut bytes = Vec::with_capacity(prev.len() + 2);
                 bytes.extend_from_slice(prev);
@@ -196,7 +213,7 @@ impl DosMachine {
                 match dst_reg {
                     0 => self.registers.set_eax(src_val as u32),
                     _ => unreachable!(),
-                }
+                }*/
             }
             _ => {
                 error!(
@@ -210,31 +227,29 @@ impl DosMachine {
         }
     }
 
-    pub fn print_error_exit_address(&mut self, opcode: u8) {
-        let bit_depth = if self.has_address_size_prefix {
-            "address32"
-        } else {
-            "address32"
-        }
-        .to_string();
-        error!(
-            "Unsupported {bit_depth} {:#02X} at CS:IP = {:#04x}:{:#04x}",
-            opcode,
-            self.registers.cs(),
-            self.registers.ip()
-        );
-        self.halted = true;
-    }
-
-    fn print_error_exit(&mut self, opcode: u8) {
+    pub fn print_error_exit(&mut self, opcode: u8) {
         let bit_depth = if self.has_operand_size_prefix {
             "opcode32"
         } else {
             "opcode"
         }
         .to_string();
+
+        let bit_address = if self.has_operand_size_prefix {
+            "address32"
+        } else {
+            "address"
+        }
+        .to_string();
+
+        let bit_extended = if self.has_extended_prefix {
+            "extended"
+        } else {
+            ""
+        }
+        .to_string();
         error!(
-            "Unsupported {bit_depth} {:#02X} at CS:IP = {:#04x}:{:#04x}",
+            "Unsupported {bit_depth} {bit_address} {bit_extended} {:#02X} at CS:IP = {:#04x}:{:#04x}",
             opcode,
             self.registers.cs(),
             self.registers.ip()
@@ -243,219 +258,128 @@ impl DosMachine {
     }
 
     fn execute(&mut self, opcode: u8) {
+        let mut full_bytes = Vec::new();
+
+        
+        if self.has_operand_size_prefix {
+            full_bytes.push(0x66);
+        }
+        if self.has_address_size_prefix {
+            full_bytes.push(0x67);
+        }
+        full_bytes.push(opcode);
         match opcode {
             0xB4 => {
-                if !self.has_address_size_prefix {
-                    mov::mov_ah(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
-            }
-            0x67 => {
-                self.has_address_size_prefix = true;
-            }
-            0x0f => {
-                if self.has_operand_size_prefix {
-                    let new_opcode = self.read_u8(self.registers.cs(), self.registers.ip());
-                    self.registers.step(None);
-                    self.execute0f(new_opcode, &[0x66, opcode]);
-                    self.has_operand_size_prefix = !self.has_operand_size_prefix;
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                mov::mov_ah(self, &full_bytes);
             }
             0xB8 => {
                 if !self.has_operand_size_prefix {
-                    mov::mov_ax(self, &[opcode]);
+                    mov::mov_ax(self, &full_bytes);
                 } else {
-                    mov32::mov_eax_data(self, &[0x66, opcode]);
+                    mov32::mov_eax_data(self, &full_bytes);
                 }
             }
             0xBA => {
                 if !self.has_operand_size_prefix {
-                    mov::mov_dx(self, &[opcode]);
+                    mov::mov_dx(self, &full_bytes);
                 } else {
                     self.print_error_exit(opcode);
                 }
             }
             0xBB => {
                 if self.has_operand_size_prefix {
-                    mov32::mov_ebx_data(self, &[opcode]);
+                    mov32::mov_ebx_data(self, &full_bytes);
                 } else {
                     self.print_error_exit(opcode);
                 }
             }
             0x1f => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::pop_ds(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                stack::pop_ds(self);
             }
 
             0x58 => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::pop_ax(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                stack::pop_ax(self);
             }
 
             0x53 => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::push_bx(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                stack::push_bx(self);
             }
 
             0x0E => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::push_cs(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                stack::push_cs(self);
             }
             0x50 => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::push_ax(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                stack::push_ax(self);
             }
             0x9C => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::pushf(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
-            }
-
-            0x66 => {
-                self.has_operand_size_prefix = true;
+                let _ = self.log_instruction(&full_bytes);
+                stack::pushf(self);
             }
             0xA3 => {
                 if self.has_operand_size_prefix {
-                    if self.has_address_size_prefix {
-                        mov32::mov_address_eax(self, &[0x66, 0x67, opcode]);
-                        self.has_operand_size_prefix = !self.has_operand_size_prefix;
-                    } else {
-                        mov32::mov_address_eax(self, &[0x66, 0x67, opcode]);
-                    }
+                    mov32::mov_address_eax(self, &full_bytes);
                 } else {
                     self.print_error_exit(opcode);
                 }
             }
             0xC1 => {
                 if self.has_operand_size_prefix {
-                    alu32::shift_group_c1(self, &[0x66, opcode]);
-                    self.has_operand_size_prefix = !self.has_operand_size_prefix;
+                    alu32::shift_group_c1(self, &full_bytes);
                 } else {
                     self.print_error_exit(opcode);
                 }
             }
             0x8C => {
-                if !self.has_operand_size_prefix {
-                    mov::mov(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                mov::mov(self, &full_bytes);
             }
 
             0xE8 => {
-                if !self.has_operand_size_prefix {
-                    control::call(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                control::call(self, &full_bytes);
             }
             0xFC => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    self.registers.set_flags(self.registers.flags() & !0x0400);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                self.registers.set_flags(self.registers.flags() & !0x0400);
             }
             0xC3 => {
-                if !self.has_operand_size_prefix {
-                    control::retn(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                control::retn(self, &full_bytes);
             }
             0x32 => {
-                if !self.has_operand_size_prefix {
-                    alu::xor(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                alu::xor(self, &full_bytes);
             }
             0x74 => {
-                if !self.has_operand_size_prefix {
-                    control::jz(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                control::jz(self, &full_bytes);
             }
             0x9D => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    stack::popf(self);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                stack::popf(self);
             }
             0x80 => {
-                if !self.has_operand_size_prefix {
-                    alu::group_x80(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                alu::group_x80(self, &full_bytes);
             }
             0xCD => {
-                if !self.has_operand_size_prefix {
-                    system::int(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                system::int(self, &full_bytes);
             }
             0x00 => {
-                if !self.has_operand_size_prefix {
-                    alu::add(self, &[opcode]);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                alu::add(self, &full_bytes);
             }
             0xFA => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    self.registers.set_flags(self.registers.flags() & !0x0200);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                self.registers.set_flags(self.registers.flags() & !0x0200);
             }
             0xFB => {
-                if !self.has_operand_size_prefix {
-                    let _ = self.log_instruction(&[opcode]);
-                    self.registers.set_flags(self.registers.flags() | 0x0200);
-                } else {
-                    self.print_error_exit(opcode);
-                }
+                let _ = self.log_instruction(&full_bytes);
+                self.registers.set_flags(self.registers.flags() | 0x0200);
             }
             0x09 => {
                 if self.has_operand_size_prefix {
-                    if self.has_address_size_prefix {
-                        alu32::or(self, &[0x66, 0x67, opcode]);
-                    } else {
-                        alu32::or(self, &[0x66, opcode]);
-                    }
+                    alu32::or(self, &full_bytes);
+                } else {
+                    self.print_error_exit(opcode);
                 }
             }
             _ => {
@@ -463,12 +387,34 @@ impl DosMachine {
             }
         }
     }
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Option<u8> {
         while !self.halted {
             let opcode = self.read_u8(self.registers.cs(), self.registers.ip());
             self.registers.step(None);
-            self.execute(opcode);
+            match opcode {
+                0x67 => {
+                    self.has_address_size_prefix = true;
+                }
+                0x66 => {
+                    self.has_operand_size_prefix = true;
+                }
+                0x0F => {
+                    self.has_extended_prefix = true;
+                }
+                _ => {
+                    if self.has_extended_prefix {
+                        self.execute_0f(opcode);
+                    } else {
+                        self.execute(opcode);
+                    }
+                    self.has_address_size_prefix = false;
+                    self.has_operand_size_prefix = false;
+                    self.has_extended_prefix = false;
+                }
+            }
         }
+        let exit_code = Some(self.registers.al());
+        return exit_code;
     }
     pub fn handle_int21(&mut self) {
         match self.registers.ah() {
@@ -498,7 +444,8 @@ impl DosMachine {
     }
     #[inline(always)]
     pub fn read_u8(&self, segment: u16, offset: u16) -> u8 {
-        let addr = (segment as usize) * 16 + (offset as usize);
+        let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
+        let addr = addr as usize;
         if addr < self.memory.len() {
             self.memory[addr]
         } else {
@@ -553,7 +500,8 @@ impl DosMachine {
 
     #[inline(always)]
     fn write_u8(&mut self, segment: u16, offset: u16, value: u8) {
-        let addr = (segment as usize) * SEGMENT_SIZE + (offset as usize);
+        let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
+        let addr = addr as usize;
         if addr < self.memory.len() {
             self.memory[addr] = value;
         } else {

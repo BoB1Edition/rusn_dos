@@ -13,4 +13,4 @@ mod consts;
 mod modrm;
 
 pub mod loader;
-pub mod instructions;
+mod instructions;

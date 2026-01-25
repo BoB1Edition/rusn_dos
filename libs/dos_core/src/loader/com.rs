@@ -158,6 +158,7 @@ impl DosExecutable {
                 logfile: File::create("logopcode_exe.txt")?,
                 has_address_size_prefix: false,
                 has_operand_size_prefix: false,
+                has_extended_prefix: false,
             };
             dos.registers.set_cs(cs);
             //dos.registers.ds = load_segment as u16;
@@ -178,6 +179,7 @@ impl DosExecutable {
                 logfile: File::create("logopcode_com.txt")?,
                 has_address_size_prefix: false,
                 has_operand_size_prefix: false,
+                has_extended_prefix: false,
             };
             dos.registers.set_cs(0);
             dos.registers.set_ds(dos.registers.cs());

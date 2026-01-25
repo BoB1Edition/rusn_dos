@@ -3,79 +3,91 @@ use log::error;
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn xor(machine: &mut DosMachine, prev: &[u8]) {
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None); // skip ModR/M
-
     let mut bytes = prev.to_vec();
-    bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    //if !machine.has_address_size_prefix {
+        let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(None); // skip ModR/M
 
-    let modrm = ModRm::from_byte(modrm_byte);
-    if !modrm.is_register_mode() {
-        error!("Memory operand in XOR r8, r/m8 not supported");
-        machine.halted = true;
-        return;
-    }
+        bytes.push(modrm_byte);
+        machine.log_instruction(&bytes).ok();
 
-    let src_val = machine.read_reg8(modrm.rm_field);
-    let dst_val = machine.read_reg8(modrm.reg_field);
-    let result = dst_val ^ src_val;
+        let modrm = ModRm::from_byte(modrm_byte);
+        if !modrm.is_register_mode() {
+            error!("Memory operand in XOR r8, r/m8 not supported");
+            machine.halted = true;
+            return;
+        }
 
-    machine.write_reg8(modrm.reg_field, result);
-    machine
-        .registers
-        .set_flags(DosMachine::compute_logical_flags(result));
+        let src_val = machine.read_reg8(modrm.rm_field);
+        let dst_val = machine.read_reg8(modrm.reg_field);
+        let result = dst_val ^ src_val;
+
+        machine.write_reg8(modrm.reg_field, result);
+        machine
+            .registers
+            .set_flags(DosMachine::compute_logical_flags(result));
+    /*} else {
+        machine.print_error_exit(bytes.last().unwrap().clone());
+    }*/
 }
 pub fn add(machine: &mut DosMachine, prev: &[u8]) {
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None);
-
     let mut bytes = prev.to_vec();
-    bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    //if machine.has_address_size_prefix {
+        let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(None);
 
-    let modrm = ModRm::from_byte(modrm_byte);
-    if !modrm.is_register_mode() {
+        bytes.push(modrm_byte);
         machine.log_instruction(&bytes).ok();
-        error!("Memory operand in ADD r/m8, r8 not supported");
-        machine.halted = true;
-        return;
-    }
 
-    let src_val = machine.read_reg8(modrm.reg_field); // источник
-    let dst_val = machine.read_reg8(modrm.rm_field); // приёмник
-    let res = (dst_val as u16) + (src_val as u16);
-    let result = res as u8;
+        let modrm = ModRm::from_byte(modrm_byte);
+        if !modrm.is_register_mode() {
+            machine.log_instruction(&bytes).ok();
+            error!("Memory operand in ADD r/m8, r8 not supported");
+            machine.halted = true;
+            return;
+        }
 
-    let cf = res > 0xFF;
-    let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
-    let of = (((dst_val ^ src_val) & 0x80) == 0) && ((dst_val ^ result) & 0x80) != 0;
+        let src_val = machine.read_reg8(modrm.reg_field); // источник
+        let dst_val = machine.read_reg8(modrm.rm_field); // приёмник
+        let res = (dst_val as u16) + (src_val as u16);
+        let result = res as u8;
 
-    machine.write_reg8(modrm.rm_field, result);
-    machine
-        .registers
-        .set_flags(DosMachine::compute_flags(result, cf, of, af));
+        let cf = res > 0xFF;
+        let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
+        let of = (((dst_val ^ src_val) & 0x80) == 0) && ((dst_val ^ result) & 0x80) != 0;
+
+        machine.write_reg8(modrm.rm_field, result);
+        machine
+            .registers
+            .set_flags(DosMachine::compute_flags(result, cf, of, af));
+    /*} else {
+        machine.print_error_exit(bytes.last().unwrap().clone());
+    }*/
 }
 
 pub fn group_x80(machine: &mut DosMachine, prev: &[u8]) {
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    let imm8 = machine.read_u8(
-        machine.registers.cs(),
-        machine.registers.ip().wrapping_add(1),
-    );
-    machine.registers.step(Some(2));
-
     let mut bytes = prev.to_vec();
-    bytes.push(modrm_byte);
-    bytes.push(imm8);
-    machine.log_instruction(&bytes).ok();
+    if !machine.has_address_size_prefix {
+        let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+        let imm8 = machine.read_u8(
+            machine.registers.cs(),
+            machine.registers.ip().wrapping_add(1),
+        );
+        machine.registers.step(Some(2));
 
-    let modrm = ModRm::from_byte(modrm_byte);
-    if modrm.is_register_mode() {
-        group_x80_operation_registry(machine, modrm.reg_field, modrm.rm_field, imm8);
+        bytes.push(modrm_byte);
+        bytes.push(imm8);
+        machine.log_instruction(&bytes).ok();
+
+        let modrm = ModRm::from_byte(modrm_byte);
+        if modrm.is_register_mode() {
+            group_x80_operation_registry(machine, modrm.reg_field, modrm.rm_field, imm8);
+        } else {
+            error!("Memory operand in group_x80 not supported yet");
+            machine.halted = true;
+        }
     } else {
-        error!("Memory operand in group_x80 not supported yet");
-        machine.halted = true;
+        machine.print_error_exit(bytes.last().unwrap().clone());
     }
 }
 

@@ -20,7 +20,7 @@ pub fn pushf(machine: &mut DosMachine) {
     machine.write_u16(machine.registers.ss(), machine.registers.sp(), machine.registers.flags());
 }
 
-pub fn pop_ds(machine: &mut DosMachine) {
+pub fn pop_ds(machine: &mut DosMachine) { 
     let ds = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine.registers.set_sp(machine.registers.sp().wrapping_add(2));
     machine.registers.set_ds(ds);

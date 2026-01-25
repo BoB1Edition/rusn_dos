@@ -1,6 +1,9 @@
-use log::{error};
+use log::error;
 
-use crate::{machine::DosMachine, modrm::ModRm};
+use crate::{
+    machine::{self, DosMachine},
+    modrm::ModRm,
+};
 
 pub fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
@@ -30,20 +33,23 @@ pub fn mov_dx(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn mov(machine: &mut DosMachine, prev: &[u8]) {
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None);
-
     let mut bytes = prev.to_vec();
-    bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    //if !machine.has_address_size_prefix {
+        let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(None);
+        bytes.push(modrm_byte);
+        machine.log_instruction(&bytes).ok();
 
-    let modrm = ModRm::from_byte(modrm_byte);
-    if !modrm.is_register_mode() {
-        error!("Memory operand in MOV r/m16, Sreg not supported yet");
-        machine.halted = true;
-        return;
-    }
+        let modrm = ModRm::from_byte(modrm_byte);
+        if !modrm.is_register_mode() {
+            error!("Memory operand in MOV r/m16, Sreg not supported yet");
+            machine.halted = true;
+            return;
+        }
 
-    let sreg_value = machine.read_sreg(modrm.reg_field); // источник: сегментный регистр
-    machine.write_reg16(modrm.rm_field, sreg_value);    // приёмник: общий регистр
+        let sreg_value = machine.read_sreg(modrm.reg_field); // источник: сегментный регистр
+        machine.write_reg16(modrm.rm_field, sreg_value); // приёмник: общий регистр
+    /*} else {
+        machine.print_error_exit(bytes.last().unwrap().clone());
+    }*/
 }

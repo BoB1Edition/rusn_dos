@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use log::info;
 use std::{env, error::Error, path::PathBuf};
 
 mod app;
@@ -47,6 +48,8 @@ fn main() -> Result<(), Box<dyn Error>>{
                 let _ = set_workdir(&workdir);
                 if program.exists() && program.is_file() {
                     run_program(program, cli.config)?;
+                } else {
+                    info!("program not found or program not a file");
                 }
             }
         }
