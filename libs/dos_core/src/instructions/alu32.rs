@@ -174,7 +174,7 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    
 
     let modrm = ModRm::from_byte(modrm_byte);
 
@@ -184,7 +184,6 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         let dst = machine.read_reg32(modrm.rm_field);
         let result = dst | src;
         machine.write_reg32(modrm.rm_field, result);
-        // Установка флагов...
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
         if result == 0 { flags |= 1 << 6; }
@@ -192,7 +191,6 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
         machine.registers.set_flags(flags);
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
-        // [disp32] — разрешено ТОЛЬКО если был 0x67
         if !machine.has_address_size_prefix {
             log::error!("Invalid memory mode for OR without address-size prefix");
             machine.halted = true;
@@ -200,6 +198,7 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         }
         let addr = machine.read_u32(machine.registers.cs(), machine.registers.ip());
         machine.registers.step(Some(4));
+        bytes.extend_from_slice(&addr.to_le_bytes());
         let src_val = machine.read_reg32(modrm.reg_field);
         let dst_val = machine.read_phys_u32(addr as u32);
         let result = dst_val | src_val;
@@ -215,6 +214,7 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         log::error!("Unsupported memory mode in OR r/m32, r32");
         machine.halted = true;
     }
+    machine.log_instruction(&bytes).ok();
 }
 
 pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
@@ -223,7 +223,7 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    
 
     let modrm = ModRm::from_byte(modrm_byte);
 
@@ -255,6 +255,7 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         }
         let disp16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
         machine.registers.step(Some(2));
+        bytes.extend_from_slice(&disp16.to_le_bytes());
         let phys_addr = (machine.registers.ds() as u32) * 16 + (disp16 as u32);
         let dst_val = machine.read_phys_u32(phys_addr);
         let src_val = machine.read_reg32(modrm.reg_field);
@@ -275,6 +276,43 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_flags(flags);
     } else {
         log::error!("Unsupported memory mode in ADD r/m32, r32");
+        machine.halted = true;
+    }
+    machine.log_instruction(&bytes).ok();
+}
+
+pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    machine.log_instruction(&bytes).ok();
+
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    if modrm.is_register_mode() {
+        // SUB reg32, reg32
+        let dst_val = machine.read_reg32(modrm.reg_field);
+        let src_val = machine.read_reg32(modrm.rm_field);
+        let res = (dst_val as i64) - (src_val as i64);
+        let result = res as u32;
+        let cf = dst_val < src_val;
+        let af = ((dst_val & 0x0F) < (src_val & 0x0F));
+        let of = (((dst_val ^ src_val) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
+        machine.write_reg32(modrm.reg_field, result);
+
+        let mut flags = machine.registers.flags();
+        flags &= !(1 << 0 | 1 << 2 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
+        if result == 0 { flags |= 1 << 6; }
+        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
+        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
+        if cf { flags |= 1 << 0; }
+        if of { flags |= 1 << 11; }
+        if af { flags |= 1 << 4; }
+        machine.registers.set_flags(flags);
+    } else {
+        log::error!("Memory operand in SUB r32, r/m32 not supported yet");
         machine.halted = true;
     }
 }

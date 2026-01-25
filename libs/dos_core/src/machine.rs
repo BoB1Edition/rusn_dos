@@ -16,6 +16,8 @@ pub struct DosMachine {
     pub has_address_size_prefix: bool,
     pub has_operand_size_prefix: bool,
     pub has_extended_prefix: bool,
+    pub override_segment: Option<u16>,
+    pub opcode_override_segment: Option<u8>,
 }
 
 impl DosMachine {
@@ -175,6 +177,11 @@ impl DosMachine {
         if self.has_address_size_prefix {
             full_bytes.push(0x67);
         }
+
+        if let Some(oos) = self.opcode_override_segment {
+            full_bytes.push(oos);
+        }
+
         full_bytes.push(0x0F);
         full_bytes.push(opcode);
         match opcode {
@@ -268,6 +275,13 @@ impl DosMachine {
         }
         full_bytes.push(opcode);
         match opcode {
+            0x2B => {
+                if self.has_operand_size_prefix {
+                    alu32::sub_r32_rm32(self, &full_bytes);
+                } else {
+                    alu::sub_r16_rm16(self, &full_bytes);
+                }
+            }
             0xB4 => {
                 mov::mov_ah(self, &full_bytes);
             }
@@ -414,6 +428,10 @@ impl DosMachine {
                 0x0F => {
                     self.has_extended_prefix = true;
                 }
+                0x26 => { self.override_segment = Some(self.registers.es()); } // ES:
+    0x2E => { self.override_segment = Some(self.registers.cs()); } // CS:
+    0x36 => { self.override_segment = Some(self.registers.ss()); } // SS:
+    0x3E => { self.override_segment = Some(self.registers.ds()); } // DS:
                 _ => {
                     if self.has_extended_prefix {
                         self.execute_0f(opcode);
@@ -423,6 +441,7 @@ impl DosMachine {
                     self.has_address_size_prefix = false;
                     self.has_operand_size_prefix = false;
                     self.has_extended_prefix = false;
+                    self.override_segment = None;
                 }
             }
         }

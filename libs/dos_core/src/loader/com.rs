@@ -159,6 +159,8 @@ impl DosExecutable {
                 has_address_size_prefix: false,
                 has_operand_size_prefix: false,
                 has_extended_prefix: false,
+                override_segment: None,
+                opcode_override_segment: None,
             };
             dos.registers.set_cs(cs);
             //dos.registers.ds = load_segment as u16;
@@ -180,6 +182,8 @@ impl DosExecutable {
                 has_address_size_prefix: false,
                 has_operand_size_prefix: false,
                 has_extended_prefix: false,
+                override_segment: None,
+                opcode_override_segment: None
             };
             dos.registers.set_cs(0);
             dos.registers.set_ds(dos.registers.cs());

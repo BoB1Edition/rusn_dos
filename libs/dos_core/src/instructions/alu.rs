@@ -226,3 +226,30 @@ pub fn add_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
         machine.halted = true;
     }
 }
+
+pub fn sub_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    machine.log_instruction(&bytes).ok();
+
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    if modrm.is_register_mode() {
+        // SUB reg16, reg16
+        let dst_val = machine.read_reg16(modrm.reg_field);   // приёмник
+        let src_val = machine.read_reg16(modrm.rm_field);    // источник
+        let res = (dst_val as i32) - (src_val as i32);
+        let result = res as u16;
+        let cf = (dst_val as u32) < (src_val as u32);
+        let af = ((dst_val & 0x0F) < (src_val & 0x0F));
+        let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
+        machine.write_reg16(modrm.reg_field, result);
+        machine.registers.set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
+    } else {
+        log::error!("Memory operand in SUB r16, r/m16 not supported yet");
+        machine.halted = true;
+    }
+}
