@@ -163,9 +163,15 @@ impl DosMachine {
         // CF=0, OF=0 — по умолчанию
         flags
     }
-    pub fn log_instruction(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+    pub fn log_instruction(&mut self, csip: [u16; 2], bytes: &[u8]) -> std::io::Result<()> {
         let hex_bytes: Vec<String> = bytes.iter().map(|b| format!("{:02X}", b)).collect();
-        writeln!(self.logfile, "{}", hex_bytes.join(" "))
+        writeln!(
+            self.logfile,
+            "{:#04x}:{:#04x}: {}",
+            csip[0],
+            csip[1],
+            hex_bytes.join(" ")
+        )
     }
 
     fn execute_0f(&mut self, opcode: u8) {
@@ -274,6 +280,7 @@ impl DosMachine {
             full_bytes.push(0x67);
         }
         full_bytes.push(opcode);
+        let csip = [self.registers.cs(), self.registers.ip()];
         match opcode {
             0x2B => {
                 if self.has_operand_size_prefix {
@@ -307,30 +314,30 @@ impl DosMachine {
                 }
             }
             0x1f => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::pop_ds(self);
             }
 
             0x58 => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::pop_ax(self);
             }
 
             0x53 => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip,&full_bytes);
                 stack::push_bx(self);
             }
 
             0x0E => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip,&full_bytes);
                 stack::push_cs(self);
             }
             0x50 => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::push_ax(self);
             }
             0x9C => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::pushf(self);
             }
             0xA3 => {
@@ -355,7 +362,7 @@ impl DosMachine {
                 control::call(self, &full_bytes);
             }
             0xFC => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip,&full_bytes);
                 self.registers.set_flags(self.registers.flags() & !0x0400);
             }
             0xC3 => {
@@ -368,7 +375,7 @@ impl DosMachine {
                 control::jz(self, &full_bytes);
             }
             0x9D => {
-                let _ = self.log_instruction(&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::popf(self);
             }
             0x80 => {
@@ -381,11 +388,11 @@ impl DosMachine {
                 alu::add_rm8_r8(self, &full_bytes);
             }
             0xFA => {
-                let _ = self.log_instruction(&full_bytes);
+                self.log_instruction(csip, &full_bytes).ok();
                 self.registers.set_flags(self.registers.flags() & !0x0200);
             }
             0xFB => {
-                let _ = self.log_instruction(&full_bytes);
+                self.log_instruction(csip, &full_bytes).ok();
                 self.registers.set_flags(self.registers.flags() | 0x0200);
             }
             0x09 => {
@@ -428,10 +435,18 @@ impl DosMachine {
                 0x0F => {
                     self.has_extended_prefix = true;
                 }
-                0x26 => { self.override_segment = Some(self.registers.es()); } // ES:
-    0x2E => { self.override_segment = Some(self.registers.cs()); } // CS:
-    0x36 => { self.override_segment = Some(self.registers.ss()); } // SS:
-    0x3E => { self.override_segment = Some(self.registers.ds()); } // DS:
+                0x26 => {
+                    self.override_segment = Some(self.registers.es());
+                } // ES:
+                0x2E => {
+                    self.override_segment = Some(self.registers.cs());
+                } // CS:
+                0x36 => {
+                    self.override_segment = Some(self.registers.ss());
+                } // SS:
+                0x3E => {
+                    self.override_segment = Some(self.registers.ds());
+                } // DS:
                 _ => {
                     if self.has_extended_prefix {
                         self.execute_0f(opcode);

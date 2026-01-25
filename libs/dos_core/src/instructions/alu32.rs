@@ -3,6 +3,7 @@ use log::error;
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     //if !machine.has_address_size_prefix {
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
@@ -13,11 +14,11 @@ pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
     bytes.push(modrm_byte);
     bytes.push(imm8);
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 
     let modrm = ModRm::from_byte(modrm_byte);
     if !modrm.is_register_mode() {
-        log::error!("Memory operand in 0xC1 not supported");
+        error!("Memory operand in 0xC1 not supported");
         machine.halted = true;
         return;
     }
@@ -169,6 +170,7 @@ fn update_flags(flags: &mut u16, result: u32, cf: bool, of: bool) {
 }
 
 pub fn or(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
@@ -203,7 +205,6 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         let dst_val = machine.read_phys_u32(addr as u32);
         let result = dst_val | src_val;
         machine.write_phys_u32(addr as u32, result);
-        // Установка флагов...
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
         if result == 0 { flags |= 1 << 6; }
@@ -214,10 +215,11 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         log::error!("Unsupported memory mode in OR r/m32, r32");
         machine.halted = true;
     }
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
@@ -278,16 +280,17 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         log::error!("Unsupported memory mode in ADD r/m32, r32");
         machine.halted = true;
     }
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 
     let modrm = ModRm::from_byte(modrm_byte);
 

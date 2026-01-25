@@ -1,12 +1,13 @@
 use crate::DosMachine;
 
 pub fn movzx_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    let _ = machine.log_instruction(&bytes);
+    let _ = machine.log_instruction(csip, &bytes);
 
     let modrm = crate::modrm::ModRm::from_byte(modrm_byte);
 

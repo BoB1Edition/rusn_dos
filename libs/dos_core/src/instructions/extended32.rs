@@ -1,6 +1,7 @@
 use crate::{DosMachine, modrm::ModRm};
 
 pub fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
@@ -31,5 +32,5 @@ pub fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
         machine.write_reg32(modrm.reg_field, src_val);
     }
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 }

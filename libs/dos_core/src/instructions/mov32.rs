@@ -1,6 +1,7 @@
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = Vec::new();
     bytes.extend_from_slice(prev);
     let addr = if machine.has_address_size_prefix {
@@ -16,17 +17,18 @@ pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.step(Some(2));
         addr as u32
     };
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
     machine.write_phys_u32(addr, machine.registers.eax());
 }
 
 pub fn mov_eax_data(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = Vec::new();
     if !machine.has_address_size_prefix {
         bytes.extend_from_slice(prev);
         let data = machine.read_u32(machine.registers.cs(), machine.registers.ip());
         bytes.extend_from_slice(&data.to_le_bytes());
-        machine.log_instruction(&bytes).ok();
+        machine.log_instruction(csip, &bytes).ok();
         machine.registers.step(Some(4));
         machine.registers.set_eax(data);
     } else {
@@ -35,11 +37,12 @@ pub fn mov_eax_data(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn mov_ebx_data(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     if !machine.has_address_size_prefix {
         let mut bytes = prev.to_vec();
         let data = machine.read_u32(machine.registers.cs(), machine.registers.ip());
         bytes.extend_from_slice(&data.to_le_bytes());
-        machine.log_instruction(&bytes).ok();
+        machine.log_instruction(csip, &bytes).ok();
         machine.registers.step(Some(4));
         machine.registers.set_ebx(data);
     } else {
@@ -48,6 +51,7 @@ pub fn mov_ebx_data(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn mov_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
@@ -69,9 +73,8 @@ pub fn mov_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let src_val = machine.read_reg32(modrm.reg_field);
         machine.write_phys_u32(addr as u32, src_val);
     } else {
-        machine.log_instruction(&bytes).ok();
         log::error!("Unsupported memory mode in MOV r/m32, r32");
         machine.halted = true;
     }
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 }

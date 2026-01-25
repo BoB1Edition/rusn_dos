@@ -3,13 +3,14 @@ use log::error;
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn xor(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     //if !machine.has_address_size_prefix {
         let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
         machine.registers.step(None); // skip ModR/M
 
         bytes.push(modrm_byte);
-        machine.log_instruction(&bytes).ok();
+        machine.log_instruction(csip, &bytes).ok();
 
         let modrm = ModRm::from_byte(modrm_byte);
         if !modrm.is_register_mode() {
@@ -31,17 +32,18 @@ pub fn xor(machine: &mut DosMachine, prev: &[u8]) {
     }*/
 }
 pub fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     //if machine.has_address_size_prefix {
         let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
         machine.registers.step(None);
 
         bytes.push(modrm_byte);
-        machine.log_instruction(&bytes).ok();
+        machine.log_instruction(csip, &bytes).ok();
 
         let modrm = ModRm::from_byte(modrm_byte);
         if !modrm.is_register_mode() {
-            machine.log_instruction(&bytes).ok();
+            machine.log_instruction(csip, &bytes).ok();
             error!("Memory operand in ADD r/m8, r8 not supported");
             machine.halted = true;
             return;
@@ -66,6 +68,7 @@ pub fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn group_x80(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     if !machine.has_address_size_prefix {
         let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
@@ -77,7 +80,7 @@ pub fn group_x80(machine: &mut DosMachine, prev: &[u8]) {
 
         bytes.push(modrm_byte);
         bytes.push(imm8);
-        machine.log_instruction(&bytes).ok();
+        machine.log_instruction(csip, &bytes).ok();
 
         let modrm = ModRm::from_byte(modrm_byte);
         if modrm.is_register_mode() {
@@ -201,12 +204,13 @@ pub fn group_x80_operation_memory_2byte(
 
 
 pub fn add_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None); // прочитали ModR/M
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 
     let modrm = ModRm::from_byte(modrm_byte);
 
@@ -228,12 +232,13 @@ pub fn add_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn sub_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    machine.log_instruction(&bytes).ok();
+    machine.log_instruction(csip, &bytes).ok();
 
     let modrm = ModRm::from_byte(modrm_byte);
 

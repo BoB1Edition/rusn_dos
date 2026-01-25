@@ -4,7 +4,7 @@ use log::info;
 
 use crate::{
     DosMachine,
-    consts::{DOS_MEMORY_SIZE, SEGMENT_SIZE},
+    consts::{DOS_MEMORY_SIZE},
     loader::MzHeader,
     registers::Registers,
 };
