@@ -4,7 +4,10 @@ use log::error;
 
 use crate::{
     consts::SEGMENT_SIZE,
-    instructions::{alu, alu32, control, control32, extended, extended32, mov, mov32, stack, system},
+    instructions::{
+        alu, alu32, control, control32, extended, extended32, mov, mov32, stack, system,
+    },
+    modrm::ModRm,
 };
 
 #[derive(Debug)]
@@ -231,6 +234,9 @@ impl DosMachine {
         full_bytes.push(0x0F);
         full_bytes.push(opcode);
         match opcode {
+            0x01 => {
+                control::smsw(self, &full_bytes);
+            }
             0xB7 => {
                 if self.has_operand_size_prefix {
                     extended::movzx_r16_rm16(self, &full_bytes);
@@ -301,6 +307,15 @@ impl DosMachine {
             }
             0xB4 => {
                 mov::mov_ah(self, &full_bytes);
+            }
+            0xA0 => {
+                if self.has_address_size_prefix {
+                    // 32-битный адрес: MOV AL, [addr32]
+                    mov::mov_al_address32(self, &full_bytes);
+                } else {
+                    // 16-битный адрес: MOV AL, [addr16]
+                    mov::mov_al_address16(self, &full_bytes);
+                }
             }
             0xB8 => {
                 if !self.has_operand_size_prefix {
@@ -417,11 +432,29 @@ impl DosMachine {
             }
 
             0xFF => {
-                if self.has_operand_size_prefix {
-                    control32::call_rm32(self, &full_bytes);
-                    self.print_error_exit(opcode);
-                } else {
-                    control::call_rm16(self, &full_bytes);
+                let modrm_byte = self.read_u8(self.registers.cs(), self.registers.ip());
+                self.registers.step(None);
+                let modrm = ModRm::from_byte(modrm_byte);
+                match modrm.reg_field {
+                    2 => {
+                        // CALL r/m16/32
+                        if self.has_operand_size_prefix {
+                            control32::call_rm32(self, &full_bytes);
+                        } else {
+                            control::call_rm16(self, &full_bytes);
+                        }
+                    }
+                    4 => {
+                        // JMP r/m16/r/m32
+                        if self.has_operand_size_prefix {
+                            control32::jmp_rm32(self, &full_bytes);
+                        } else {
+                            control::jmp_rm16(self, &full_bytes);
+                        }
+                    }
+                    _ => {
+                        self.print_error_exit(opcode);
+                    }
                 }
             }
 
@@ -459,6 +492,9 @@ impl DosMachine {
                 } else {
                     alu::add_r16_rm16(self, &full_bytes);
                 }
+            }
+            0x8E => {
+                mov::mov_sreg_rm16(self, &full_bytes);
             }
             _ => {
                 self.print_error_exit(opcode);

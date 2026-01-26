@@ -104,3 +104,49 @@ pub fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.halted = true;
     }
 }
+
+pub fn smsw(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+
+    let modrm = ModRm::from_byte(modrm_byte);
+    if modrm.is_register_mode() {
+        machine.write_reg16(modrm.rm_field, 0x0000);
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.write_phys_u16(addr, 0x0000);
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// control.rs
+pub fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+
+    let modrm = ModRm::from_byte(modrm_byte);
+    let target_ip = if modrm.is_register_mode() {
+        // JMP reg16
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        // JMP [addr]
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr)
+    };
+
+    machine.registers.set_ip(target_ip);
+    machine.log_instruction(csip, &bytes).ok();
+}
