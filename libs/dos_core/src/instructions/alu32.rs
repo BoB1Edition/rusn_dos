@@ -14,20 +14,24 @@ pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
     bytes.push(modrm_byte);
     bytes.push(imm8);
-    machine.log_instruction(csip, &bytes).ok();
 
     let modrm = ModRm::from_byte(modrm_byte);
-    if !modrm.is_register_mode() {
-        error!("Memory operand in 0xC1 not supported");
-        machine.halted = true;
-        return;
-    }
 
-    let value = machine.read_reg32(modrm.rm_field);
+    let value = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u32(addr)
+    };
     let (result, new_flags) =
         perform_shift(modrm.reg_field, value, imm8, machine.registers.flags());
     machine.write_reg32(modrm.rm_field, result);
     machine.registers.set_flags(new_flags);
+
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) {
@@ -38,7 +42,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
     }
 
     let mut new_flags = flags;
-
+    let af = false;
     let result = match op_field {
         0 => {
             // ROL
@@ -51,7 +55,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
             } else {
                 false
             };
-            update_flags(&mut new_flags, result, cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, cf, of, af);
             result
         }
         1 => {
@@ -65,7 +69,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
             } else {
                 false
             };
-            update_flags(&mut new_flags, result, cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, cf, of, af);
             result
         }
         2 => {
@@ -82,7 +86,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
             } else {
                 false
             };
-            update_flags(&mut new_flags, result, new_cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, new_cf, of, af);
             result
         }
         3 => {
@@ -99,7 +103,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
             } else {
                 false
             };
-            update_flags(&mut new_flags, result, new_cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, new_cf, of, af);
             result
         }
         4 | 6 => {
@@ -115,7 +119,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
             } else {
                 false
             };
-            update_flags(&mut new_flags, result, cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, cf, of, af);
             result
         }
         5 => {
@@ -128,7 +132,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
             } else {
                 false
             };
-            update_flags(&mut new_flags, result, cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, cf, of, af);
             result
         }
         7 => {
@@ -141,32 +145,13 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
                 (value >> (count - 1)) & 1 != 0
             };
             let of = false; // OF cleared for SAR
-            update_flags(&mut new_flags, result, cf, of);
+            new_flags = DosMachine::compute_flags_u32(result, cf, of, af);
             result
         }
         _ => unreachable!(),
     };
 
     (result, new_flags)
-}
-
-fn update_flags(flags: &mut u16, result: u32, cf: bool, of: bool) {
-    *flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
-    if cf {
-        *flags |= 1 << 0;
-    }
-    if of {
-        *flags |= 1 << 11;
-    }
-    if result == 0 {
-        *flags |= 1 << 6;
-    }
-    if (result & 0x8000) != 0 {
-        *flags |= 1 << 7;
-    }
-    if (result as u8).count_ones() % 2 == 0 {
-        *flags |= 1 << 2;
-    }
 }
 
 pub fn or(machine: &mut DosMachine, prev: &[u8]) {
@@ -176,7 +161,6 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    
 
     let modrm = ModRm::from_byte(modrm_byte);
 
@@ -188,9 +172,15 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_reg32(modrm.rm_field, result);
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
-        if result == 0 { flags |= 1 << 6; }
-        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
-        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
+        if result == 0 {
+            flags |= 1 << 6;
+        }
+        if (result & 0x8000_0000) != 0 {
+            flags |= 1 << 7;
+        }
+        if (result as u8).count_ones() % 2 == 0 {
+            flags |= 1 << 2;
+        }
         machine.registers.set_flags(flags);
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
         if !machine.has_address_size_prefix {
@@ -207,9 +197,15 @@ pub fn or(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_phys_u32(addr as u32, result);
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
-        if result == 0 { flags |= 1 << 6; }
-        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
-        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
+        if result == 0 {
+            flags |= 1 << 6;
+        }
+        if (result & 0x8000_0000) != 0 {
+            flags |= 1 << 7;
+        }
+        if (result as u8).count_ones() % 2 == 0 {
+            flags |= 1 << 2;
+        }
         machine.registers.set_flags(flags);
     } else {
         log::error!("Unsupported memory mode in OR r/m32, r32");
@@ -225,7 +221,6 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    
 
     let modrm = ModRm::from_byte(modrm_byte);
 
@@ -242,11 +237,21 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         // Установка флагов...
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
-        if result == 0 { flags |= 1 << 6; }
-        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
-        if cf { flags |= 1 << 0; }
-        if of { flags |= 1 << 11; }
-        if af { flags |= 1 << 4; }
+        if result == 0 {
+            flags |= 1 << 6;
+        }
+        if (result & 0x8000_0000) != 0 {
+            flags |= 1 << 7;
+        }
+        if cf {
+            flags |= 1 << 0;
+        }
+        if of {
+            flags |= 1 << 11;
+        }
+        if af {
+            flags |= 1 << 4;
+        }
         machine.registers.set_flags(flags);
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b110 {
         // [disp16] — разрешено ТОЛЬКО если НЕТ 0x67
@@ -265,16 +270,27 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let result = res as u32;
         let cf = res > 0xFFFFFFFF;
         let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
-        let of = (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
+        let of =
+            (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
         machine.write_phys_u32(phys_addr, result);
         // Установка флагов...
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
-        if result == 0 { flags |= 1 << 6; }
-        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
-        if cf { flags |= 1 << 0; }
-        if of { flags |= 1 << 11; }
-        if af { flags |= 1 << 4; }
+        if result == 0 {
+            flags |= 1 << 6;
+        }
+        if (result & 0x8000_0000) != 0 {
+            flags |= 1 << 7;
+        }
+        if cf {
+            flags |= 1 << 0;
+        }
+        if of {
+            flags |= 1 << 11;
+        }
+        if af {
+            flags |= 1 << 4;
+        }
         machine.registers.set_flags(flags);
     } else {
         log::error!("Unsupported memory mode in ADD r/m32, r32");
@@ -301,18 +317,31 @@ pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let res = (dst_val as i64) - (src_val as i64);
         let result = res as u32;
         let cf = dst_val < src_val;
-        let af = ((dst_val & 0x0F) < (src_val & 0x0F));
-        let of = (((dst_val ^ src_val) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
+        let af = (dst_val & 0x0F) < (src_val & 0x0F);
+        let of =
+            (((dst_val ^ src_val) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
         machine.write_reg32(modrm.reg_field, result);
 
         let mut flags = machine.registers.flags();
         flags &= !(1 << 0 | 1 << 2 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
-        if result == 0 { flags |= 1 << 6; }
-        if (result & 0x8000_0000) != 0 { flags |= 1 << 7; }
-        if (result as u8).count_ones() % 2 == 0 { flags |= 1 << 2; }
-        if cf { flags |= 1 << 0; }
-        if of { flags |= 1 << 11; }
-        if af { flags |= 1 << 4; }
+        if result == 0 {
+            flags |= 1 << 6;
+        }
+        if (result & 0x8000_0000) != 0 {
+            flags |= 1 << 7;
+        }
+        if (result as u8).count_ones() % 2 == 0 {
+            flags |= 1 << 2;
+        }
+        if cf {
+            flags |= 1 << 0;
+        }
+        if of {
+            flags |= 1 << 11;
+        }
+        if af {
+            flags |= 1 << 4;
+        }
         machine.registers.set_flags(flags);
     } else {
         log::error!("Memory operand in SUB r32, r/m32 not supported yet");

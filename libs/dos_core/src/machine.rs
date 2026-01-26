@@ -121,7 +121,7 @@ impl DosMachine {
         }
     }
 
-    pub fn compute_flags(result: u8, cf: bool, of: bool, af: bool) -> u16 {
+    /*pub fn compute_flags(result: u8, cf: bool, of: bool, af: bool) -> u16 {
         let mut flags = 0u16;
         // ZF, SF, PF — общие для всех
         if result == 0 {
@@ -146,22 +146,56 @@ impl DosMachine {
         }
 
         flags
+    }*/
+
+    #[inline]
+    fn compute_flags_impl(value: u32, width_bits: u32, cf: bool, of: bool, af: bool) -> u16 {
+        let mut flags = 0u16;
+        if value == 0 {
+            flags |= 1 << 6; // ZF
+        }
+        let sign_bit = 1u32 << (width_bits - 1);
+        if (value & sign_bit) != 0 {
+            flags |= 1 << 7; // SF
+        }
+        if (value as u8).count_ones() % 2 == 0 {
+            flags |= 1 << 2; // PF
+        }
+        if cf { flags |= 1 << 0; }   // CF
+        if of { flags |= 1 << 11; }  // OF
+        if af { flags |= 1 << 4; }   // AF
+        flags
     }
 
-    pub fn compute_logical_flags(result: u8) -> u16 {
-        // Логические операции: CF=0, OF=0
-        let mut flags = 0u16;
-        if result == 0 {
-            flags |= 1 << 6;
-        } // ZF
-        if (result & 0x80) != 0 {
-            flags |= 1 << 7;
-        } // SF
-        if result.count_ones() % 2 == 0 {
-            flags |= 1 << 2;
-        } // PF
-        // CF=0, OF=0 — по умолчанию
-        flags
+    #[inline]
+    pub fn compute_flags_u8(result: u8, cf: bool, of: bool, af: bool) -> u16 {
+        Self::compute_flags_impl(result as u32, 8, cf, of, af)
+    }
+
+    #[inline]
+    pub fn compute_flags_u16(result: u16, cf: bool, of: bool, af: bool) -> u16 {
+        Self::compute_flags_impl(result as u32, 16, cf, of, af)
+    }
+
+    #[inline]
+    pub fn compute_flags_u32(result: u32, cf: bool, of: bool, af: bool) -> u16 {
+        Self::compute_flags_impl(result, 32, cf, of, af)
+    }
+
+    // Логические операции (CF=0, OF=0)
+    #[inline]
+    pub fn compute_logical_flags_u8(result: u8) -> u16 {
+        Self::compute_flags_u8(result, false, false, false)
+    }
+
+    #[inline]
+    pub fn compute_logical_flags_u16(result: u16) -> u16 {
+        Self::compute_flags_u16(result, false, false, false)
+    }
+
+    #[inline]
+    pub fn compute_logical_flags_u32(result: u32) -> u16 {
+        Self::compute_flags_u32(result, false, false, false)
     }
     pub fn log_instruction(&mut self, csip: [u16; 2], bytes: &[u8]) -> std::io::Result<()> {
         let hex_bytes: Vec<String> = bytes.iter().map(|b| format!("{:02X}", b)).collect();
@@ -192,41 +226,11 @@ impl DosMachine {
         full_bytes.push(opcode);
         match opcode {
             0xB7 => {
-                /*if self.has_operand_size_prefix {
+                if self.has_operand_size_prefix {
                     extended::movzx_r16_rm16(self, &full_bytes);
-                } else {*/
-                extended32::movzx_r32_rm16(self, &full_bytes);
-                //}
-
-                /*let modrm = self.read_u8(self.registers.cs(), self.registers.ip());
-                self.registers.step(None);
-                let mut bytes = Vec::with_capacity(prev.len() + 2);
-                bytes.extend_from_slice(prev);
-                bytes.push(opcode);
-                bytes.push(modrm);
-                let _ = self.log_instruction(&bytes.as_slice());
-                if (modrm & 0xC0) != 0xC0 {
-                    error!("Memory operand in MOV r/m16, Sreg not supported yet execute0f");
-                    self.halted = true;
-                    return;
+                } else {
+                    extended32::movzx_r32_rm16(self, &full_bytes);
                 }
-                let sreg_field = (modrm >> 3) & 0x7; // какой сегментный регистр читать
-                let dst_reg = modrm & 0x7; // куда записать
-                let src_val = match sreg_field {
-                    0 => self.registers.ax(),
-                    1 => self.registers.cx(),
-                    2 => self.registers.dx(),
-                    3 => self.registers.bx(),
-                    4 => self.registers.sp(),
-                    5 => self.registers.bp(),
-                    6 => self.registers.si(),
-                    7 => self.registers.di(),
-                    _ => unreachable!(),
-                };
-                match dst_reg {
-                    0 => self.registers.set_eax(src_val as u32),
-                    _ => unreachable!(),
-                }*/
             }
             _ => {
                 error!(
@@ -324,12 +328,12 @@ impl DosMachine {
             }
 
             0x53 => {
-                let _ = self.log_instruction(csip,&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::push_bx(self);
             }
 
             0x0E => {
-                let _ = self.log_instruction(csip,&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 stack::push_cs(self);
             }
             0x50 => {
@@ -362,7 +366,7 @@ impl DosMachine {
                 control::call(self, &full_bytes);
             }
             0xFC => {
-                let _ = self.log_instruction(csip,&full_bytes);
+                let _ = self.log_instruction(csip, &full_bytes);
                 self.registers.set_flags(self.registers.flags() & !0x0400);
             }
             0xC3 => {
@@ -414,6 +418,13 @@ impl DosMachine {
                     alu32::add_rm32_r32(self, &full_bytes);
                 } else {
                     alu::add_rm16_r16(self, &full_bytes);
+                }
+            }
+            0x03 => {
+                if self.has_operand_size_prefix {
+                    self.print_error_exit(opcode);
+                } else {
+                    alu::add_r16_rm16(self, &full_bytes);
                 }
             }
             _ => {
@@ -509,29 +520,6 @@ impl DosMachine {
         } else {
             0xFF // или panic, или лог ошибки
         }
-    }
-
-    pub fn compute_flags_u16(result: u16, cf: bool, of: bool, af: bool) -> u16 {
-        let mut flags = 0u16;
-        if result == 0 {
-            flags |= 1 << 6;
-        } // ZF
-        if (result & 0x8000) != 0 {
-            flags |= 1 << 7;
-        } // SF
-        if result.count_ones() % 2 == 0 {
-            flags |= 1 << 2;
-        } // PF
-        if cf {
-            flags |= 1 << 0;
-        }
-        if of {
-            flags |= 1 << 11;
-        }
-        if af {
-            flags |= 1 << 4;
-        }
-        flags
     }
 
     #[inline(always)]

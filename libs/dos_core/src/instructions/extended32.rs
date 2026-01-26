@@ -1,3 +1,4 @@
+// libs/dos_core/src/instructions/extended32.rs
 use crate::{DosMachine, modrm::ModRm};
 
 pub fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
@@ -7,30 +8,21 @@ pub fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    
 
     let modrm = ModRm::from_byte(modrm_byte);
 
-    if modrm.is_register_mode() {
-        let src_val = machine.read_reg16(modrm.rm_field) as u32;
-        machine.write_reg32(modrm.reg_field, src_val);
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field) as u32
     } else {
-        if modrm.mod_field != 0b00 || modrm.rm_field != 0b110 {
-            log::error!("Unsupported memory mode in MOVZX r32, r/m16");
-            machine.halted = true;
-            return;
-        }
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix)
+            .unwrap(); 
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr) as u32
+    };
 
-        let disp16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
-        machine.registers.step(Some(2));
-        bytes.extend_from_slice(&disp16.to_le_bytes());
+    let dst_reg = modrm.reg_field;
+    machine.write_reg32(dst_reg, src_val);
 
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let offset = disp16;
-
-        let src_val = machine.read_u16(segment, offset) as u32;
-
-        machine.write_reg32(modrm.reg_field, src_val);
-    }
     machine.log_instruction(csip, &bytes).ok();
 }
