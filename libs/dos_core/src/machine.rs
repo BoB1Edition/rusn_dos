@@ -422,7 +422,7 @@ impl DosMachine {
             }
             0x03 => {
                 if self.has_operand_size_prefix {
-                    self.print_error_exit(opcode);
+                    alu32::add_r32_rm32(self, &full_bytes);
                 } else {
                     alu::add_r16_rm16(self, &full_bytes);
                 }

@@ -348,3 +348,38 @@ pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
         machine.halted = true;
     }
 }
+
+
+pub fn add_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+
+    let modrm = ModRm::from_byte(modrm_byte);
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field) // источник: r/m32
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u32(addr)
+    };
+
+    let dst_reg = modrm.reg_field; // приёмник: r32
+    let dst_val = machine.read_reg32(dst_reg);
+
+    let res = (dst_val as u64) + (src_val as u64);
+    let result = res as u32;
+    let cf = res > 0xFFFFFFFF;
+    let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
+    let of = (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
+
+    machine.write_reg32(dst_reg, result);
+    machine.registers.set_flags(DosMachine::compute_flags_u32(result, cf, of, af));
+
+    machine.log_instruction(csip, &bytes).ok();
+}
