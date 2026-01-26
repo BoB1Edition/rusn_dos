@@ -4,7 +4,7 @@ use log::error;
 
 use crate::{
     consts::SEGMENT_SIZE,
-    instructions::{alu, alu32, control, extended, extended32, mov, mov32, stack, system},
+    instructions::{alu, alu32, control, control32, extended, extended32, mov, mov32, stack, system},
 };
 
 #[derive(Debug)]
@@ -161,9 +161,15 @@ impl DosMachine {
         if (value as u8).count_ones() % 2 == 0 {
             flags |= 1 << 2; // PF
         }
-        if cf { flags |= 1 << 0; }   // CF
-        if of { flags |= 1 << 11; }  // OF
-        if af { flags |= 1 << 4; }   // AF
+        if cf {
+            flags |= 1 << 0;
+        } // CF
+        if of {
+            flags |= 1 << 11;
+        } // OF
+        if af {
+            flags |= 1 << 4;
+        } // AF
         flags
     }
 
@@ -317,6 +323,13 @@ impl DosMachine {
                     self.print_error_exit(opcode);
                 }
             }
+            0x8B => {
+                if self.has_operand_size_prefix {
+                    mov32::mov_r32_rm32(self, &full_bytes);
+                } else {
+                    mov::mov_r16_rm16(self, &full_bytes);
+                }
+            }
             0x1f => {
                 let _ = self.log_instruction(csip, &full_bytes);
                 stack::pop_ds(self);
@@ -382,6 +395,9 @@ impl DosMachine {
                 let _ = self.log_instruction(csip, &full_bytes);
                 stack::popf(self);
             }
+            0x77 => {
+                control::ja(self, &full_bytes);
+            }
             0x80 => {
                 alu::group_x80(self, &full_bytes);
             }
@@ -399,11 +415,28 @@ impl DosMachine {
                 self.log_instruction(csip, &full_bytes).ok();
                 self.registers.set_flags(self.registers.flags() | 0x0200);
             }
+
+            0xFF => {
+                if self.has_operand_size_prefix {
+                    control32::call_rm32(self, &full_bytes);
+                    self.print_error_exit(opcode);
+                } else {
+                    control::call_rm16(self, &full_bytes);
+                }
+            }
+
             0x09 => {
                 if self.has_operand_size_prefix {
                     alu32::or(self, &full_bytes);
                 } else {
                     self.print_error_exit(opcode);
+                }
+            }
+            0x3B => {
+                if self.has_operand_size_prefix {
+                    alu32::cmp_r32_rm32(self, &full_bytes);
+                } else {
+                    alu::cmp_r16_rm16(self, &full_bytes);
                 }
             }
             0x89 => {

@@ -290,3 +290,30 @@ fn do_add_16(machine: &mut DosMachine, dst_reg: u8, src_value: u16) {
         .registers
         .set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
 }
+
+pub fn cmp_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr)
+    };
+
+    let dst_val = machine.read_reg16(modrm.reg_field);
+    let res = (dst_val as i32) - (src_val as i32);
+    let result = res as u16;
+    let cf = (dst_val as u32) < (src_val as u32);
+    let af = (dst_val & 0x0F) < (src_val & 0x0F);
+    let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
+
+    machine.registers.set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
+    machine.log_instruction(csip, &bytes).ok();
+}

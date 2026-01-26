@@ -53,15 +53,12 @@ pub fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
     };
     machine.write_reg16(modrm.rm_field, sreg_value); // приёмник: общий регистр
     machine.log_instruction(csip, &bytes).ok();
-    /*} else {
-        machine.print_error_exit(bytes.last().unwrap().clone());
-    }*/
 }
 
 pub fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None); // прочитали ModR/M
+    machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -70,7 +67,6 @@ pub fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let modrm = ModRm::from_byte(modrm_byte);
 
     if modrm.is_register_mode() {
-        // MOV reg16, reg16
         let src_reg = modrm.reg_field; // источник
         let dst_reg = modrm.rm_field; // приёмник
         let src_val = machine.read_reg16(src_reg);
@@ -80,4 +76,24 @@ pub fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
         log::error!("Memory operand in MOV r/m16, r16 not supported yet");
         machine.halted = true;
     }
+}
+
+pub fn mov_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr)
+    };
+
+    machine.write_reg16(modrm.reg_field, src_val);
+    machine.log_instruction(csip, &bytes).ok();
 }

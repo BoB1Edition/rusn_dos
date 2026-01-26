@@ -31,14 +31,12 @@ impl ModRm {
         let segment = machine.override_segment.unwrap_or(machine.registers.ds());
 
         if addr32_mode {
-            // 32-битная адресация: [EAX], [EBX+ESI*1+disp], но без SIB в реальном режиме
-            // Поддерживаем только базовые случаи: [reg32] + disp
             let base = match self.rm_field {
                 0 => machine.registers.eax(),
                 1 => todo!("machine.registers.ecx(),"),
                 2 => todo!("machine.registers.edx(),"),
                 3 => machine.registers.ebx(),
-                4 => 0, // ESP — не поддерживаем (SIB)
+                4 => 0,
                 5 => {
                     if self.mod_field == 0 {
                         // [disp32]
@@ -73,7 +71,6 @@ impl ModRm {
             Some(((segment as u32) << 4).wrapping_add(linear) & 0xFFFFF)
 
         } else {
-            // 16-битная адресация
             let (base, index) = match self.rm_field {
                 0 => (machine.registers.bx(), machine.registers.si()),
                 1 => (machine.registers.bx(), machine.registers.di()),
@@ -83,11 +80,9 @@ impl ModRm {
                 5 => (0, machine.registers.di()),
                 6 => {
                     if self.mod_field == 0 {
-                        // [disp16]
                         let disp = machine.read_u16(machine.registers.cs(), machine.registers.ip());
                         machine.registers.step(Some(2));
                         let seg = if self.rm_field == 6 && self.mod_field == 0 {
-                            // [disp16] использует DS, кроме случая с BP → тогда SS
                             machine.registers.ds()
                         } else {
                             segment
@@ -117,7 +112,6 @@ impl ModRm {
             };
 
             let effective = (base as i32 + index as i32 + disp) as u32;
-            // Если используется BP, сегмент по умолчанию — SS
             let effective_segment = if self.rm_field == 2 || self.rm_field == 3 || (self.rm_field == 6 && self.mod_field != 0) {
                 machine.registers.ss()
             } else {
