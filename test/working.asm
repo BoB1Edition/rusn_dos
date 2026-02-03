@@ -2,7 +2,7 @@ format MZ
 entry main:start
 
 segment data_seg
-    hello:  db 'Hello World', 13, 10, '$'
+    hello:  db 'Hello World', 10, 13, '$'
 
 segment stack_seg
     stack_size db 64

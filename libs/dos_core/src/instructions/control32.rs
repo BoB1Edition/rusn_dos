@@ -14,7 +14,7 @@ pub fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg32(modrm.rm_field)
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
@@ -51,9 +51,8 @@ pub fn jmp_rm32(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg32(modrm.rm_field)
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
     };
     let target_ip = target_addr as u16;

@@ -1,5 +1,3 @@
-use log::error;
-
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
@@ -17,7 +15,7 @@ pub fn mov_ax(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     let imm = machine.read_u16(machine.registers.cs(), machine.registers.ip());
     bytes.extend_from_slice(&imm.to_le_bytes());
-    let _ = machine.log_instruction(csip, &bytes);
+    machine.log_instruction(csip, &bytes).ok();
     machine.registers.set_ax(imm);
     machine.registers.step(Some(2));
 }
@@ -46,7 +44,7 @@ pub fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg16(modrm.rm_field)
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr)
@@ -90,7 +88,7 @@ pub fn mov_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg16(modrm.rm_field)
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr)
@@ -143,7 +141,7 @@ pub fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg16(modrm.rm_field)
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr)

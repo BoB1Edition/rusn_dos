@@ -1,3 +1,4 @@
+//ver: 1
 use std::{fs::File, io::Write};
 
 use log::error;
@@ -264,7 +265,7 @@ impl DosMachine {
         }
         .to_string();
 
-        let bit_address = if self.has_operand_size_prefix {
+        let bit_address = if self.has_address_size_prefix {
             "address32"
         } else {
             "address"
@@ -433,7 +434,8 @@ impl DosMachine {
 
             0xFF => {
                 let modrm_byte = self.read_u8(self.registers.cs(), self.registers.ip());
-                self.registers.step(None);
+                //self.registers.step(None);
+                //full_bytes.push(modrm_byte);
                 let modrm = ModRm::from_byte(modrm_byte);
                 match modrm.reg_field {
                     2 => {
@@ -553,26 +555,42 @@ impl DosMachine {
         }
     }
     fn print_dos_string(&self) {
-        let mut addr = self.registers.dx() as usize;
-        let mut s = String::new();
-        loop {
-            if addr >= self.memory.len() {
-                log::error!("string not contains '$'");
-                return;
-            }
-            let byte = self.memory[addr];
-            if byte == b'$' {
-                break;
-            }
-            s.push(byte as char);
-            addr += 1;
+    // Вычисляем физический адрес: DS * 16 + DX
+    let phys_addr = ((self.registers.ds() as u32)<< 4).wrapping_add(self.registers.dx() as u32);
+    let mut addr = phys_addr as usize;
+    let mut s = String::new();
+
+    loop {
+        if addr >= self.memory.len() {
+            log::error!("string not contains '$'");
+            return;
         }
-        println!("{}", s);
+        let byte = self.memory[addr];
+        if byte == b'$' {
+            break;
+        }
+        s.push(byte as char);
+        // Безопасное преобразование: только печатаемые ASCII
+        /*if byte >= 32 && byte <= 126 {
+            
+        } else {
+            // Опционально: пропускаем или заменяем
+            // s.push('?');
+        }*/
+        addr += 1;
     }
+    println!("{}", s);
+}
     #[inline(always)]
     pub fn read_u8(&self, segment: u16, offset: u16) -> u8 {
-        let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
+        let addr = ((segment as u32) << 4 ).wrapping_add(offset as u32) & 0xFFFFF;
         let addr = addr as usize;
+        /*let t = self.memory.clone();
+        let t = t.to_vec();
+        let t = t.as_slice();
+        for t1 in 0..t.len() {
+            println!("byte {:#02X}", t1);
+        }*/
         if addr < self.memory.len() {
             self.memory[addr]
         } else {

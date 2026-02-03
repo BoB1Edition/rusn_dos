@@ -59,7 +59,7 @@ pub fn mov_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         // MOV [addr], reg32
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap(); // resolve_address уже обрабатывает seg override и BP→SS
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.write_phys_u32(addr, src_val);
@@ -80,7 +80,7 @@ pub fn mov_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix).unwrap();
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
     };

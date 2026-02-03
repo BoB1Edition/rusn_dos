@@ -21,7 +21,7 @@ pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg32(modrm.rm_field)
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
@@ -363,7 +363,7 @@ pub fn add_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg32(modrm.rm_field) // источник: r/m32
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
@@ -396,7 +396,7 @@ pub fn cmp_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix).unwrap();
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
     };

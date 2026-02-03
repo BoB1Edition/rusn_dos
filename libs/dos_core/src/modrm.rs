@@ -23,7 +23,7 @@ impl ModRm {
         self.mod_field == 0b11
     }
 
-    pub fn resolve_address(&self, machine: &mut DosMachine, addr32_mode: bool) -> Option<u32> {
+    pub fn resolve_address(&self, machine: &mut DosMachine, addr32_mode: bool, bytes: &mut Vec<u8>) -> Option<u32> {
         if self.is_register_mode() {
             return None;
         }
@@ -82,6 +82,8 @@ impl ModRm {
                     if self.mod_field == 0 {
                         let disp = machine.read_u16(machine.registers.cs(), machine.registers.ip());
                         machine.registers.step(Some(2));
+                        bytes.extend_from_slice(&disp.to_le_bytes());
+
                         let seg = if self.rm_field == 6 && self.mod_field == 0 {
                             machine.registers.ds()
                         } else {

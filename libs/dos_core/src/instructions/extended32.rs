@@ -15,7 +15,7 @@ pub fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg16(modrm.rm_field) as u32
     } else {
         let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix)
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap(); 
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr) as u32

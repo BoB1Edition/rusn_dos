@@ -2,12 +2,7 @@ use std::fs::File;
 
 use log::info;
 
-use crate::{
-    DosMachine,
-    consts::{DOS_MEMORY_SIZE},
-    loader::MzHeader,
-    registers::Registers,
-};
+use crate::{DosMachine, consts::DOS_MEMORY_SIZE, loader::MzHeader, registers::Registers};
 
 #[derive(Debug, Clone, Default)]
 pub struct DosExecutable {
@@ -76,10 +71,9 @@ impl DosExecutable {
         })
     }
 
-    pub fn relocation(&self, memory: &mut Box<[u8]>) {
-        let load_segment = 0x1000;
+    pub fn relocation(&self, memory: &mut Box<[u8]>, load_segment: u16) {
         if let Some(hdr) = &self.header {
-            let reloc_table_offset = hdr.e_lfarlc as usize;
+            let reloc_table_offset = (hdr.e_lfarlc as usize);// * 16;
             let reloc_count = hdr.e_relc as usize;
 
             for i in 0..reloc_count {
@@ -87,72 +81,68 @@ impl DosExecutable {
                 if entry_offset + 4 > self.data.len() {
                     break;
                 }
-
                 let offset =
                     u16::from_le_bytes([self.data[entry_offset], self.data[entry_offset + 1]]);
                 let segment =
                     u16::from_le_bytes([self.data[entry_offset + 2], self.data[entry_offset + 3]]);
+                let fixup_addr = ((load_segment as u32 + segment as u32)<<4) + offset as u32;
+                let idx = fixup_addr as usize;
 
-                let fixup_addr = (load_segment as u32 + segment as u32) * 16 + offset as u32;
-                let fixup_idx = fixup_addr as usize;
-
-                if fixup_idx + 2 > memory.len() {
-                    continue;
+                if idx + 2 <= memory.len() {
+                    let current = u16::from_le_bytes([memory[idx], memory[idx + 1]]);
+                    let corrected = current.wrapping_add(load_segment);
+                    memory[idx] = corrected as u8;
+                    memory[idx + 1] = (corrected >> 8) as u8;
                 }
-
-                let current = u16::from_le_bytes([memory[fixup_idx], memory[fixup_idx + 1]]);
-                let corrected = current.wrapping_add(load_segment);
-
-                memory[fixup_idx] = corrected as u8;
-                memory[fixup_idx + 1] = (corrected >> 8) as u8;
             }
         }
     }
 
+    fn create_psp(&self, load_segment: usize, memory: &mut Box<[u8]>) {
+        let psp_base = (load_segment - 0x10)<<4;
+        memory[psp_base] = 0xCD;
+        memory[psp_base + 1] = 0x20;
+        let mem_size_para = (DOS_MEMORY_SIZE / 16 - load_segment as usize) as u16;
+        memory[psp_base + 2] = (mem_size_para & 0xFF) as u8;
+        memory[psp_base + 3] = ((mem_size_para >> 8) & 0xFF) as u8;
+        memory[psp_base + 8] = 0xCD;
+        memory[psp_base + 9] = 0x21;
+        memory[psp_base + 10] = 0xCB;
+    }
+
     pub fn exec(&self) -> Result<crate::DosMachine, Box<dyn std::error::Error>> {
         let mut memory = vec![0u8; DOS_MEMORY_SIZE].into_boxed_slice();
-        memory[0x00] = 0xCD; // INT
-        memory[0x01] = 0x20; // 20h
-        // Указать размер доступной памяти (например, 640 KiB = 0xA000 параграфов)
-        let mem_size_para = (DOS_MEMORY_SIZE / 16) as u16;
-        memory[0x02] = (mem_size_para & 0xFF) as u8;
-        memory[0x03] = ((mem_size_para >> 8) & 0xFF) as u8;
-        // INT 21h / RETF для возврата
-        memory[0x08] = 0xCD; // INT
-        memory[0x09] = 0x21; // 21h
-        memory[0x0A] = 0xCB; // RETF
-        let mut dos: crate::DosMachine;
+        
         if let Some(hdr) = &self.header {
-            //let load_segment = hdr.e_minep;//0x1000;
-            let load_segment = 0x1000;
-            let header_size = (hdr.e_cparhdr as usize) * 16;
+            const LOAD_SEGMENT: usize = 0x1000;
+            self.create_psp(LOAD_SEGMENT, &mut memory);
 
-            // Копируем по физическому адресу 0x100
-            let load_physical = load_segment as usize * 16;
-            if load_physical + self.data.len() > DOS_MEMORY_SIZE {
+            let header_size = (hdr.e_cparhdr as usize) * 16;
+            let code_data = &self.data[header_size..];
+            let code_base = LOAD_SEGMENT << 4;
+            if code_base as usize + code_data.len() > DOS_MEMORY_SIZE {
                 return Err("Program too large".into());
             }
-            let data = self.data[header_size..].to_vec();
-            memory[load_physical..load_physical + data.len()].copy_from_slice(&data);
-            self.relocation(&mut memory);
-            // Регистры
-            let cs = load_segment + hdr.cs; //load_segment + hdr.e_cparhdr;
+            memory[code_base..code_base + code_data.len()].copy_from_slice(code_data);
+            /*for b in &memory[code_base..code_base + code_data.len()] {
+                println!("byte: {:#02x}", b);
+            }*/
+            self.relocation(&mut memory, LOAD_SEGMENT as u16);
+            /*for b in &memory[code_base..code_base + code_data.len()] {
+                println!("post reloc byte: {:#02x}", b);
+            }*/
+            let cs = (LOAD_SEGMENT as u16).wrapping_add(hdr.cs);
             let ip = hdr.ip;
-            let ss = load_segment + hdr.ss; //load_segment + hdr.e_cparhdr + hdr.e_minep;
+            let ss = (LOAD_SEGMENT as u16).wrapping_add(hdr.ss);
             let sp = hdr.sp;
 
-            // PSP
-            let code_start_offset = (load_segment as u32 * 16 ) + header_size as u32;
             println!("Loaded .EXE file:");
             println!("  CS:IP = {:#04x}:{:#04x}", cs, ip);
             println!("  SS:SP = {:#04x}:{:#04x}", ss, sp);
-            println!(
-                "  Code loaded at physical address: {:#x}",
-                code_start_offset
-            );
+            println!("  DS = {:#04x}", LOAD_SEGMENT - 0x10);
 
-            dos = crate::DosMachine {
-                memory: memory,
+            let mut dos = crate::DosMachine {
+                memory,
                 halted: false,
                 registers: Registers::default(),
                 logfile: File::create("logopcode_exe.txt")?,
@@ -163,19 +153,21 @@ impl DosExecutable {
                 opcode_override_segment: None,
             };
             dos.registers.set_cs(cs);
-            //dos.registers.ds = load_segment as u16;
-            //dos.registers.es = load_segment as u16;
-            dos.registers.set_ds(load_segment);
-            dos.registers.set_es(load_segment);
+            dos.registers.set_ds((LOAD_SEGMENT - 0x10)as u16);
+            dos.registers.set_es((LOAD_SEGMENT - 0x10) as u16);
             dos.registers.set_ip(ip);
             dos.registers.set_ss(ss);
             dos.registers.set_sp(sp);
+
+            Ok(dos)
         } else {
             info!("Assuming .COM file (starts at 0x100)");
-            let com_start = 0x100;
+            const LOAD_SEGMENT: usize = 0x10;
+            let com_start= LOAD_SEGMENT<<4;
             memory[com_start..com_start + self.data.len()].copy_from_slice(&self.data);
-            dos = DosMachine {
-                memory: memory,
+            self.create_psp(LOAD_SEGMENT, &mut memory);
+            let mut dos = DosMachine {
+                memory,
                 halted: false,
                 registers: Registers::default(),
                 logfile: File::create("logopcode_com.txt")?,
@@ -183,11 +175,11 @@ impl DosExecutable {
                 has_operand_size_prefix: false,
                 has_extended_prefix: false,
                 override_segment: None,
-                opcode_override_segment: None
+                opcode_override_segment: None,
             };
             dos.registers.set_cs(0);
-            dos.registers.set_ds(dos.registers.cs());
-            dos.registers.set_es(dos.registers.cs());
+            dos.registers.set_ds(0);
+            dos.registers.set_es(0);
             dos.registers.set_ip(0x0100);
             dos.registers.set_ss(0);
             dos.registers.set_sp(0xFFFE);
@@ -195,7 +187,7 @@ impl DosExecutable {
             println!("  CS:IP = 0x0000:0x0100");
             println!("  SS:SP = 0x0000:0xFFFE");
             println!("  Code loaded at physical address: 0x100");
+            Ok(dos)
         }
-        Ok(dos)
     }
 }
