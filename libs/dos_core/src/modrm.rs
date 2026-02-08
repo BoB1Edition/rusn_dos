@@ -1,6 +1,5 @@
 use crate::DosMachine;
 
-// src/modrm.rs
 #[derive(Debug, Clone, Copy)]
 pub struct ModRm {
     pub mod_field: u8,

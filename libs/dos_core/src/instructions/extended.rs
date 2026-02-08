@@ -18,7 +18,7 @@ pub fn movzx_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
+        //bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr)
     };
     machine.write_reg16(dst_reg, src_val);

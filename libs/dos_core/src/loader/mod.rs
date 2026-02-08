@@ -1,5 +1,3 @@
-// dos_core/src/loader/mod.rs
-
 mod mz;
 mod com;
 

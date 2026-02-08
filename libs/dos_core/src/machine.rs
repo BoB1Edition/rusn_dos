@@ -1,4 +1,3 @@
-//ver: 1
 use std::{fs::File, io::Write};
 
 use log::error;
@@ -519,15 +518,19 @@ impl DosMachine {
                 }
                 0x26 => {
                     self.override_segment = Some(self.registers.es());
+                    self.opcode_override_segment = Some(opcode);
                 } // ES:
                 0x2E => {
                     self.override_segment = Some(self.registers.cs());
+                    self.opcode_override_segment = Some(opcode);
                 } // CS:
                 0x36 => {
                     self.override_segment = Some(self.registers.ss());
+                    self.opcode_override_segment = Some(opcode);
                 } // SS:
                 0x3E => {
                     self.override_segment = Some(self.registers.ds());
+                    self.opcode_override_segment = Some(opcode);
                 } // DS:
                 _ => {
                     if self.has_extended_prefix {
@@ -539,6 +542,7 @@ impl DosMachine {
                     self.has_operand_size_prefix = false;
                     self.has_extended_prefix = false;
                     self.override_segment = None;
+                    self.opcode_override_segment = None;
                 }
             }
         }
@@ -555,35 +559,36 @@ impl DosMachine {
         }
     }
     fn print_dos_string(&self) {
-    // Вычисляем физический адрес: DS * 16 + DX
-    let phys_addr = ((self.registers.ds() as u32)<< 4).wrapping_add(self.registers.dx() as u32);
-    let mut addr = phys_addr as usize;
-    let mut s = String::new();
+        // Вычисляем физический адрес: DS * 16 + DX
+        let phys_addr =
+            ((self.registers.ds() as u32) << 4).wrapping_add(self.registers.dx() as u32);
+        let mut addr = phys_addr as usize;
+        let mut s = String::new();
 
-    loop {
-        if addr >= self.memory.len() {
-            log::error!("string not contains '$'");
-            return;
+        loop {
+            if addr >= self.memory.len() {
+                log::error!("string not contains '$'");
+                return;
+            }
+            let byte = self.memory[addr];
+            if byte == b'$' {
+                break;
+            }
+            s.push(byte as char);
+            // Безопасное преобразование: только печатаемые ASCII
+            /*if byte >= 32 && byte <= 126 {
+
+            } else {
+                // Опционально: пропускаем или заменяем
+                // s.push('?');
+            }*/
+            addr += 1;
         }
-        let byte = self.memory[addr];
-        if byte == b'$' {
-            break;
-        }
-        s.push(byte as char);
-        // Безопасное преобразование: только печатаемые ASCII
-        /*if byte >= 32 && byte <= 126 {
-            
-        } else {
-            // Опционально: пропускаем или заменяем
-            // s.push('?');
-        }*/
-        addr += 1;
+        println!("{}", s);
     }
-    println!("{}", s);
-}
     #[inline(always)]
     pub fn read_u8(&self, segment: u16, offset: u16) -> u8 {
-        let addr = ((segment as u32) << 4 ).wrapping_add(offset as u32) & 0xFFFFF;
+        let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
         let addr = addr as usize;
         /*let t = self.memory.clone();
         let t = t.to_vec();
@@ -626,7 +631,19 @@ impl DosMachine {
     pub fn read_u16(&self, segment: u16, offset: u16) -> u16 {
         let lo = self.read_u8(segment, offset) as u16;
         let hi = self.read_u8(segment, offset.wrapping_add(1)) as u16;
-        lo | (hi << 8)
+        let result = lo | (hi << 8);
+        println!("==============================");
+        println!("DEBUG: offset  {:#04x}", offset);
+        println!("DEBUG: segment {:#04x}", segment);
+        println!("DEBUG: ds      {:#04x}", self.registers.ds());
+        println!("DEBUG: cs      {:#04x}", self.registers.cs());
+        println!("DEBUG: es      {:#04x}", self.registers.es());
+        println!("==============================");
+        if segment == self.registers.es() && offset == 0x0002 {
+            println!("DEBUG: reading ES:[0x0002] = segment {:#04x}", segment);
+            println!("DEBUG: result = {:#04x}", result);
+        }
+        result
     }
 
     #[inline(always)]
