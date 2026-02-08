@@ -1,3 +1,4 @@
+// Ver: 5
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
@@ -17,8 +18,10 @@ pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.step(Some(2));
         addr as u32
     };
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let offset = (addr & 0xFFFF) as u16;
+    machine.write_u32(segment, offset, machine.registers.eax());
     machine.log_instruction(csip, &bytes).ok();
-    machine.write_phys_u32(addr, machine.registers.eax());
 }
 
 pub fn mov_eax_data(machine: &mut DosMachine, prev: &[u8]) {
@@ -30,6 +33,17 @@ pub fn mov_eax_data(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
     machine.registers.step(Some(4));
     machine.registers.set_eax(data);
+}
+
+pub fn mov_edx_data(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(prev);
+    let data = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    bytes.extend_from_slice(&data.to_le_bytes());
+    machine.log_instruction(csip, &bytes).ok();
+    machine.registers.step(Some(4));
+    machine.registers.set_edx(data);
 }
 
 pub fn mov_ebx_data(machine: &mut DosMachine, prev: &[u8]) {
@@ -80,7 +94,9 @@ pub fn mov_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u32(addr)
     };

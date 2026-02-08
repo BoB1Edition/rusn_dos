@@ -1,3 +1,5 @@
+// Ver: 4
+
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
@@ -27,6 +29,16 @@ pub fn mov_dx(machine: &mut DosMachine, prev: &[u8]) {
     bytes.extend_from_slice(&imm.to_le_bytes());
     let _ = machine.log_instruction(csip, &bytes);
     machine.registers.set_dx(imm);
+    machine.registers.step(Some(2));
+}
+
+pub fn mov_bx(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    let imm = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    bytes.extend_from_slice(&imm.to_le_bytes());
+    let _ = machine.log_instruction(csip, &bytes);
+    machine.registers.set_bx(imm);
     machine.registers.step(Some(2));
 }
 
@@ -101,13 +113,12 @@ pub fn mov_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
 pub fn mov_al_address16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
-
     let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&addr16.to_le_bytes());
 
-    let phys_addr = ((machine.registers.ds() as u32) << 4) + (addr16 as u32);
-    let value = machine.read_phys_u8(phys_addr);
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let value = machine.read_u8(segment, addr16);
 
     machine.registers.set_al(value);
     machine.log_instruction(csip, &bytes).ok();
@@ -116,13 +127,13 @@ pub fn mov_al_address16(machine: &mut DosMachine, prev: &[u8]) {
 pub fn mov_al_address32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
-
     let addr32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(Some(4));
     bytes.extend_from_slice(&addr32.to_le_bytes());
 
-    let phys_addr = ((machine.registers.ds() as u64) << 4).wrapping_add(addr32 as u64) & 0xFFFFF;
-    let value = machine.read_phys_u8(phys_addr as u32);
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let offset = (addr32 & 0xFFFF) as u16; 
+    let value = machine.read_u8(segment, offset); 
 
     machine.registers.set_al(value);
     machine.log_instruction(csip, &bytes).ok();

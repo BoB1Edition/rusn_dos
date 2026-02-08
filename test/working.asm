@@ -1,3 +1,4 @@
+; Ver: 1
 format MZ
 entry main:start
 

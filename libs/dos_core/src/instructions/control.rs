@@ -1,3 +1,4 @@
+// Ver: 5
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn call(machine: &mut DosMachine, prev: &[u8]) {
@@ -59,7 +60,6 @@ pub fn ja(machine: &mut DosMachine, prev: &[u8]) {
     }
 }
 
-// control.rs
 pub fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
@@ -81,8 +81,8 @@ pub fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.step(Some(2));
         bytes.extend_from_slice(&disp16.to_le_bytes());
 
-        let addr = (machine.registers.ds() as u32) * 16 + (disp16 as u32);
-        let target_ip = machine.read_phys_u16(addr);
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let target_ip = machine.read_u16(segment, disp16); // ← КОРРЕКТНО
 
         // PUSH IP
         let current_ip = machine.registers.ip();

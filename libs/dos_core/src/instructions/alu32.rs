@@ -1,11 +1,9 @@
-use log::error;
-
+// Ver: 3
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
-    //if !machine.has_address_size_prefix {
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
@@ -37,7 +35,6 @@ pub fn shift_group_c1(machine: &mut DosMachine, prev: &[u8]) {
 fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) {
     let count = count & 0x1F; // x86: count mod 32
     if count == 0 {
-        // Никаких изменений, флаги не меняются
         return (value, flags);
     }
 
@@ -384,7 +381,6 @@ pub fn add_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// alu32.rs
 pub fn cmp_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
@@ -409,5 +405,30 @@ pub fn cmp_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let of = (((dst_val ^ src_val) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
 
     machine.registers.set_flags(DosMachine::compute_flags_u32(result, cf, of, af));
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn xchg_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    if modrm.is_register_mode() {
+        let src_val = machine.read_reg32(modrm.reg_field);
+        let dst_val = machine.read_reg32(modrm.rm_field);
+        machine.write_reg32(modrm.rm_field, src_val);
+        machine.write_reg32(modrm.reg_field, dst_val);
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let mem_val = machine.read_phys_u32(addr);
+        let reg_val = machine.read_reg32(modrm.reg_field);
+        machine.write_phys_u32(addr, reg_val);
+        machine.write_reg32(modrm.reg_field, mem_val);
+    }
+    
     machine.log_instruction(csip, &bytes).ok();
 }

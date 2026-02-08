@@ -1,3 +1,4 @@
+// Ver: 3
 use log::error;
 
 use crate::{machine::DosMachine, modrm::ModRm};
@@ -315,5 +316,62 @@ pub fn cmp_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
 
     machine.registers.set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    if modrm.is_register_mode() {
+        // XCHG reg16, reg16
+        let src_val = machine.read_reg16(modrm.reg_field);
+        let dst_val = machine.read_reg16(modrm.rm_field);
+        machine.write_reg16(modrm.rm_field, src_val);
+        machine.write_reg16(modrm.reg_field, dst_val);
+    } else {
+        // XCHG [addr], reg16
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let mem_val = machine.read_phys_u16(addr);
+        let reg_val = machine.read_reg16(modrm.reg_field);
+        machine.write_phys_u16(addr, reg_val);
+        machine.write_reg16(modrm.reg_field, mem_val);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn add_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    let mut bytes = prev.to_vec();
+    bytes.push(imm8);
+    let al = machine.registers.al();
+    let result = (al as u16) + (imm8 as u16);
+    let result8 = result as u8;
+    let cf = result > 0xFF;
+    let zf = result8 == 0;
+    let sf = (result8 & 0x80) != 0;
+    let af = ((al & 0x0F) + (imm8 & 0x0F)) > 0x0F;
+    let pf = result8.count_ones() % 2 == 0;
+    let al_sign = (al as i8) < 0;
+    let imm_sign = (imm8 as i8) < 0;
+    let result_sign = (result8 as i8) < 0;
+    let of = (al_sign == imm_sign) && (result_sign != al_sign);
+    let mut flags = 0u16;
+    if cf { flags |= 1 << 0; }   // CF
+    if pf { flags |= 1 << 2; }   // PF
+    if af { flags |= 1 << 4; }   // AF
+    if zf { flags |= 1 << 6; }   // ZF
+    if sf { flags |= 1 << 7; }   // SF
+    if of { flags |= 1 << 11; }  // OF
+    machine.registers.set_flags(flags);
+    machine.registers.set_al(result8);
     machine.log_instruction(csip, &bytes).ok();
 }

@@ -1,4 +1,4 @@
-; hello.asm
+; Ver: 1
 .MODEL SMALL
 .STACK 100h
 

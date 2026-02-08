@@ -1,18 +1,19 @@
+// Ver: 11
 use std::{fs::File, io::Write};
 
 use log::error;
 
 use crate::{
-    consts::SEGMENT_SIZE,
     instructions::{
         alu, alu32, control, control32, extended, extended32, mov, mov32, stack, system,
     },
+    memory::Memory,
     modrm::ModRm,
 };
 
 #[derive(Debug)]
 pub struct DosMachine {
-    pub memory: Box<[u8]>,
+    pub memory: Memory,
     pub registers: crate::registers::Registers,
     pub halted: bool,
     pub logfile: File,
@@ -98,13 +99,13 @@ impl DosMachine {
     pub fn read_reg32(&self, reg: u8) -> u32 {
         match reg {
             0 => self.registers.eax(),
-            1 => todo!("self.registers.ecx(),"),
-            2 => todo!("self.registers.edx(),"),
+            1 => self.registers.ecx(),
+            2 => self.registers.edx(),
             3 => self.registers.ebx(),
-            4 => todo!("self.registers.esp(),"),
-            5 => todo!("self.registers.ebp(),"),
-            6 => todo!("self.registers.esi(),"),
-            7 => todo!("self.registers.edi(),"),
+            4 => self.registers.esp(),
+            5 => self.registers.ebp(),
+            6 => self.registers.esi(),
+            7 => self.registers.edi(),
             _ => unreachable!(),
         }
     }
@@ -113,43 +114,16 @@ impl DosMachine {
     pub fn write_reg32(&mut self, reg: u8, value: u32) {
         match reg {
             0 => self.registers.set_eax(value),
-            1 => todo!("self.registers.set_ecx(value)"),
-            2 => todo!("self.registers.set_edx(value)"),
+            1 => self.registers.set_ecx(value),
+            2 => self.registers.set_edx(value),
             3 => self.registers.set_ebx(value),
-            4 => todo!("self.registers.set_esp(value)"),
-            5 => todo!("self.registers.set_ebp(value)"),
-            6 => todo!("self.registers.set_esi(value)"),
-            7 => todo!("self.registers.set_edi(value)"),
+            4 => self.registers.set_esp(value),
+            5 => self.registers.set_ebp(value),
+            6 => self.registers.set_esi(value),
+            7 => self.registers.set_edi(value),
             _ => unreachable!(),
         }
     }
-
-    /*pub fn compute_flags(result: u8, cf: bool, of: bool, af: bool) -> u16 {
-        let mut flags = 0u16;
-        // ZF, SF, PF — общие для всех
-        if result == 0 {
-            flags |= 1 << 6;
-        } // ZF
-        if (result & 0x80) != 0 {
-            flags |= 1 << 7;
-        } // SF
-        if result.count_ones() % 2 == 0 {
-            flags |= 1 << 2;
-        } // PF
-
-        // CF, OF, AF — зависят от операции
-        if cf {
-            flags |= 1 << 0;
-        }
-        if of {
-            flags |= 1 << 11;
-        }
-        if af {
-            flags |= 1 << 4;
-        }
-
-        flags
-    }*/
 
     #[inline]
     fn compute_flags_impl(value: u32, width_bits: u32, cf: bool, of: bool, af: bool) -> u16 {
@@ -284,6 +258,11 @@ impl DosMachine {
             self.registers.ip()
         );
         self.halted = true;
+        self.has_address_size_prefix = false;
+        self.has_operand_size_prefix = false;
+        self.has_extended_prefix = false;
+        self.override_segment = None;
+        self.opcode_override_segment = None;
     }
 
     fn execute(&mut self, opcode: u8) {
@@ -294,6 +273,9 @@ impl DosMachine {
         }
         if self.has_address_size_prefix {
             full_bytes.push(0x67);
+        }
+        if let Some(oos) = self.opcode_override_segment {
+            full_bytes.push(oos);
         }
         full_bytes.push(opcode);
         let csip = [self.registers.cs(), self.registers.ip()];
@@ -318,24 +300,24 @@ impl DosMachine {
                 }
             }
             0xB8 => {
-                if !self.has_operand_size_prefix {
-                    mov::mov_ax(self, &full_bytes);
-                } else {
+                if self.has_operand_size_prefix {
                     mov32::mov_eax_data(self, &full_bytes);
+                } else {
+                    mov::mov_ax(self, &full_bytes);
                 }
             }
             0xBA => {
                 if !self.has_operand_size_prefix {
                     mov::mov_dx(self, &full_bytes);
                 } else {
-                    self.print_error_exit(opcode);
+                    mov32::mov_edx_data(self, &full_bytes);
                 }
             }
             0xBB => {
                 if self.has_operand_size_prefix {
                     mov32::mov_ebx_data(self, &full_bytes);
                 } else {
-                    self.print_error_exit(opcode);
+                    mov::mov_bx(self, &full_bytes);
                 }
             }
             0x8B => {
@@ -379,6 +361,16 @@ impl DosMachine {
                     self.print_error_exit(opcode);
                 }
             }
+            0x04 => {
+                alu::add_al_imm8(self, &full_bytes);
+            }
+            0x87 => {
+                if self.has_operand_size_prefix {
+                    alu32::xchg_rm32_r32(self, &full_bytes);
+                } else {
+                    alu::xchg_rm16_r16(self, &full_bytes);
+                }
+            }
             0xC1 => {
                 if self.has_operand_size_prefix {
                     alu32::shift_group_c1(self, &full_bytes);
@@ -391,14 +383,22 @@ impl DosMachine {
             }
 
             0xE8 => {
-                control::call(self, &full_bytes);
+                if self.has_operand_size_prefix {
+                    control32::call32(self, &full_bytes);
+                } else {
+                    control::call(self, &full_bytes);
+                }
             }
             0xFC => {
                 let _ = self.log_instruction(csip, &full_bytes);
                 self.registers.set_flags(self.registers.flags() & !0x0400);
             }
             0xC3 => {
-                control::retn(self, &full_bytes);
+                if self.has_operand_size_prefix {
+                    control32::retn32(self, &full_bytes);
+                } else {
+                    control::retn(self, &full_bytes);
+                }
             }
             0x32 => {
                 alu::xor(self, &full_bytes);
@@ -559,100 +559,40 @@ impl DosMachine {
         }
     }
     fn print_dos_string(&self) {
-        // Вычисляем физический адрес: DS * 16 + DX
-        let phys_addr =
-            ((self.registers.ds() as u32) << 4).wrapping_add(self.registers.dx() as u32);
-        let mut addr = phys_addr as usize;
+        let mut addr = ((self.registers.ds() as u32) << 4).wrapping_add(self.registers.dx() as u32);
         let mut s = String::new();
-
         loop {
-            if addr >= self.memory.len() {
+            if addr >= self.memory.len() as u32 {
                 log::error!("string not contains '$'");
                 return;
             }
-            let byte = self.memory[addr];
+            let byte = self.memory.read_u8(addr);
             if byte == b'$' {
                 break;
             }
             s.push(byte as char);
-            // Безопасное преобразование: только печатаемые ASCII
-            /*if byte >= 32 && byte <= 126 {
-
-            } else {
-                // Опционально: пропускаем или заменяем
-                // s.push('?');
-            }*/
-            addr += 1;
+            addr = addr.wrapping_add(1);
         }
         println!("{}", s);
     }
     #[inline(always)]
-    pub fn read_u8(&self, segment: u16, offset: u16) -> u8 {
-        let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
-        let addr = addr as usize;
-        /*let t = self.memory.clone();
-        let t = t.to_vec();
-        let t = t.as_slice();
-        for t1 in 0..t.len() {
-            println!("byte {:#02X}", t1);
-        }*/
-        if addr < self.memory.len() {
-            self.memory[addr]
-        } else {
-            error!("stack overflow: {}", addr);
-            0xFF
-        }
+    pub fn read_u8(&self, default_segment: u16, offset: u16) -> u8 {
+        let segment = self.override_segment.unwrap_or(default_segment);
+        let addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        self.memory.read_u8(addr)
     }
 
     #[inline(always)]
-    pub fn read_phys_u8(&self, addr: u32) -> u8 {
-        let addr_20bit = (addr & 0xFFFFF) as usize; // 20-битный wrap-around
-        if addr_20bit < self.memory.len() {
-            self.memory[addr_20bit]
-        } else {
-            0xFF // или panic, или лог ошибки
-        }
-    }
-
-    #[inline(always)]
-    pub fn read_phys_u16(&self, addr: u32) -> u16 {
-        let lo = self.read_phys_u8(addr) as u16;
-        let hi = self.read_phys_u8(addr + 1) as u16;
+    pub fn read_u16(&self, default_segment: u16, offset: u16) -> u16 {
+        let segment = self.override_segment.unwrap_or(default_segment);
+        let lo = self.read_u8(segment, offset) as u16;
+        let hi = self.read_u8(segment, offset.wrapping_add(1)) as u16;
         lo | (hi << 8)
     }
 
     #[inline(always)]
-    pub fn read_phys_u32(&self, addr: u32) -> u32 {
-        let lo = self.read_phys_u16(addr) as u32;
-        let hi = self.read_phys_u16(addr + 2) as u32;
-        lo | (hi << 16)
-    }
-    #[inline(always)]
-    pub fn read_u16(&self, segment: u16, offset: u16) -> u16 {
-        let lo = self.read_u8(segment, offset) as u16;
-        let hi = self.read_u8(segment, offset.wrapping_add(1)) as u16;
-        let result = lo | (hi << 8);
-        println!("==============================");
-        println!("DEBUG: offset  {:#04x}", offset);
-        println!("DEBUG: segment {:#04x}", segment);
-        println!("DEBUG: ds      {:#04x}", self.registers.ds());
-        println!("DEBUG: cs      {:#04x}", self.registers.cs());
-        println!("DEBUG: es      {:#04x}", self.registers.es());
-        println!("==============================");
-        if segment == self.registers.es() && offset == 0x0002 {
-            println!("DEBUG: reading ES:[0x0002] = segment {:#04x}", segment);
-            println!("DEBUG: result = {:#04x}", result);
-        }
-        result
-    }
-
-    #[inline(always)]
-    /*pub fn read_u32(&self, segment: u16, offset: u16) -> u32 {
-        let lo = self.read_u16(segment, offset) as u32;
-        let hi = self.read_u16(segment, offset.wrapping_add(2)) as u32;
-        lo | (hi << 16)
-    }*/
-    pub fn read_u32(&self, segment: u16, offset: u16) -> u32 {
+    pub fn read_u32(&self, default_segment: u16, offset: u16) -> u32 {
+        let segment = self.override_segment.unwrap_or(default_segment);
         let b0 = self.read_u8(segment, offset) as u32;
         let b1 = self.read_u8(segment, offset.wrapping_add(1)) as u32;
         let b2 = self.read_u8(segment, offset.wrapping_add(2)) as u32;
@@ -661,23 +601,25 @@ impl DosMachine {
     }
 
     #[inline(always)]
-    fn write_u8(&mut self, segment: u16, offset: u16, value: u8) {
+    fn write_u8(&mut self, default_segment: u16, offset: u16, value: u8) {
+        let segment = self.override_segment.unwrap_or(default_segment);
         let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
-        let addr = addr as usize;
-        if addr < self.memory.len() {
-            self.memory[addr] = value;
+        if addr < self.memory.len() as u32 {
+            self.memory.write_u8(addr, value);
         } else {
             log::error!("Memory write out of bounds: {:#x}", addr);
         }
     }
     #[inline(always)]
-    pub fn write_u16(&mut self, segment: u16, offset: u16, value: u16) {
+    pub fn write_u16(&mut self, default_segment: u16, offset: u16, value: u16) {
+        let segment = self.override_segment.unwrap_or(default_segment);
         self.write_u8(segment, offset, value as u8);
         self.write_u8(segment, offset.wrapping_add(1), (value >> 8) as u8);
     }
 
     #[inline(always)]
-    pub fn write_u32(&mut self, segment: u16, offset: u16, value: u32) {
+    pub fn write_u32(&mut self, default_segment: u16, offset: u16, value: u32) {
+        let segment = self.override_segment.unwrap_or(default_segment);
         self.write_u16(segment, offset, value as u16);
         self.write_u16(segment, offset.wrapping_add(2), (value >> 16) as u16);
     }
@@ -688,26 +630,39 @@ impl DosMachine {
             println!("op{i}: {op:#02X}")
         }
     }
+    #[inline(always)]
+    pub fn read_phys_u8(&self, addr: u32) -> u8 {
+        self.memory.read_u8(addr & 0xFFFFF)
+    }
 
     #[inline(always)]
-    pub fn write_phys_u32(&mut self, addr: u32, value: u32) {
-        let addr_20bit = addr & 0xFFFFF;
-        self.write_phys_u16(addr_20bit, value as u16);
-        self.write_phys_u16(addr_20bit + 2, (value >> 16) as u16);
+    pub fn read_phys_u16(&self, addr: u32) -> u16 {
+        let lo = self.read_phys_u8(addr) as u16;
+        let hi = self.read_phys_u8(addr.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    #[inline(always)]
+    pub fn read_phys_u32(&self, addr: u32) -> u32 {
+        let lo = self.read_phys_u16(addr) as u32;
+        let hi = self.read_phys_u16(addr.wrapping_add(2)) as u32;
+        lo | (hi << 16)
+    }
+
+    #[inline(always)]
+    pub fn write_phys_u8(&mut self, addr: u32, value: u8) {
+        self.memory.write_u8(addr & 0xFFFFF, value);
     }
 
     #[inline(always)]
     pub fn write_phys_u16(&mut self, addr: u32, value: u16) {
-        let addr = addr & 0xFFFFF;
         self.write_phys_u8(addr, value as u8);
-        self.write_phys_u8(addr + 1, (value >> 8) as u8);
+        self.write_phys_u8(addr.wrapping_add(1), (value >> 8) as u8);
     }
 
     #[inline(always)]
-    fn write_phys_u8(&mut self, addr: u32, value: u8) {
-        let idx = (addr & 0xFFFFF) as usize;
-        if idx < self.memory.len() {
-            self.memory[idx] = value;
-        }
+    pub fn write_phys_u32(&mut self, addr: u32, value: u32) {
+        self.write_phys_u16(addr, value as u16);
+        self.write_phys_u16(addr.wrapping_add(2), (value >> 16) as u16);
     }
 }

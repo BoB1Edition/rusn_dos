@@ -1,6 +1,6 @@
+; Ver: 1
 .MODEL TINY
 .CODE
-ORG 100h        ; Для .COM точка входа 0x100
 
 main PROC
     MOV AX, 0   ; PSP всегда в сегменте 0 для .COM

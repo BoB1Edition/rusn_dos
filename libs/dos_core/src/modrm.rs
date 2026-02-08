@@ -1,3 +1,5 @@
+// Ver: 4
+
 use crate::DosMachine;
 
 #[derive(Debug, Clone, Copy)]
@@ -22,7 +24,12 @@ impl ModRm {
         self.mod_field == 0b11
     }
 
-    pub fn resolve_address(&self, machine: &mut DosMachine, addr32_mode: bool, bytes: &mut Vec<u8>) -> Option<u32> {
+    pub fn resolve_address(
+        &self,
+        machine: &mut DosMachine,
+        addr32_mode: bool,
+        bytes: &mut Vec<u8>,
+    ) -> Option<u32> {
         if self.is_register_mode() {
             return None;
         }
@@ -32,8 +39,8 @@ impl ModRm {
         if addr32_mode {
             let base = match self.rm_field {
                 0 => machine.registers.eax(),
-                1 => todo!("machine.registers.ecx(),"),
-                2 => todo!("machine.registers.edx(),"),
+                1 => machine.registers.ecx(),
+                2 => machine.registers.edx(),
                 3 => machine.registers.ebx(),
                 4 => 0,
                 5 => {
@@ -43,32 +50,32 @@ impl ModRm {
                         machine.registers.step(Some(4));
                         return Some(((segment as u32) << 4).wrapping_add(disp) & 0xFFFFF);
                     } else {
-                        todo!("machine.registers.esp()")
+                        machine.registers.esp()
                     }
-                },
-                6 => todo!("machine.registers.esi(),"),
-                7 => todo!("machine.registers.edi(),"),
+                }
+                6 => machine.registers.esi(),
+                7 => machine.registers.edi(),
                 _ => unreachable!(),
             };
 
             let disp = match self.mod_field {
                 0 => 0,
                 1 => {
-                    let d = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8 as i32;
+                    let d = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8
+                        as i32;
                     machine.registers.step(None);
                     d
-                },
+                }
                 2 => {
                     let d = machine.read_u32(machine.registers.cs(), machine.registers.ip());
                     machine.registers.step(Some(4));
                     d as i32
-                },
+                }
                 _ => unreachable!(),
             };
 
             let linear = (base as i32).wrapping_add(disp) as u32;
             Some(((segment as u32) << 4).wrapping_add(linear) & 0xFFFFF)
-
         } else {
             let (base, index) = match self.rm_field {
                 0 => (machine.registers.bx(), machine.registers.si()),
@@ -92,7 +99,7 @@ impl ModRm {
                     } else {
                         (machine.registers.bp(), 0)
                     }
-                },
+                }
                 7 => (machine.registers.bx(), 0),
                 _ => unreachable!(),
             };
@@ -100,20 +107,25 @@ impl ModRm {
             let disp = match self.mod_field {
                 0 => 0,
                 1 => {
-                    let d = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8 as i16;
+                    let d = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8
+                        as i16;
                     machine.registers.step(None);
                     d as i32
-                },
+                }
                 2 => {
                     let d = machine.read_u16(machine.registers.cs(), machine.registers.ip());
                     machine.registers.step(Some(2));
                     d as i32
-                },
+                }
                 _ => unreachable!(),
             };
 
             let effective = (base as i32 + index as i32 + disp) as u32;
-            let effective_segment = if self.rm_field == 2 || self.rm_field == 3 || (self.rm_field == 6 && self.mod_field != 0) {
+            let uses_bp_or_sp = self.rm_field == 5
+                || self.rm_field == 2
+                || self.rm_field == 3
+                || (self.rm_field == 6 && self.mod_field != 0);
+            let effective_segment = if uses_bp_or_sp {
                 machine.registers.ss()
             } else {
                 segment

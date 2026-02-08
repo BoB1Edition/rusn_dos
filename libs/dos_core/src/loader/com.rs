@@ -1,8 +1,9 @@
+// Ver: 3
 use std::fs::File;
 
 use log::info;
 
-use crate::{DosMachine, consts::DOS_MEMORY_SIZE, loader::MzHeader, registers::Registers};
+use crate::{DosMachine, consts::DOS_MEMORY_SIZE, loader::MzHeader, memory::{Memory}, registers::Registers};
 
 #[derive(Debug, Clone, Default)]
 pub struct DosExecutable {
@@ -73,7 +74,7 @@ impl DosExecutable {
 
     pub fn relocation(&self, memory: &mut Box<[u8]>, load_segment: u16) {
         if let Some(hdr) = &self.header {
-            let reloc_table_offset = (hdr.e_lfarlc as usize); // * 16;
+            let reloc_table_offset = hdr.e_lfarlc as usize; // * 16;
             let reloc_count = hdr.e_relc as usize;
 
             for i in 0..reloc_count {
@@ -102,12 +103,6 @@ impl DosExecutable {
         let psp_base = (load_segment - 0x10) << 4;
         memory[psp_base] = 0xCD;
         memory[psp_base + 1] = 0x20;
-        //todo: change config max memory psp
-        //let mem_size_para = (DOS_MEMORY_SIZE / 16 - load_segment as usize) as u16;
-        /*const MAX_CONVENTIONAL_PARA: usize = 0xA000; // 640 КБ = 0xA000 параграфов
-        let mem_size_para = (MAX_CONVENTIONAL_PARA.saturating_sub(load_segment)) as u16;
-        memory[psp_base + 2] = (mem_size_para & 0xFF) as u8;
-        memory[psp_base + 3] = ((mem_size_para >> 8) & 0xFF) as u8;*/
         const MEM_END_SEGMENT: u16 = 0xA000; // 640 КБ = сегмент 0xA000
         memory[psp_base + 2] = (MEM_END_SEGMENT & 0xFF) as u8; // 0x00
         memory[psp_base + 3] = ((MEM_END_SEGMENT >> 8) & 0xFF) as u8; // 0xA0
@@ -130,13 +125,7 @@ impl DosExecutable {
                 return Err("Program too large".into());
             }
             memory[code_base..code_base + code_data.len()].copy_from_slice(code_data);
-            /*for b in &memory[code_base..code_base + code_data.len()] {
-                println!("byte: {:#02x}", b);
-            }*/
             self.relocation(&mut memory, LOAD_SEGMENT as u16);
-            /*for b in &memory[code_base..code_base + code_data.len()] {
-                println!("post reloc byte: {:#02x}", b);
-            }*/
             let cs = (LOAD_SEGMENT as u16).wrapping_add(hdr.cs);
             let ip = hdr.ip;
             let ss = (LOAD_SEGMENT as u16).wrapping_add(hdr.ss);
@@ -145,8 +134,8 @@ impl DosExecutable {
             println!("Loaded .EXE file:");
             println!("  CS:IP = {:#04x}:{:#04x}", cs, ip);
             println!("  SS:SP = {:#04x}:{:#04x}", ss, sp);
-            println!("  DS = {:#04x}", LOAD_SEGMENT - 0x10);
-
+            println!("  DS = {:#04x}", LOAD_SEGMENT);
+            let memory = Memory::from_slice(memory);
             let mut dos = crate::DosMachine {
                 memory,
                 halted: false,
@@ -159,7 +148,7 @@ impl DosExecutable {
                 opcode_override_segment: None,
             };
             dos.registers.set_cs(cs);
-            dos.registers.set_ds((LOAD_SEGMENT - 0x10) as u16);
+            dos.registers.set_ds((LOAD_SEGMENT) as u16);
             dos.registers.set_es(dos.registers.ds());
             dos.registers.set_ip(ip);
             dos.registers.set_ss(ss);
@@ -172,6 +161,7 @@ impl DosExecutable {
             let com_start = LOAD_SEGMENT << 4;
             memory[com_start..com_start + self.data.len()].copy_from_slice(&self.data);
             self.create_psp(LOAD_SEGMENT, &mut memory);
+            let memory = Memory::from_slice(memory);
             let mut dos = DosMachine {
                 memory,
                 halted: false,

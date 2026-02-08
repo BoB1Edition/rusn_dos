@@ -20,7 +20,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["run", "./test/TASM_W~1.EXE"],
+            "args": ["run", "./test/working.exe"],
             "cwd": "${workspaceFolder}"
         },
         {
