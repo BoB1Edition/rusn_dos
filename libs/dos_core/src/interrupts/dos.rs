@@ -1,7 +1,8 @@
+// Ver: 1
 //! Обработка прерываний DOS (INT 21h, INT 2Fh)
 //! Содержит реализацию основных функций DOS API
 
-use crate::{DosMachine, error::Result};
+use crate::DosMachine;
 use log::{warn, error};
 use std::io::Write;
 
