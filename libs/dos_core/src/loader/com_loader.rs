@@ -15,7 +15,7 @@ impl ComLoader {
         Ok(Self { data })
     }
 
-    pub fn exec(self) -> Result<DosMachine, Box<dyn std::error::Error>> {
+    pub fn exec(self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
         const PSP_SEGMENT: u16 = 0x0000;      // PSP всегда в сегменте 0
         const CODE_OFFSET: u16 = 0x0100;      // Код начинается со смещения 0x100
         const STACK_TOP: u16 = 0xFFFE;        // Вершина стека (64 КБ - 2)
@@ -35,8 +35,15 @@ impl ComLoader {
             memory.write_u8((code_base + i) as u32, byte);
         }
 
+        let logfile = if no_log {
+            File::create("/dev/null")?  // Unix
+            // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
+        } else {
+            File::create("logopcode.txt")?
+        };
+
         // 4. Инициализируем машину
-        let mut machine = DosMachine::new_with_memory(memory, File::create("logopcode_com.txt")?);
+        let mut machine = DosMachine::new_with_memory(memory, logfile);
 
         // 5. Устанавливаем регистры согласно спецификации DOS для .COM:
         //    - Все сегменты = 0 (включая PSP)

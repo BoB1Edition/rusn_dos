@@ -74,11 +74,8 @@ impl App {
         );
         Self::default()
     }
-    pub fn run(&self, program: PathBuf) -> Result<(), Box<dyn Error>> {
-        /*let data = fs::read(program)?;
-        let dos = DosExecutable::from(data)?;
-        let mut dm = dos.exec()?;*/
-        let mut dm = loader::load_executable(program)?;
+    pub fn run(&self, program: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
+        let mut dm = loader::load_executable(program, no_log)?;
         dm.run();
         Ok(())
     }

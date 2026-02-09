@@ -20,15 +20,15 @@ pub fn detect_executable_type(path: &PathBuf) -> ExecutableType {
     }
 }
 
-pub fn load_executable(path: PathBuf) -> Result<DosMachine, Box<dyn std::error::Error>> {
+pub fn load_executable(path: PathBuf, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
     match detect_executable_type(&path) {
         ExecutableType::Com => {
             let loader = com_loader::ComLoader::from_file(&path)?;
-            loader.exec()
+            loader.exec(no_log)
         }
         ExecutableType::Exe => {
             let loader = exe_loader::ExeLoader::from_file(&path)?;
-            loader.exec()
+            loader.exec(no_log)
         }
     }
 }

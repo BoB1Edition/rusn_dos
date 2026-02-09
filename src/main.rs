@@ -15,6 +15,8 @@ struct Cli {
     /// optional config path
     #[arg(short, long, default_value = "config.toml")]
     config: PathBuf,
+    #[arg(long, default_value = "false")]
+    no_log: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -48,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>>{
             Commands::Run { program, workdir } => {
                 let _ = set_workdir(&workdir);
                 if program.exists() && program.is_file() {
-                    run_program(program, cli.config)?;
+                    run_program(program, cli.config, false)?;
                 } else {
                     info!("program not found or program not a file");
                 }
@@ -60,10 +62,9 @@ fn main() -> Result<(), Box<dyn Error>>{
     Ok(())
 }
 
-fn run_program(program: PathBuf, config: PathBuf) -> Result<(), Box<dyn Error>> {
+fn run_program(program: PathBuf, config: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
     let app = app::App::load_from_file(config);
-    app.run(program)?;
-
+    app.run(program, no_log)?;
     Ok(())
 }
 

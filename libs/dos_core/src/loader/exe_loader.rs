@@ -1,5 +1,5 @@
 // Ver: 1
-use crate::{DosMachine, loader::exe_header::MzHeader, memory::Memory, registers::Registers};
+use crate::{DosMachine, loader::exe_header::MzHeader, memory::Memory};
 use std::fs::File;
 
 pub struct ExeLoader {
@@ -65,7 +65,7 @@ impl ExeLoader {
         })
     }
 
-    pub fn exec(self) -> Result<DosMachine, Box<dyn std::error::Error>> {
+    pub fn exec(self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
         const LOAD_SEGMENT: u16 = 0x1000; // Базовый сегмент загрузки
         const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10; // PSP на 256 байт ниже кода
 
@@ -89,8 +89,15 @@ impl ExeLoader {
         // 4. Применяем релокации
         self.apply_relocations(&mut memory, LOAD_SEGMENT);
 
+        let logfile = if no_log {
+            File::create("/dev/null")?  // Unix
+            // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
+        } else {
+            File::create("logopcode.txt")?
+        };
+
         // 5. Инициализируем машину
-        let mut machine = DosMachine::new_with_memory(memory, File::create("logopcode_exe.txt")?);
+        let mut machine = DosMachine::new_with_memory(memory, logfile);
 
         // 6. Устанавливаем регистры СОГЛАСНО СПЕЦИФИКАЦИИ DOS ДЛЯ .EXE:
         //    - CS:IP = заголовок (смещение от LOAD_SEGMENT)
