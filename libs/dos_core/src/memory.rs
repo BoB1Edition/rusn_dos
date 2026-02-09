@@ -1,4 +1,4 @@
-// Ver: 5
+// Ver: 6
 
 use std::ops::{Index, IndexMut};
 

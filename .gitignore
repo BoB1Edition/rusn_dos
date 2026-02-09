@@ -6,3 +6,4 @@
 !*.asm
 *.todo
 opcodes
+libs/dos_core/src/loader/com.rs

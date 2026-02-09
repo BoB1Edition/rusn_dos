@@ -1,3 +1,4 @@
+// Ver: 3
 #[derive(Debug, Clone, Default)]
 pub struct MzHeader {
     // Стандартная (повсеместная) часть заголовка

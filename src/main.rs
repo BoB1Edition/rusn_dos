@@ -1,3 +1,4 @@
+// Ver: 1
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};

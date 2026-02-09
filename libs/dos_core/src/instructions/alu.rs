@@ -1,7 +1,7 @@
-// Ver: 3
+// Ver: 5
 use log::error;
 
-use crate::{machine::DosMachine, modrm::ModRm};
+use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub fn xor(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
@@ -28,7 +28,7 @@ pub fn xor(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_reg8(modrm.reg_field, result);
     machine
         .registers
-        .set_flags(DosMachine::compute_logical_flags_u8(result));
+        .set_flags(flags::compute_logical_flags_u8(result));
     machine.log_instruction(csip, &bytes).ok();
 }
 pub fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
@@ -61,7 +61,7 @@ pub fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_reg8(modrm.rm_field, result);
     machine
         .registers
-        .set_flags(DosMachine::compute_flags_u8(result, cf, of, af));
+        .set_flags(flags::compute_flags_u8(result, cf, of, af));
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -104,12 +104,12 @@ fn group_x80_operation_registry(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = (res >> 8) != 0;
             let af = ((src_val & 0x0F) + (imm & 0x0F)) > 0x0F;
             let of = (((src_val ^ imm) & 0x80) == 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, DosMachine::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(result, cf, of, af))
         }
         1 => {
             // OR r8, imm8
             let result = src_val | imm;
-            (result, DosMachine::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(result))
         }
         2 => {
             // ADC r8, imm8
@@ -122,7 +122,7 @@ fn group_x80_operation_registry(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = (res >> 8) != 0;
             let af = ((src_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
             let of = (((src_val ^ imm) & 0x80) == 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, DosMachine::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(result, cf, of, af))
         }
         3 => {
             // SBB r8, imm8
@@ -134,12 +134,12 @@ fn group_x80_operation_registry(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let result = res as u8;
             let af = (src_val & 0x0F) < (imm & 0x0F) + if borrow_in { 1 } else { 0 };
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, DosMachine::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(result, cf, of, af))
         }
         4 => {
             // AND r8, imm8
             let result = src_val & imm;
-            (result, DosMachine::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(result))
         }
         5 => {
             // SUB r8, imm8
@@ -148,12 +148,12 @@ fn group_x80_operation_registry(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = src_val < imm;
             let af = (src_val & 0x0F) < (imm & 0x0F);
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, DosMachine::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(result, cf, of, af))
         }
         6 => {
             // XOR r8, imm8
             let result = src_val ^ imm;
-            (result, DosMachine::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(result))
         }
         7 => {
             // CMP r8, imm8 — как SUB, но не сохраняем результат
@@ -162,7 +162,7 @@ fn group_x80_operation_registry(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = src_val < imm;
             let af = (src_val & 0x0F) < (imm & 0x0F);
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            let flags = DosMachine::compute_flags_u8(result, cf, of, af);
+            let flags = flags::compute_flags_u8(result, cf, of, af);
             machine.registers.set_flags(flags);
             return; // выход без записи результата
         }
@@ -246,7 +246,7 @@ pub fn sub_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_reg16(modrm.reg_field, result);
         machine
             .registers
-            .set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
+            .set_flags(flags::compute_flags_u16(result, cf, of, af));
     } else {
         log::error!("Memory operand in SUB r16, r/m16 not supported yet");
         machine.halted = true;
@@ -289,7 +289,7 @@ fn do_add_16(machine: &mut DosMachine, dst_reg: u8, src_value: u16) {
     machine.write_reg16(dst_reg, result);
     machine
         .registers
-        .set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
+        .set_flags(flags::compute_flags_u16(result, cf, of, af));
 }
 
 pub fn cmp_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
@@ -315,7 +315,7 @@ pub fn cmp_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let af = (dst_val & 0x0F) < (src_val & 0x0F);
     let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
 
-    machine.registers.set_flags(DosMachine::compute_flags_u16(result, cf, of, af));
+    machine.registers.set_flags(flags::compute_flags_u16(result, cf, of, af));
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -485,11 +485,11 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = res > 0xFFFF;
             let af = ((dst_val & 0x0F) + (imm & 0x0F)) > 0x0F;
             let of = (((dst_val ^ imm) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
-            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(result, cf, of, af))
         }
         1 => { // OR r/m16, imm8
             let result = dst_val | imm;
-            (result, DosMachine::compute_logical_flags_u16(result))
+            (result, flags::compute_logical_flags_u16(result))
         }
         2 => { // ADC r/m16, imm8
             let carry_in = (flags & 1) != 0;
@@ -501,7 +501,7 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = res > 0xFFFF;
             let af = ((dst_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
             let of = (((dst_val ^ imm) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
-            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(result, cf, of, af))
         }
         3 => { // SBB r/m16, imm8
             let borrow_in = (flags & 1) != 0;
@@ -511,11 +511,11 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let result = res as u16;
             let af = (dst_val & 0x0F) < ((imm & 0x0F) + if borrow_in { 1 } else { 0 });
             let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(result, cf, of, af))
         }
         4 => { // AND r/m16, imm8
             let result = dst_val & imm;
-            (result, DosMachine::compute_logical_flags_u16(result))
+            (result, flags::compute_logical_flags_u16(result))
         }
         5 => { // SUB r/m16, imm8
             let res = (dst_val as u32).wrapping_sub(imm as u32);
@@ -523,11 +523,11 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = dst_val < imm;
             let af = (dst_val & 0x0F) < (imm & 0x0F);
             let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(result, cf, of, af))
         }
         6 => { // XOR r/m16, imm8
             let result = dst_val ^ imm;
-            (result, DosMachine::compute_logical_flags_u16(result))
+            (result, flags::compute_logical_flags_u16(result))
         }
         7 => { // CMP r/m16, imm8 — как SUB, но не сохраняем результат
             let res = (dst_val as u32).wrapping_sub(imm as u32);
@@ -535,7 +535,7 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = dst_val < imm;
             let af = (dst_val & 0x0F) < (imm & 0x0F);
             let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-            let flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            let flags = flags::compute_flags_u16(result, cf, of, af);
             (dst_val, flags) // Возвращаем исходное значение (не сохраняем результат)
         }
         _ => unreachable!(),
@@ -593,7 +593,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             let msb_before = (value >> 15) != 0;
             let msb_after = (result >> 15) != 0;
             let of = if count == 1 { msb_before != msb_after } else { false };
-            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(result, cf, of, af);
             result
         }
         1 => { // ROR
@@ -602,7 +602,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             let lsb_before = (value & 1) != 0;
             let msb_after = (result >> 15) != 0;
             let of = if count == 1 { lsb_before != msb_after } else { false };
-            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(result, cf, of, af);
             result
         }
         2 => { // RCL
@@ -614,7 +614,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             let msb_before = (value >> 15) != 0;
             let msb_after = (result >> 15) != 0;
             let of = if count == 1 { msb_before != msb_after } else { false };
-            new_flags = DosMachine::compute_flags_u16(result, new_cf, of, af);
+            new_flags = flags::compute_flags_u16(result, new_cf, of, af);
             result
         }
         3 => { // RCR
@@ -630,7 +630,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = DosMachine::compute_flags_u16(result, new_cf, of, af);
+            new_flags = flags::compute_flags_u16(result, new_cf, of, af);
             result
         }
         4 | 6 => { // SHL / SAL (одинаково)
@@ -645,7 +645,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(result, cf, of, af);
             result
         }
         5 => { // SHR
@@ -657,7 +657,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(result, cf, of, af);
             result
         }
         7 => { // SAR
@@ -669,7 +669,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
                 (value >> (count - 1)) & 1 != 0
             };
             let of = false; // OF cleared for SAR
-            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(result, cf, of, af);
             result
         }
         _ => unreachable!(),

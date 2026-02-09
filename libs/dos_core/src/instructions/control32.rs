@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 4
 use crate::{DosMachine, instructions::control, modrm::ModRm};
 
 pub fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {

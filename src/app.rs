@@ -1,8 +1,9 @@
+// Ver: 1
 use std::{
     error::Error, fs, path::PathBuf
 };
 
-use dos_core::DosExecutable;
+use dos_core::loader;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -74,9 +75,10 @@ impl App {
         Self::default()
     }
     pub fn run(&self, program: PathBuf) -> Result<(), Box<dyn Error>> {
-        let data = fs::read(program)?;
+        /*let data = fs::read(program)?;
         let dos = DosExecutable::from(data)?;
-        let mut dm = dos.exec()?;
+        let mut dm = dos.exec()?;*/
+        let mut dm = loader::load_executable(program)?;
         dm.run();
         Ok(())
     }

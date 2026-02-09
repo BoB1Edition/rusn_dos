@@ -1,14 +1,10 @@
-// Ver: 12
+// Ver: 14
 use std::{fs::File, io::Write};
 
 use log::error;
 
 use crate::{
-    instructions::{
-        alu, alu32, control, control32, extended, extended32, mov, mov32, stack, system,
-    },
-    memory::Memory,
-    modrm::ModRm,
+    interrupts, memory::Memory, registers::Registers
 };
 
 #[derive(Debug)]
@@ -126,61 +122,6 @@ impl DosMachine {
         }
     }
 
-    #[inline]
-    fn compute_flags_impl(value: u32, width_bits: u32, cf: bool, of: bool, af: bool) -> u16 {
-        let mut flags = 0u16;
-        if value == 0 {
-            flags |= 1 << 6; // ZF
-        }
-        let sign_bit = 1u32 << (width_bits - 1);
-        if (value & sign_bit) != 0 {
-            flags |= 1 << 7; // SF
-        }
-        if (value as u8).count_ones() % 2 == 0 {
-            flags |= 1 << 2; // PF
-        }
-        if cf {
-            flags |= 1 << 0;
-        } // CF
-        if of {
-            flags |= 1 << 11;
-        } // OF
-        if af {
-            flags |= 1 << 4;
-        } // AF
-        flags
-    }
-
-    #[inline]
-    pub fn compute_flags_u8(result: u8, cf: bool, of: bool, af: bool) -> u16 {
-        Self::compute_flags_impl(result as u32, 8, cf, of, af)
-    }
-
-    #[inline]
-    pub fn compute_flags_u16(result: u16, cf: bool, of: bool, af: bool) -> u16 {
-        Self::compute_flags_impl(result as u32, 16, cf, of, af)
-    }
-
-    #[inline]
-    pub fn compute_flags_u32(result: u32, cf: bool, of: bool, af: bool) -> u16 {
-        Self::compute_flags_impl(result, 32, cf, of, af)
-    }
-
-    // Логические операции (CF=0, OF=0)
-    #[inline]
-    pub fn compute_logical_flags_u8(result: u8) -> u16 {
-        Self::compute_flags_u8(result, false, false, false)
-    }
-
-    #[inline]
-    pub fn compute_logical_flags_u16(result: u16) -> u16 {
-        Self::compute_flags_u16(result, false, false, false)
-    }
-
-    #[inline]
-    pub fn compute_logical_flags_u32(result: u32) -> u16 {
-        Self::compute_flags_u32(result, false, false, false)
-    }
     pub fn log_instruction(&mut self, csip: [u16; 2], bytes: &[u8]) -> std::io::Result<()> {
         let hex_bytes: Vec<String> = bytes.iter().map(|b| format!("{:02X}", b)).collect();
         writeln!(
@@ -190,50 +131,6 @@ impl DosMachine {
             csip[1],
             hex_bytes.join(" ")
         )
-    }
-
-    fn execute_0f(&mut self, opcode: u8) {
-        let mut full_bytes = Vec::new();
-
-        if self.has_operand_size_prefix {
-            full_bytes.push(0x66);
-        }
-        if self.has_address_size_prefix {
-            full_bytes.push(0x67);
-        }
-
-        if let Some(oos) = self.opcode_override_segment {
-            full_bytes.push(oos);
-        }
-
-        full_bytes.push(0x0F);
-        full_bytes.push(opcode);
-        match opcode {
-            0x01 => {
-                control::smsw(self, &full_bytes);
-            }
-            0xA1 => {
-                stack::pop_fs(self);
-                self.log_instruction([self.registers.cs(), self.registers.ip()], &full_bytes)
-                    .ok();
-            }
-            0xB7 => {
-                if self.has_operand_size_prefix {
-                    extended::movzx_r16_rm16(self, &full_bytes);
-                } else {
-                    extended32::movzx_r32_rm16(self, &full_bytes);
-                }
-            }
-            _ => {
-                error!(
-                    "Unsupported opcode0f {:#02X} at CS:IP = {:#04x}:{:#04x}",
-                    opcode,
-                    self.registers.cs(),
-                    self.registers.ip()
-                );
-                self.halted = true;
-            }
-        }
     }
 
     pub fn print_error_exit(&mut self, opcode: u8) {
@@ -271,378 +168,14 @@ impl DosMachine {
         self.opcode_override_segment = None;
     }
 
-    fn execute(&mut self, opcode: u8) {
-        let mut full_bytes = Vec::new();
-
-        if self.has_operand_size_prefix {
-            full_bytes.push(0x66);
-        }
-        if self.has_address_size_prefix {
-            full_bytes.push(0x67);
-        }
-        if let Some(oos) = self.opcode_override_segment {
-            full_bytes.push(oos);
-        }
-        full_bytes.push(opcode);
-        let csip = [self.registers.cs(), self.registers.ip()];
-        match opcode {
-            0x2B => {
-                if self.has_operand_size_prefix {
-                    alu32::sub_r32_rm32(self, &full_bytes);
-                } else {
-                    alu::sub_r16_rm16(self, &full_bytes);
-                }
-            }
-            0xB4 => {
-                mov::mov_ah(self, &full_bytes);
-            }
-            0xB2 => {
-                mov::mov_dl(self, &full_bytes);
-            }
-            0xA0 => {
-                if self.has_address_size_prefix {
-                    // 32-битный адрес: MOV AL, [addr32]
-                    mov::mov_al_address32(self, &full_bytes);
-                } else {
-                    // 16-битный адрес: MOV AL, [addr16]
-                    mov::mov_al_address16(self, &full_bytes);
-                }
-            }
-            0xB8 => {
-                if self.has_operand_size_prefix {
-                    mov32::mov_eax_data(self, &full_bytes);
-                } else {
-                    mov::mov_ax(self, &full_bytes);
-                }
-            }
-            0xBA => {
-                if !self.has_operand_size_prefix {
-                    mov::mov_dx(self, &full_bytes);
-                } else {
-                    mov32::mov_edx_data(self, &full_bytes);
-                }
-            }
-            0xBB => {
-                if self.has_operand_size_prefix {
-                    mov32::mov_ebx_data(self, &full_bytes);
-                } else {
-                    mov::mov_bx(self, &full_bytes);
-                }
-            }
-            0x8B => {
-                if self.has_operand_size_prefix {
-                    mov32::mov_r32_rm32(self, &full_bytes);
-                } else {
-                    mov::mov_r16_rm16(self, &full_bytes);
-                }
-            }
-            0x1f => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::pop_ds(self);
-            }
-
-            0x58 => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::pop_ax(self);
-            }
-
-            0x53 => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::push_bx(self);
-            }
-
-            0x0E => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::push_cs(self);
-            }
-            0x50 => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::push_ax(self);
-            }
-            0x9C => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::pushf(self);
-            }
-            0xA3 => {
-                if self.has_operand_size_prefix {
-                    mov32::mov_address_eax(self, &full_bytes);
-                } else {
-                    self.print_error_exit(opcode);
-                }
-            }
-            0x04 => {
-                alu::add_al_imm8(self, &full_bytes);
-            }
-            0x05 => {
-                if self.has_operand_size_prefix {
-                    alu32::add_eax_imm32(self, &full_bytes);
-                } else {
-                    alu::add_ax_imm16(self, &full_bytes);
-                }
-            }
-            0x87 => {
-                if self.has_operand_size_prefix {
-                    alu32::xchg_rm32_r32(self, &full_bytes);
-                } else {
-                    alu::xchg_rm16_r16(self, &full_bytes);
-                }
-            }
-            0xD1 => {
-                if self.has_operand_size_prefix {
-                    alu32::shift_group_d1_32(self, &full_bytes);
-                } else {
-                    alu::shift_group_d1(self, &full_bytes);
-                }
-            }
-            0xC1 => {
-                if self.has_operand_size_prefix {
-                    alu32::shift_group_c1_32(self, &full_bytes);
-                } else {
-                    alu::shift_group_c1_16(self, &full_bytes);
-                }
-            }
-            0x8C => {
-                mov::mov_rm16_sreg(self, &full_bytes);
-            }
-
-            0xE8 => {
-                if self.has_operand_size_prefix {
-                    control32::call32(self, &full_bytes);
-                } else {
-                    control::call(self, &full_bytes);
-                }
-            }
-            0x8A => {
-                mov::mov_r8_rm8(self, &full_bytes);
-            }
-            0x72 => {
-                control::jb(self, &full_bytes);
-            }
-            0xFC => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                self.registers.set_flags(self.registers.flags() & !0x0400);
-            }
-            0xC3 => {
-                if self.has_operand_size_prefix {
-                    control32::retn32(self, &full_bytes);
-                } else {
-                    control::retn(self, &full_bytes);
-                }
-            }
-            0xC7 => {
-                if self.has_operand_size_prefix {
-                    mov32::mov_rm32_imm32(self, &full_bytes);
-                } else {
-                    mov::mov_rm16_imm16(self, &full_bytes);
-                }
-            }
-            0x32 => {
-                alu::xor(self, &full_bytes);
-            }
-            0x74 => {
-                control::jz(self, &full_bytes);
-            }
-            0x9D => {
-                let _ = self.log_instruction(csip, &full_bytes);
-                stack::popf(self);
-            }
-            0x77 => {
-                control::ja(self, &full_bytes);
-            }
-            0x80 => {
-                alu::group_x80(self, &full_bytes);
-            }
-            0xCD => {
-                system::int(self, &full_bytes);
-            }
-            0x00 => {
-                alu::add_rm8_r8(self, &full_bytes);
-            }
-            0xFA => {
-                self.log_instruction(csip, &full_bytes).ok();
-                self.registers.set_flags(self.registers.flags() & !0x0200);
-            }
-            0xFB => {
-                self.log_instruction(csip, &full_bytes).ok();
-                self.registers.set_flags(self.registers.flags() | 0x0200);
-            }
-
-            0xFF => {
-                let modrm_byte = self.read_u8(self.registers.cs(), self.registers.ip());
-                //self.registers.step(None);
-                //full_bytes.push(modrm_byte);
-                let modrm = ModRm::from_byte(modrm_byte);
-                match modrm.reg_field {
-                    2 => {
-                        // CALL r/m16/32
-                        if self.has_operand_size_prefix {
-                            control32::call_rm32(self, &full_bytes);
-                        } else {
-                            control::call_rm16(self, &full_bytes);
-                        }
-                    }
-                    4 => {
-                        // JMP r/m16/r/m32
-                        if self.has_operand_size_prefix {
-                            control32::jmp_rm32(self, &full_bytes);
-                        } else {
-                            control::jmp_rm16(self, &full_bytes);
-                        }
-                    }
-                    _ => {
-                        self.print_error_exit(opcode);
-                    }
-                }
-            }
-
-            0x09 => {
-                if self.has_operand_size_prefix {
-                    alu32::or(self, &full_bytes);
-                } else {
-                    self.print_error_exit(opcode);
-                }
-            }
-            0x3B => {
-                if self.has_operand_size_prefix {
-                    alu32::cmp_r32_rm32(self, &full_bytes);
-                } else {
-                    alu::cmp_r16_rm16(self, &full_bytes);
-                }
-            }
-            0x89 => {
-                if !self.has_operand_size_prefix {
-                    mov::mov_rm16_r16(self, &full_bytes);
-                } else {
-                    mov32::mov_rm32_r32(self, &full_bytes);
-                }
-            }
-            0x01 => {
-                if self.has_operand_size_prefix {
-                    alu32::add_rm32_r32(self, &full_bytes);
-                } else {
-                    alu::add_rm16_r16(self, &full_bytes);
-                }
-            }
-            0x83 => {
-                if self.has_operand_size_prefix {
-                    alu32::group_x83_rm32(self, &full_bytes);
-                } else {
-                    alu::group_x83_rm16(self, &full_bytes);
-                }
-            }
-            0x03 => {
-                if self.has_operand_size_prefix {
-                    alu32::add_r32_rm32(self, &full_bytes);
-                } else {
-                    alu::add_r16_rm16(self, &full_bytes);
-                }
-            }
-            0xE2 => {
-                control::loop_cx(self, &full_bytes);
-            }
-            0x06 => {
-                let es = self.registers.es();
-                self.registers.set_sp(self.registers.sp().wrapping_sub(2));
-                self.write_u16(self.registers.ss(), self.registers.sp(), es);
-                self.log_instruction(csip, &full_bytes).ok();
-            }
-            0x8E => {
-                mov::mov_sreg_rm16(self, &full_bytes);
-            }
-            _ => {
-                self.print_error_exit(opcode);
-            }
-        }
-    }
     pub fn run(&mut self) -> Option<u8> {
-        while !self.halted {
-            let opcode = self.read_u8(self.registers.cs(), self.registers.ip());
-            self.registers.step(None);
-            match opcode {
-                0x67 => {
-                    self.has_address_size_prefix = true;
-                }
-                0x66 => {
-                    self.has_operand_size_prefix = true;
-                }
-                0x0F => {
-                    self.has_extended_prefix = true;
-                }
-                0x26 => {
-                    self.override_segment = Some(self.registers.es());
-                    self.opcode_override_segment = Some(opcode);
-                } // ES:
-                0x2E => {
-                    self.override_segment = Some(self.registers.cs());
-                    self.opcode_override_segment = Some(opcode);
-                } // CS:
-                0x36 => {
-                    self.override_segment = Some(self.registers.ss());
-                    self.opcode_override_segment = Some(opcode);
-                } // SS:
-                0x3E => {
-                    self.override_segment = Some(self.registers.ds());
-                    self.opcode_override_segment = Some(opcode);
-                } // DS:
-                _ => {
-                    if self.has_extended_prefix {
-                        self.execute_0f(opcode);
-                    } else {
-                        self.execute(opcode);
-                    }
-                    self.has_address_size_prefix = false;
-                    self.has_operand_size_prefix = false;
-                    self.has_extended_prefix = false;
-                    self.override_segment = None;
-                    self.opcode_override_segment = None;
-                }
-            }
-        }
-        let exit_code = Some(self.registers.al());
-        return exit_code;
+        crate::executor::run(self)
     }
+
     pub fn handle_int21(&mut self) {
-        match self.registers.ah() {
-            0x02 => self.print_char(),
-            0x06 => self.direct_console_io(),
-            0x09 => self.print_dos_string(),
-            0x4A => {
-                let requested_paragraphs = self.registers.bx();
-                const MAX_CONVENTIONAL_MEMORY_PARAGRAPHS: u16 = 0xA000; // 640 КБ = 0xA000 параграфов
-                if requested_paragraphs <= MAX_CONVENTIONAL_MEMORY_PARAGRAPHS {
-                    let mut flags = self.registers.flags();
-                    flags &= !(1 << 0);
-                    self.registers.set_flags(flags);
-                } else {
-                    let mut flags = self.registers.flags();
-                    flags |= 1 << 0;
-                    self.registers.set_flags(flags);
-                    self.registers.set_ax(0x08);
-                }
-            }
-            0x4C => {
-                self.halted = true;
-            }
-            _ => panic!("Unsupported DOS call AH={:#02x}", self.registers.ah()),
-        }
+        interrupts::dos::handle_int21(self);
     }
-    fn print_dos_string(&self) {
-        let mut addr = ((self.registers.ds() as u32) << 4).wrapping_add(self.registers.dx() as u32);
-        let mut s = String::new();
-        loop {
-            if addr >= self.memory.len() as u32 {
-                log::error!("string not contains '$'");
-                return;
-            }
-            let byte = self.memory.read_u8(addr);
-            if byte == b'$' {
-                break;
-            }
-            s.push(byte as char);
-            addr = addr.wrapping_add(1);
-        }
-        println!("{}", s);
-    }
+
     #[inline(always)]
     pub fn read_u8(&self, default_segment: u16, offset: u16) -> u8 {
         let segment = self.override_segment.unwrap_or(default_segment);
@@ -763,6 +296,57 @@ impl DosMachine {
             let mut flags = self.registers.flags();
             flags &= !(1 << 6); // ZF = 0
             self.registers.set_flags(flags);
+        }
+    }
+    pub fn handle_int2f(&mut self) {
+        interrupts::dos::handle_int2f(self);
+    }
+
+    fn open_file(&mut self) {
+        // AL = режим доступа (биты 0-2: 0=только чтение, 1=только запись, 2=чтение+запись)
+        let access_mode = self.registers.al() & 0x07;
+
+        // DS:DX = указатель на строку с именем файла (заканчивается нулём)
+        let mut addr = ((self.registers.ds() as u32) << 4).wrapping_add(self.registers.dx() as u32);
+        let mut filename = String::new();
+        loop {
+            if addr >= self.memory.len() as u32 {
+                log::error!("Filename string exceeds memory bounds");
+                break;
+            }
+            let byte = self.memory.read_u8(addr);
+            if byte == 0 {
+                break;
+            }
+            filename.push(byte as char);
+            addr = addr.wrapping_add(1);
+        }
+
+        log::warn!(
+            "INT 21h / AH=3Dh: Open file '{}' (mode={}) — not fully implemented",
+            filename,
+            access_mode
+        );
+
+        // Возвращаем фиктивный дескриптор файла (5 = первый доступный после стандартных: 0=stdin, 1=stdout, 2=stderr, 3=AUX, 4=PRN)
+        // CF=0 (успех), AX=дескриптор
+        let mut flags = self.registers.flags();
+        flags &= !(1 << 0); // CF = 0
+        self.registers.set_flags(flags);
+        self.registers.set_ax(5); // фиктивный дескриптор
+    }
+
+    pub fn new_with_memory(memory: Memory, logfile: File) -> Self {
+        Self {
+            memory,
+            registers: Registers::default(),
+            halted: false,
+            logfile,
+            has_address_size_prefix: false,
+            has_operand_size_prefix: false,
+            has_extended_prefix: false,
+            override_segment: None,
+            opcode_override_segment: None,
         }
     }
 }
