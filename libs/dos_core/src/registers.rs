@@ -15,6 +15,7 @@ pub struct Registers {
     ds: u16,
     es: u16,
     ss: u16,
+    fs: u16,
     flags: u16,
     eflags: u16,
     rflags: u32,
@@ -290,5 +291,13 @@ impl Registers {
 
     pub fn set_flags(&mut self, flags: u16) {
         self.flags = flags;
+    }
+
+    pub fn fs(&self) -> u16 {
+        self.fs
+    }
+
+    pub fn set_fs(&mut self, fs: u16) {
+        self.fs = fs;
     }
 }

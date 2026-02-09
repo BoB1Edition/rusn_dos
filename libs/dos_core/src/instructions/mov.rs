@@ -12,6 +12,16 @@ pub fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None);
 }
 
+pub fn mov_dl(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    let imm = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    bytes.push(imm);
+    machine.log_instruction(csip, &bytes).ok();
+    machine.registers.set_dl(imm);
+    machine.registers.step(None);
+}
+
 pub fn mov_ax(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
@@ -176,5 +186,62 @@ pub fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
         }
     }
 
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg8(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u8(addr)
+    };
+    machine.write_reg8(modrm.reg_field, src_val);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+pub fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Проверка подоперации: только /0 допустимо для опкода 0xC7
+    if modrm.reg_field != 0 {
+        log::error!("Invalid reg_field {} for opcode 0xC7", modrm.reg_field);
+        machine.halted = true;
+        return;
+    }
+    
+    // Чтение непосредственного значения
+    let imm16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2));
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    
+    if modrm.is_register_mode() {
+        // MOV reg16, imm16
+        machine.write_reg16(modrm.rm_field, imm16);
+    } else {
+        // MOV [addr], imm16
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.write_phys_u16(addr, imm16);
+    }
+    
     machine.log_instruction(csip, &bytes).ok();
 }

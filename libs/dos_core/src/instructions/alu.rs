@@ -375,3 +375,304 @@ pub fn add_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_al(result8);
     machine.log_instruction(csip, &bytes).ok();
 }
+
+// libs/dos_core/src/instructions/alu.rs
+pub fn add_ax_imm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2));
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    
+    let ax = machine.registers.ax();
+    let res = (ax as u32) + (imm16 as u32);
+    let result = res as u16;
+    
+    // Установка флагов
+    let cf = res > 0xFFFF;
+    let zf = result == 0;
+    let sf = (result & 0x8000) != 0;
+    let af = ((ax & 0x0F) + (imm16 & 0x0F)) > 0x0F;
+    let pf = result.count_ones() % 2 == 0;
+    let of = (((ax ^ imm16) & 0x8000) == 0) && ((ax ^ result) & 0x8000) != 0;
+    
+    let mut flags = 0u16;
+    if cf { flags |= 1 << 0; }
+    if pf { flags |= 1 << 2; }
+    if af { flags |= 1 << 4; }
+    if zf { flags |= 1 << 6; }
+    if sf { flags |= 1 << 7; }
+    if of { flags |= 1 << 11; }
+    machine.registers.set_flags(flags);
+    
+    machine.registers.set_ax(result);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu.rs
+pub fn shift_group_d1(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // продвигаем только на байт ModR/M
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    if modrm.is_register_mode() {
+        // ROL/ROR/RCL/RCR/SHL/SHR/SAR reg16, 1
+        let value = machine.read_reg16(modrm.rm_field);
+        let (result, new_flags) = perform_shift_16(modrm.reg_field, value, 1, machine.registers.flags());
+        machine.write_reg16(modrm.rm_field, result);
+        machine.registers.set_flags(new_flags);
+    } else {
+        // ROL/ROR/RCL/RCR/SHL/SHR/SAR [mem], 1
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let value = machine.read_phys_u16(addr);
+        let (result, new_flags) = perform_shift_16(modrm.reg_field, value, 1, machine.registers.flags());
+        machine.write_phys_u16(addr, result);
+        machine.registers.set_flags(new_flags);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu.rs
+pub fn group_x83_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let imm8 = machine.read_u8(
+        machine.registers.cs(),
+        machine.registers.ip().wrapping_add(1),
+    );
+    machine.registers.step(Some(2));
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    bytes.push(imm8);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Расширяем imm8 до i8, затем до i16 со знаком (sign-extend)
+    let imm16 = (imm8 as i8) as i16 as u16;
+    
+    if modrm.is_register_mode() {
+        // Операция над регистром
+        let dst_val = machine.read_reg16(modrm.rm_field);
+        let (result, flags) = perform_group_x83_operation_16(modrm.reg_field, dst_val, imm16, machine.registers.flags());
+        if modrm.reg_field != 7 { // CMP (reg_field=7) не сохраняет результат
+            machine.write_reg16(modrm.rm_field, result);
+        }
+        machine.registers.set_flags(flags);
+    } else {
+        // Операция над памятью
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u16(addr);
+        let (result, flags) = perform_group_x83_operation_16(modrm.reg_field, dst_val, imm16, machine.registers.flags());
+        if modrm.reg_field != 7 { // CMP не сохраняет результат
+            machine.write_phys_u16(addr, result);
+        }
+        machine.registers.set_flags(flags);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u16) -> (u16, u16) {
+    match op_field {
+        0 => { // ADD r/m16, imm8 (sign-extended)
+            let res = dst_val as u32 + imm as u32;
+            let result = res as u16;
+            let cf = res > 0xFFFF;
+            let af = ((dst_val & 0x0F) + (imm & 0x0F)) > 0x0F;
+            let of = (((dst_val ^ imm) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
+            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+        }
+        1 => { // OR r/m16, imm8
+            let result = dst_val | imm;
+            (result, DosMachine::compute_logical_flags_u16(result))
+        }
+        2 => { // ADC r/m16, imm8
+            let carry_in = (flags & 1) != 0;
+            let mut res = dst_val as u32 + imm as u32;
+            if carry_in {
+                res += 1;
+            }
+            let result = res as u16;
+            let cf = res > 0xFFFF;
+            let af = ((dst_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
+            let of = (((dst_val ^ imm) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
+            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+        }
+        3 => { // SBB r/m16, imm8
+            let borrow_in = (flags & 1) != 0;
+            let imm_with_borrow = imm as u32 + if borrow_in { 1 } else { 0 };
+            let cf = (dst_val as u32) < imm_with_borrow;
+            let res = (dst_val as u32).wrapping_sub(imm_with_borrow);
+            let result = res as u16;
+            let af = (dst_val & 0x0F) < ((imm & 0x0F) + if borrow_in { 1 } else { 0 });
+            let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
+            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+        }
+        4 => { // AND r/m16, imm8
+            let result = dst_val & imm;
+            (result, DosMachine::compute_logical_flags_u16(result))
+        }
+        5 => { // SUB r/m16, imm8
+            let res = (dst_val as u32).wrapping_sub(imm as u32);
+            let result = res as u16;
+            let cf = dst_val < imm;
+            let af = (dst_val & 0x0F) < (imm & 0x0F);
+            let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
+            (result, DosMachine::compute_flags_u16(result, cf, of, af))
+        }
+        6 => { // XOR r/m16, imm8
+            let result = dst_val ^ imm;
+            (result, DosMachine::compute_logical_flags_u16(result))
+        }
+        7 => { // CMP r/m16, imm8 — как SUB, но не сохраняем результат
+            let res = (dst_val as u32).wrapping_sub(imm as u32);
+            let result = res as u16;
+            let cf = dst_val < imm;
+            let af = (dst_val & 0x0F) < (imm & 0x0F);
+            let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
+            let flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            (dst_val, flags) // Возвращаем исходное значение (не сохраняем результат)
+        }
+        _ => unreachable!(),
+    }
+}
+
+pub fn shift_group_c1_16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let imm8 = machine.read_u8(
+        machine.registers.cs(),
+        machine.registers.ip().wrapping_add(1),
+    );
+    machine.registers.step(Some(2));
+    bytes.push(modrm_byte);
+    bytes.push(imm8);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    let (value, addr_opt) = if modrm.is_register_mode() {
+        (machine.read_reg16(modrm.rm_field), None)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        (machine.read_phys_u16(addr), Some(addr))
+    };
+    
+    let (result, new_flags) = perform_shift_16(modrm.reg_field, value, imm8, machine.registers.flags());
+    
+    if let Some(addr) = addr_opt {
+        // Запись обратно в память
+        machine.write_phys_u16(addr, result);
+    } else {
+        // Запись в регистр
+        machine.write_reg16(modrm.rm_field, result);
+    }
+    
+    machine.registers.set_flags(new_flags);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u16) {
+    let count = count & 0x0F; // x86: count mod 16 для 16-битных операций
+    if count == 0 {
+        return (value, flags);
+    }
+    let mut new_flags = flags;
+    let af = false; // AF не определён для сдвигов
+    let result = match op_field {
+        0 => { // ROL
+            let result = value.rotate_left(count as u32);
+            let cf = (result & 1) != 0;
+            let msb_before = (value >> 15) != 0;
+            let msb_after = (result >> 15) != 0;
+            let of = if count == 1 { msb_before != msb_after } else { false };
+            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            result
+        }
+        1 => { // ROR
+            let result = value.rotate_right(count as u32);
+            let cf = (result >> 15) != 0;
+            let lsb_before = (value & 1) != 0;
+            let msb_after = (result >> 15) != 0;
+            let of = if count == 1 { lsb_before != msb_after } else { false };
+            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            result
+        }
+        2 => { // RCL
+            let carry_in = (flags & 1) != 0;
+            let input = (value as u32) | ((carry_in as u32) << 16);
+            let rotated = input.rotate_left(count as u32);
+            let result = rotated as u16;
+            let new_cf = (rotated >> 16) != 0;
+            let msb_before = (value >> 15) != 0;
+            let msb_after = (result >> 15) != 0;
+            let of = if count == 1 { msb_before != msb_after } else { false };
+            new_flags = DosMachine::compute_flags_u16(result, new_cf, of, af);
+            result
+        }
+        3 => { // RCR
+            let carry_in = (flags & 1) != 0;
+            let input = (value as u32) | ((carry_in as u32) << 16);
+            let rotated = input.rotate_right(count as u32);
+            let result = rotated as u16;
+            let new_cf = (rotated >> 16) != 0;
+            let of = if count == 1 {
+                let msb = (result >> 15) & 1;
+                let second_msb = (result >> 14) & 1;
+                msb != second_msb
+            } else {
+                false
+            };
+            new_flags = DosMachine::compute_flags_u16(result, new_cf, of, af);
+            result
+        }
+        4 | 6 => { // SHL / SAL (одинаково)
+            let extended = value as u32;
+            let shifted = extended << count;
+            let result = shifted as u16;
+            let cf = (shifted >> 16) != 0;
+            let of = if count == 1 {
+                let msb_result = (result >> 15) & 1;
+                let cf_bit = cf as u16;
+                (msb_result ^ cf_bit) != 0
+            } else {
+                false
+            };
+            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            result
+        }
+        5 => { // SHR
+            let shifted = value >> count;
+            let result = shifted;
+            let cf = (value >> (count - 1)) & 1 != 0;
+            let of = if count == 1 {
+                (((result >> 15) ^ (cf as u16)) & 1) != 0
+            } else {
+                false
+            };
+            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            result
+        }
+        7 => { // SAR
+            let shifted = (value as i16).wrapping_shr(count as u32) as u16;
+            let result = shifted;
+            let cf = if count == 0 {
+                false
+            } else {
+                (value >> (count - 1)) & 1 != 0
+            };
+            let of = false; // OF cleared for SAR
+            new_flags = DosMachine::compute_flags_u16(result, cf, of, af);
+            result
+        }
+        _ => unreachable!(),
+    };
+    (result, new_flags)
+}

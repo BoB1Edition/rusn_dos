@@ -38,3 +38,9 @@ pub fn popf(machine: &mut DosMachine) {
     machine.registers.set_sp(machine.registers.sp().wrapping_add(2));
     machine.registers.set_flags(flags);
 }
+
+pub fn pop_fs(machine: &mut DosMachine) {
+    let fs = machine.read_u16(machine.registers.ss(), machine.registers.sp());
+    machine.registers.set_sp(machine.registers.sp().wrapping_add(2));
+    machine.registers.set_fs(fs);
+}

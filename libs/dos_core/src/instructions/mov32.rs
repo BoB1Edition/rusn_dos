@@ -104,3 +104,39 @@ pub fn mov_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_reg32(modrm.reg_field, src_val);
     machine.log_instruction(csip, &bytes).ok();
 }
+
+// libs/dos_core/src/instructions/mov32.rs
+pub fn mov_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Проверка подоперации: только /0 допустимо для опкода 0xC7
+    if modrm.reg_field != 0 {
+        log::error!("Invalid reg_field {} for opcode 0xC7", modrm.reg_field);
+        machine.halted = true;
+        return;
+    }
+    
+    // Чтение непосредственного значения
+    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(4));
+    bytes.extend_from_slice(&imm32.to_le_bytes());
+    
+    if modrm.is_register_mode() {
+        // MOV reg32, imm32
+        machine.write_reg32(modrm.rm_field, imm32);
+    } else {
+        // MOV [addr], imm32
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.write_phys_u32(addr, imm32);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

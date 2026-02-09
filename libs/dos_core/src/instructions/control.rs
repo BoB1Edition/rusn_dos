@@ -125,7 +125,6 @@ pub fn smsw(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// control.rs
 pub fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
@@ -136,17 +135,54 @@ pub fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
     let modrm = ModRm::from_byte(modrm_byte);
     let target_ip = if modrm.is_register_mode() {
-        // JMP reg16
         machine.read_reg16(modrm.rm_field)
     } else {
-        // JMP [addr]
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr)
     };
 
     machine.registers.set_ip(target_ip);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn jb(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+
+    let cf = (machine.registers.flags() & 0x0001) != 0;
+    machine.log_instruction(csip, &bytes).ok();
+
+    if cf {
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel8 as i32) as u16;
+        machine.registers.set_ip(new_ip);
+    }
+}
+
+// libs/dos_core/src/instructions/control.rs
+pub fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    machine.registers.step(None); // продвигаем на 1 байт (rel8)
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+    if machine.registers.cx() != 0 {
+        // Уменьшаем CX на 1 (беззнаковое вычитание с wrap-around)
+        let cx = machine.registers.cx().wrapping_sub(1);
+        machine.registers.set_cx(cx);
+        /*println!("{cx}");
+        machine.log_instruction(csip, &bytes).ok();
+        machine.halted = true;
+        return;*/
+        // Если CX ≠ 0 — выполняем переход
+
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel8 as i32) as u16;
+        machine.registers.set_ip(new_ip);
+    }
+
     machine.log_instruction(csip, &bytes).ok();
 }

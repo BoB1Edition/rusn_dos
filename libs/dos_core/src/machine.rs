@@ -1,4 +1,4 @@
-// Ver: 11
+// Ver: 12
 use std::{fs::File, io::Write};
 
 use log::error;
@@ -91,6 +91,7 @@ impl DosMachine {
             1 => self.registers.cs(),
             2 => self.registers.ss(),
             3 => self.registers.ds(),
+            4 => self.registers.fs(),
             _ => 0, // зарезервировано
         }
     }
@@ -211,6 +212,11 @@ impl DosMachine {
             0x01 => {
                 control::smsw(self, &full_bytes);
             }
+            0xA1 => {
+                stack::pop_fs(self);
+                self.log_instruction([self.registers.cs(), self.registers.ip()], &full_bytes)
+                    .ok();
+            }
             0xB7 => {
                 if self.has_operand_size_prefix {
                     extended::movzx_r16_rm16(self, &full_bytes);
@@ -290,6 +296,9 @@ impl DosMachine {
             0xB4 => {
                 mov::mov_ah(self, &full_bytes);
             }
+            0xB2 => {
+                mov::mov_dl(self, &full_bytes);
+            }
             0xA0 => {
                 if self.has_address_size_prefix {
                     // 32-битный адрес: MOV AL, [addr32]
@@ -364,6 +373,13 @@ impl DosMachine {
             0x04 => {
                 alu::add_al_imm8(self, &full_bytes);
             }
+            0x05 => {
+                if self.has_operand_size_prefix {
+                    alu32::add_eax_imm32(self, &full_bytes);
+                } else {
+                    alu::add_ax_imm16(self, &full_bytes);
+                }
+            }
             0x87 => {
                 if self.has_operand_size_prefix {
                     alu32::xchg_rm32_r32(self, &full_bytes);
@@ -371,11 +387,18 @@ impl DosMachine {
                     alu::xchg_rm16_r16(self, &full_bytes);
                 }
             }
+            0xD1 => {
+                if self.has_operand_size_prefix {
+                    alu32::shift_group_d1_32(self, &full_bytes);
+                } else {
+                    alu::shift_group_d1(self, &full_bytes);
+                }
+            }
             0xC1 => {
                 if self.has_operand_size_prefix {
-                    alu32::shift_group_c1(self, &full_bytes);
+                    alu32::shift_group_c1_32(self, &full_bytes);
                 } else {
-                    self.print_error_exit(opcode);
+                    alu::shift_group_c1_16(self, &full_bytes);
                 }
             }
             0x8C => {
@@ -389,6 +412,12 @@ impl DosMachine {
                     control::call(self, &full_bytes);
                 }
             }
+            0x8A => {
+                mov::mov_r8_rm8(self, &full_bytes);
+            }
+            0x72 => {
+                control::jb(self, &full_bytes);
+            }
             0xFC => {
                 let _ = self.log_instruction(csip, &full_bytes);
                 self.registers.set_flags(self.registers.flags() & !0x0400);
@@ -398,6 +427,13 @@ impl DosMachine {
                     control32::retn32(self, &full_bytes);
                 } else {
                     control::retn(self, &full_bytes);
+                }
+            }
+            0xC7 => {
+                if self.has_operand_size_prefix {
+                    mov32::mov_rm32_imm32(self, &full_bytes);
+                } else {
+                    mov::mov_rm16_imm16(self, &full_bytes);
                 }
             }
             0x32 => {
@@ -487,12 +523,28 @@ impl DosMachine {
                     alu::add_rm16_r16(self, &full_bytes);
                 }
             }
+            0x83 => {
+                if self.has_operand_size_prefix {
+                    alu32::group_x83_rm32(self, &full_bytes);
+                } else {
+                    alu::group_x83_rm16(self, &full_bytes);
+                }
+            }
             0x03 => {
                 if self.has_operand_size_prefix {
                     alu32::add_r32_rm32(self, &full_bytes);
                 } else {
                     alu::add_r16_rm16(self, &full_bytes);
                 }
+            }
+            0xE2 => {
+                control::loop_cx(self, &full_bytes);
+            }
+            0x06 => {
+                let es = self.registers.es();
+                self.registers.set_sp(self.registers.sp().wrapping_sub(2));
+                self.write_u16(self.registers.ss(), self.registers.sp(), es);
+                self.log_instruction(csip, &full_bytes).ok();
             }
             0x8E => {
                 mov::mov_sreg_rm16(self, &full_bytes);
@@ -551,7 +603,23 @@ impl DosMachine {
     }
     pub fn handle_int21(&mut self) {
         match self.registers.ah() {
+            0x02 => self.print_char(),
+            0x06 => self.direct_console_io(),
             0x09 => self.print_dos_string(),
+            0x4A => {
+                let requested_paragraphs = self.registers.bx();
+                const MAX_CONVENTIONAL_MEMORY_PARAGRAPHS: u16 = 0xA000; // 640 КБ = 0xA000 параграфов
+                if requested_paragraphs <= MAX_CONVENTIONAL_MEMORY_PARAGRAPHS {
+                    let mut flags = self.registers.flags();
+                    flags &= !(1 << 0);
+                    self.registers.set_flags(flags);
+                } else {
+                    let mut flags = self.registers.flags();
+                    flags |= 1 << 0;
+                    self.registers.set_flags(flags);
+                    self.registers.set_ax(0x08);
+                }
+            }
             0x4C => {
                 self.halted = true;
             }
@@ -664,5 +732,37 @@ impl DosMachine {
     pub fn write_phys_u32(&mut self, addr: u32, value: u32) {
         self.write_phys_u16(addr, value as u16);
         self.write_phys_u16(addr.wrapping_add(2), (value >> 16) as u16);
+    }
+
+    pub fn print_char(&self) {
+        let ch = self.registers.dl() as char;
+        print!("{}", ch);
+        std::io::stdout().flush().ok(); // Сразу сбросить буфер для немедленного отображения
+    }
+
+    fn direct_console_io(&mut self) {
+        let dl = self.registers.dl();
+
+        if dl == 0xFF {
+            // Неблокирующий ввод — в неинтерактивном режиме всегда возвращаем "нет ввода"
+            self.registers.set_al(0); // AL не определён по спецификации, но устанавливаем 0 для определённости
+            // Устанавливаем флаг ZF=1 (нет ввода)
+            let mut flags = self.registers.flags();
+            flags |= 1 << 6; // ZF = 1
+            self.registers.set_flags(flags);
+        } else {
+            // Вывод символа
+            let ch = dl as char;
+            print!("{}", ch);
+            std::io::stdout().flush().ok();
+
+            // Устанавливаем AL = DL (эхо символа)
+            self.registers.set_al(dl);
+
+            // Сбрасываем флаг ZF=0
+            let mut flags = self.registers.flags();
+            flags &= !(1 << 6); // ZF = 0
+            self.registers.set_flags(flags);
+        }
     }
 }
