@@ -1,3 +1,4 @@
+// Ver: 2
 pub use machine::DosMachine;
 pub mod cpu;
 
@@ -13,7 +14,10 @@ mod consts;
 mod modrm;
 mod instructions;
 mod interrupts;
-
 pub mod loader;
+pub mod filesystem;
+pub mod video;
+
+pub use filesystem::DiskDriver;
 pub use cpu::flags;
 pub use cpu::executor;

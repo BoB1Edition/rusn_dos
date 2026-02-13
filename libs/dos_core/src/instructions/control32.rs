@@ -81,3 +81,27 @@ pub fn call32(machine: &mut DosMachine, prev: &[u8]) {
 pub fn retn32(machine: &mut DosMachine, prev: &[u8]) {
     control::retn(machine, prev);
 }
+
+/// JZ/JE rel32 — условный переход при ZF=1 с 32-битным смещением
+/// В реальном режиме результат усекается до 16 бит (IP — 16-битный регистр)
+pub fn jz_rel32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 32-битное смещение (sign-extended)
+    let rel32 = machine.read_u32(machine.registers.cs(), machine.registers.ip()) as i32;
+    machine.registers.step(Some(4));
+    bytes.extend_from_slice(&rel32.to_le_bytes());
+    
+    // Проверяем флаг ZF (бит 6)
+    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    
+    if zf {
+        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel32)
+        // В реальном режиме усекаем до 16 бит
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel32) as u16;
+        machine.registers.set_ip(new_ip);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

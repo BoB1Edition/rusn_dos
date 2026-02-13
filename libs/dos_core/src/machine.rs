@@ -1,23 +1,28 @@
-// Ver: 15
-use std::{fs::File, io::Write};
+// Ver: 20
+use std::{error::Error, fs::File, io::Write};
 
 use log::error;
+use minifb::Window;
 
 use crate::{
-    interrupts, memory::Memory, registers::Registers
+    filesystem::FileSystem, interrupts, memory::Memory, registers::Registers, video::{VideoMode, VideoSystem}
 };
 
 #[derive(Debug)]
 pub struct DosMachine {
-    pub memory: Memory,
-    pub registers: crate::registers::Registers,
-    pub halted: bool,
-    pub logfile: File,
-    pub has_address_size_prefix: bool,
-    pub has_operand_size_prefix: bool,
-    pub has_extended_prefix: bool,
-    pub override_segment: Option<u16>,
-    pub opcode_override_segment: Option<u8>,
+    pub(crate) memory: Memory,
+    pub(crate) registers: crate::registers::Registers,
+    pub(crate) halted: bool,
+    pub(crate) logfile: File,
+    pub(crate) has_address_size_prefix: bool,
+    pub(crate) has_operand_size_prefix: bool,
+    pub(crate) has_extended_prefix: bool,
+    pub(crate) override_segment: Option<u16>,
+    pub(crate) opcode_override_segment: Option<u8>,
+    pub(crate) video: VideoSystem,
+    pub filesystem: FileSystem,
+    window: Option<*mut Window>,
+    pub(crate) has_rep_prefix: bool,
 }
 
 impl DosMachine {
@@ -168,7 +173,8 @@ impl DosMachine {
         self.opcode_override_segment = None;
     }
 
-    pub fn run(&mut self) -> Option<u8> {
+    pub fn run(&mut self, window: Option<&mut Window>) -> Result<Option<u8>, Box<dyn Error>> {
+        self.window = window.map(|w| w as *mut Window);
         crate::executor::run(self)
     }
 
@@ -202,9 +208,20 @@ impl DosMachine {
     }
 
     #[inline(always)]
-    fn write_u8(&mut self, default_segment: u16, offset: u16, value: u8) {
+    pub(crate) fn write_u8(&mut self, default_segment: u16, offset: u16, value: u8) {
         let segment = self.override_segment.unwrap_or(default_segment);
         let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
+
+        if self.video.mode == VideoMode::Mode13h && addr >= 0xA0000 && addr < 0xB0000 {
+            if let Some(fb) = self.video.framebuffer.as_mut() {
+                let video_offset = (addr - 0xA0000) as usize;
+                if video_offset < 320 * 200 {
+                    fb.data[video_offset] = value;
+                    self.video.dirty = true;
+                }
+            }
+        }
+
         if addr < self.memory.len() as u32 {
             self.memory.write_u8(addr, value);
         } else {
@@ -347,6 +364,14 @@ impl DosMachine {
             has_extended_prefix: false,
             override_segment: None,
             opcode_override_segment: None,
+            video: VideoSystem::new(),
+            window: None,
+            has_rep_prefix: false,
+            filesystem: FileSystem::new(),
         }
+    }
+
+    pub(crate) fn window(&mut self) -> Option<&mut Window> {
+        self.window.map(|ptr| unsafe { &mut *ptr })
     }
 }

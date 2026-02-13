@@ -1,6 +1,8 @@
 pub mod stack;
 pub mod alu32;
-pub mod alu;
+pub(crate) mod alu;
+pub(crate) mod bcd;
+pub(crate) mod exchange;
 pub mod mov32;
 pub mod mov;
 pub mod control;

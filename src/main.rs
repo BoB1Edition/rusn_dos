@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 4
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};
@@ -17,6 +17,8 @@ struct Cli {
     config: PathBuf,
     #[arg(long, default_value = "false")]
     no_log: bool,
+    #[arg(long, default_value = "false")]
+    graphics: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -50,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>>{
             Commands::Run { program, workdir } => {
                 let _ = set_workdir(&workdir);
                 if program.exists() && program.is_file() {
-                    run_program(program, cli.config, false)?;
+                    run_program(program, cli.config, cli.no_log, cli.graphics)?;
                 } else {
                     info!("program not found or program not a file");
                 }
@@ -62,9 +64,14 @@ fn main() -> Result<(), Box<dyn Error>>{
     Ok(())
 }
 
-fn run_program(program: PathBuf, config: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
+fn run_program(program: PathBuf, config: PathBuf, no_log: bool, graphics: bool) -> Result<(), Box<dyn Error>> {
     let app = app::App::load_from_file(config);
-    app.run(program, no_log)?;
+    if graphics {
+        println!("graphics");
+        app.run_with_graphics(program, no_log)?;
+    } else {
+        app.run(program, no_log)?;
+    }
     Ok(())
 }
 

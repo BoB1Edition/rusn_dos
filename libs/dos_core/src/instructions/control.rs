@@ -186,3 +186,41 @@ pub fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
 
     machine.log_instruction(csip, &bytes).ok();
 }
+
+pub fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    // Читаем 8-битное смещение со знаком
+    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    machine.registers.step(None); // продвигаем на 1 байт (смещение)
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+    
+    // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
+    // В реальном режиме усекаем до 16 бит
+    let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
+    machine.registers.set_ip(new_ip);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/control.rs
+pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    // Читаем 8-битное смещение со знаком
+    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    machine.registers.step(None); // продвигаем на 1 байт (смещение)
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+    
+    // Проверяем флаг нуля ZF (бит 6) — прыжок при ZF=0
+    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    
+    if !zf {
+        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
+        // В реальном режиме усекаем до 16 бит
+        let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
+        machine.registers.set_ip(new_ip);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

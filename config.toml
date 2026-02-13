@@ -1,3 +1,14 @@
-title = "first"
-[main]
-resolution = "640x480"
+title = "Biing!"
+[resolution]
+width = 1920
+height = 1200
+
+[[drivers]]
+letter = "C"
+path = "./app"      # Локальный путь для диска C:
+read_only = false
+
+[[drivers]]
+letter = "Z"
+path = "/tmp/mgk/"   # Локальный путь для диска Z:
+read_only = true     # Защита от записи

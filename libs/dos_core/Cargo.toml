@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 log = { version = "0.4.29", features = ["max_level_info", "std", "release_max_level_info"] }
 env_logger = "0.11.8"
+minifb = "0.28.0"
+hex = "0.4.3"

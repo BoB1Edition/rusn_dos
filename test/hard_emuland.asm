@@ -7,6 +7,7 @@ msg1 DB 'Hello, BIOS!', 0Dh, 0Ah, '$'    ; сообщение для вывод�
 
 filename DB 'TEST.TXT', 0     ; имя файла
 filehandle DW ?             ; дескриптор файла
+errorMsg DB 'Error opening file!', 0Dh, 0Ah, '$'
 
 .CODE
 
@@ -54,7 +55,7 @@ main PROC
 
     ; ----------- Работа с портами и чтение/запись -----------
 
-    mov dx, 0x70h          ; порт BIOS data area или любой другой порт
+    mov dx, 70h          ; порт BIOS data area или любой другой порт
     in al, dx              ; чтение байта
     mov bl, al             ; сохранить
     ; Вывод полученного байта на экран (через BIOS)
@@ -63,7 +64,7 @@ main PROC
     int 10h
 
     ; Запись байта обратно в порт
-    mov dx, 0x70h
+    mov dx, 70h
     mov al, bl
     out dx, al
 
@@ -79,8 +80,5 @@ file_error:
 
     mov ah, 4Ch
     int 21h
-
-.DATA
-errorMsg DB 'Error opening file!', 0Dh, 0Ah, '$'
-
+ENDP main
 END main

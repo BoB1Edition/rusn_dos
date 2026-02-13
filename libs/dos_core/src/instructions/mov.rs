@@ -179,8 +179,14 @@ pub fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
         }
         2 => machine.registers.set_ss(src_val),
         3 => machine.registers.set_ds(src_val),
+        4 => machine.registers.set_fs(src_val),  // FS (расширение 386+)
+        5 => {
+            machine.registers.set_gs(src_val);
+            log::warn!("GS register not implemented, ignoring write");
+            // Игнорируем запись в GS (как делают многие эмуляторы для совместимости)
+        }
         _ => {
-            log::error!("Invalid segment register field in MOV sreg, r/m16");
+            log::error!("Invalid segment register field in MOV sreg, r/m16 {}", modrm.reg_field);
             machine.halted = true;
             return;
         }
@@ -241,6 +247,192 @@ pub fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.write_phys_u16(addr, imm16);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+pub fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 16-битное смещение из [CS:IP]
+    let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2));
+    bytes.extend_from_slice(&addr16.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    
+    // Записываем значение AX в память по абсолютному адресу [segment:addr16]
+    machine.write_u16(segment, addr16, machine.registers.ax());
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    let mut bytes = prev.to_vec();
+    bytes.push(imm8);
+    
+    // Устанавливаем значение в AL (не изменяя остальные биты EAX)
+    machine.registers.set_al(imm8);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_bh_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    let mut bytes = prev.to_vec();
+    bytes.push(imm8);
+    
+    // Устанавливаем значение в BH (не изменяя остальные биты EBX)
+    machine.registers.set_bh(imm8);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_bl_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    let mut bytes = prev.to_vec();
+    bytes.push(imm8);
+    
+    // Устанавливаем значение в BH (не изменяя остальные биты EBX)
+    machine.registers.set_bl(imm8);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn stosw(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    bytes.push(0xAB); // опкод STOSW
+    
+    // Читаем флаг направления DF (бит 10)
+    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    
+    // Записываем слово AX в [ES:DI]
+    let ax = machine.registers.ax();
+    machine.write_u16(machine.registers.es(), machine.registers.di(), ax);
+    
+    // Обновляем DI в зависимости от флага направления
+    if df {
+        machine.registers.set_di(machine.registers.di().wrapping_sub(2));
+    } else {
+        machine.registers.set_di(machine.registers.di().wrapping_add(2));
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+pub fn mov_si_imm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2)); // продвигаем на 2 байта (imm16)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    
+    // Устанавливаем значение в SI (не изменяя остальные биты ESI)
+    machine.registers.set_si(imm16);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_di_imm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2)); // продвигаем на 2 байта (imm16)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    
+    // Устанавливаем значение в DI (не изменяя остальные биты EDI)
+    machine.registers.set_di(imm16);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_cx_imm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2)); // продвигаем на 2 байта (imm16)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    
+    // Устанавливаем значение в CX (не изменяя остальные биты ECX)
+    machine.registers.set_cx(imm16);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+/*pub fn mov_al_address16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 16-битное смещение из [CS:IP]
+    let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2));
+    bytes.extend_from_slice(&addr16.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    
+    // Читаем значение из памяти по абсолютному адресу [segment:addr16]
+    let value = machine.read_u8(segment, addr16);
+    
+    // Устанавливаем значение в AL
+    machine.registers.set_al(value);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}*/
+
+pub fn mov_ax_address16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 16-битное смещение из [CS:IP]
+    let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2));
+    bytes.extend_from_slice(&addr16.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    
+    // Читаем значение из памяти по абсолютному адресу [segment:addr16]
+    let value = machine.read_u16(segment, addr16);
+    
+    // Устанавливаем значение в AX
+    machine.registers.set_ax(value);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+pub fn stosb(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    bytes.push(0xAA); // опкод STOSB
+    
+    // Читаем флаг направления DF (бит 10)
+    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    
+    // Записываем байт AL в [ES:DI]
+    let al = machine.registers.al();
+    machine.write_u8(machine.registers.es(), machine.registers.di(), al);
+    
+    // Обновляем DI в зависимости от флага направления
+    if df {
+        machine.registers.set_di(machine.registers.di().wrapping_sub(1));
+    } else {
+        machine.registers.set_di(machine.registers.di().wrapping_add(1));
     }
     
     machine.log_instruction(csip, &bytes).ok();

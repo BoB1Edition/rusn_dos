@@ -1,7 +1,7 @@
 // Ver: 5
 use crate::{machine::DosMachine, modrm::ModRm};
 
-pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
+/*pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = Vec::new();
     bytes.extend_from_slice(prev);
@@ -21,6 +21,32 @@ pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
     let segment = machine.override_segment.unwrap_or(machine.registers.ds());
     let offset = (addr & 0xFFFF) as u16;
     machine.write_u32(segment, offset, machine.registers.eax());
+    machine.log_instruction(csip, &bytes).ok();
+}*/
+
+pub fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 32-битное смещение из [CS:IP]
+    let addr32 = if machine.has_address_size_prefix {
+        let addr32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(Some(4));
+        addr32
+    } else {
+        let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(Some(2));
+        addr16 as u32
+    };
+    bytes.extend_from_slice(&addr32.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let offset = (addr32 & 0xFFFF) as u16; // В реальном режиме смещение усекается до 16 бит
+    
+    // Записываем значение EAX в память по абсолютному адресу [segment:offset]
+    machine.write_u32(segment, offset, machine.registers.eax());
+    
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -137,6 +163,64 @@ pub fn mov_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.write_phys_u32(addr, imm32);
     }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov32.rs
+pub fn mov_esi_imm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(4)); // продвигаем на 4 байта (imm32)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm32.to_le_bytes());
+    
+    // Устанавливаем значение в ESI
+    machine.registers.set_esi(imm32);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov32.rs
+pub fn mov_edi_imm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(4)); // продвигаем на 4 байта (imm32)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm32.to_le_bytes());
+    
+    // Устанавливаем значение в EDI
+    machine.registers.set_edi(imm32);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov32.rs
+pub fn mov_eax_address32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 32-битное смещение из [CS:IP]
+    let addr32 = if machine.has_address_size_prefix {
+        let addr32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(Some(4));
+        addr32
+    } else {
+        let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+        machine.registers.step(Some(2));
+        addr16 as u32
+    };
+    bytes.extend_from_slice(&addr32.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let offset = (addr32 & 0xFFFF) as u16; // В реальном режиме смещение усекается до 16 бит
+    
+    // Читаем значение из памяти по абсолютному адресу [segment:offset]
+    let value = machine.read_u32(segment, offset);
+    
+    // Устанавливаем значение в EAX
+    machine.registers.set_eax(value);
     
     machine.log_instruction(csip, &bytes).ok();
 }

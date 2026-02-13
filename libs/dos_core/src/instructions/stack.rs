@@ -191,3 +191,18 @@ pub fn popad(machine: &mut DosMachine) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     machine.log_instruction(csip, &[0x66, 0x61]).ok();
 }
+
+pub fn push_di(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let bytes = prev.to_vec();
+    
+    // Уменьшаем SP на 2 (стек растёт вниз)
+    let new_sp = machine.registers.sp().wrapping_sub(2);
+    machine.registers.set_sp(new_sp);
+    
+    // Записываем значение DI в стек по адресу [SS:SP]
+    let di = machine.registers.di();
+    machine.write_u16(machine.registers.ss(), new_sp, di);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

@@ -120,7 +120,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
     (result, new_flags)
 }
 
-pub fn or(machine: &mut DosMachine, prev: &[u8]) {
+pub fn or_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(None);
@@ -377,31 +377,6 @@ pub fn cmp_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn xchg_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None);
-    let mut bytes = prev.to_vec();
-    bytes.push(modrm_byte);
-    let modrm = ModRm::from_byte(modrm_byte);
-    
-    if modrm.is_register_mode() {
-        let src_val = machine.read_reg32(modrm.reg_field);
-        let dst_val = machine.read_reg32(modrm.rm_field);
-        machine.write_reg32(modrm.rm_field, src_val);
-        machine.write_reg32(modrm.reg_field, dst_val);
-    } else {
-        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
-        let mem_val = machine.read_phys_u32(addr);
-        let reg_val = machine.read_reg32(modrm.reg_field);
-        machine.write_phys_u32(addr, reg_val);
-        machine.write_reg32(modrm.reg_field, mem_val);
-    }
-    
-    machine.log_instruction(csip, &bytes).ok();
-}
-
 // libs/dos_core/src/instructions/alu32.rs
 pub fn add_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
@@ -603,5 +578,172 @@ pub fn shift_group_c1_32(machine: &mut DosMachine, prev: &[u8]) {
     }
     
     machine.registers.set_flags(new_flags);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu32.rs
+pub fn or_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: r/m32 (регистр или память)
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u32(addr)
+    };
+    
+    // Приёмник: регистр из reg_field
+    let dst_reg = modrm.reg_field;
+    let dst_val = machine.read_reg32(dst_reg);
+    let result = dst_val | src_val;
+    
+    // Запись результата в регистр-приёмник
+    machine.write_reg32(dst_reg, result);
+    
+    // Установка флагов (логическая операция: CF=0, OF=0)
+    machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu32.rs
+pub fn and_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg32(modrm.reg_field);
+    
+    // Приёмник: r/m32 (регистр или память)
+    if modrm.is_register_mode() {
+        // AND reg32, reg32
+        let dst_val = machine.read_reg32(modrm.rm_field);
+        let result = dst_val & src_val;
+        machine.write_reg32(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    } else {
+        // AND [mem], reg32
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u32(addr);
+        let result = dst_val & src_val;
+        machine.write_phys_u32(addr, result);
+        machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu32.rs
+pub fn xor_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg32(modrm.reg_field);
+    
+    // Приёмник: r/m32 (регистр или память)
+    if modrm.is_register_mode() {
+        // XOR reg32, reg32
+        let dst_val = machine.read_reg32(modrm.rm_field);
+        let result = dst_val ^ src_val;
+        machine.write_reg32(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    } else {
+        // XOR [mem], reg32
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u32(addr);
+        let result = dst_val ^ src_val;
+        machine.write_phys_u32(addr, result);
+        machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu32.rs
+pub fn xor_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg32(modrm.reg_field);
+    
+    // Приёмник: r/m32 (регистр или память)
+    if modrm.is_register_mode() {
+        // XOR reg32, reg32
+        let dst_val = machine.read_reg32(modrm.rm_field);
+        let result = dst_val ^ src_val;
+        machine.write_reg32(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    } else {
+        // XOR [mem], reg32
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u32(addr);
+        let result = dst_val ^ src_val;
+        machine.write_phys_u32(addr, result);
+        machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/alu32.rs
+pub fn cmp_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(4)); // продвигаем на 4 байта (imm32)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm32.to_le_bytes());
+    
+    let eax = machine.registers.eax();
+    
+    // Вычисление флагов как при вычитании
+    let result = eax.wrapping_sub(imm32);
+    
+    // Флаг переноса (CF): 1 если беззнаковое переполнение (EAX < imm32)
+    let cf = eax < imm32;
+    
+    // Флаг переполнения (OF): знаковое переполнение при вычитании
+    let eax_sign = (eax as i32) < 0;
+    let imm_sign = (imm32 as i32) < 0;
+    let result_sign = (result as i32) < 0;
+    let of = (eax_sign != imm_sign) && (eax_sign != result_sign);
+    
+    // Флаг вспомогательного переноса (AF): перенос из бита 3 в бит 4
+    let af = ((eax & 0x0F) as i32) < ((imm32 & 0x0F) as i32);
+    
+    // Установка флагов
+    machine.registers.set_flags(flags::compute_flags_u32(result, cf, of, af));
+    
     machine.log_instruction(csip, &bytes).ok();
 }
