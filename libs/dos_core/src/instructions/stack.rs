@@ -206,3 +206,47 @@ pub fn push_di(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+// libs/dos_core/src/instructions/stack.rs
+pub fn pop_di(machine: &mut DosMachine) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    
+    // Читаем слово из стека по адресу [SS:SP]
+    let sp = machine.registers.sp();
+    let di = machine.read_u16(machine.registers.ss(), sp);
+    
+    // Увеличиваем SP на 2 (стек растёт вверх при извлечении)
+    let new_sp = sp.wrapping_add(2);
+    machine.registers.set_sp(new_sp);
+    
+    // Сохраняем значение в DI
+    machine.registers.set_di(di);
+    
+    // Логирование
+    machine.log_instruction(csip, &[0x5F]).ok();
+}
+
+// libs/dos_core/src/instructions/stack.rs
+pub fn push_ds(machine: &mut DosMachine) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    
+    // Уменьшаем SP на 2 (стек растёт вниз)
+    let new_sp = machine.registers.sp().wrapping_sub(2);
+    machine.registers.set_sp(new_sp);
+    
+    // Записываем значение DS в стек по адресу [SS:SP]
+    let ds = machine.registers.ds();
+    machine.write_u16(machine.registers.ss(), new_sp, ds);
+    
+    // Логирование
+    machine.log_instruction(csip, &[0x1E]).ok();
+}
+
+pub fn pop_es(machine: &mut DosMachine) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];   
+    let es_value = machine.read_u16(machine.registers.ss(), machine.registers.sp());
+    let new_sp = machine.registers.sp().wrapping_add(2);
+    machine.registers.set_sp(new_sp);
+    machine.registers.set_es(es_value);
+    machine.log_instruction(csip, &[0x07]).ok();
+}

@@ -228,3 +228,56 @@ pub fn xor_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+pub fn test_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg16(modrm.reg_field);
+    
+    // Приёмник: r/m16 (регистр или память) — читаем, но НЕ записываем результат
+    let dst_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr)
+    };
+    
+    // Вычисляем логическое И (результат НЕ сохраняем!)
+    let result = dst_val & src_val;
+    
+    // Устанавливаем флаги (логическая операция: CF=0, OF=0)
+    machine.registers.set_flags(flags::compute_logical_flags_u16(result));
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn or_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    // Читаем 8-битное непосредственное значение
+    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    let mut bytes = prev.to_vec();
+    bytes.push(0x0C);
+    bytes.push(imm8);
+    
+    // Выполняем логическое ИЛИ
+    let al = machine.registers.al();
+    let result = al | imm8;
+    
+    // Устанавливаем результат в AL
+    machine.registers.set_al(result);
+    
+    // Устанавливаем флаги (логическая операция: CF=0, OF=0)
+    machine.registers.set_flags(flags::compute_logical_flags_u8(result));
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

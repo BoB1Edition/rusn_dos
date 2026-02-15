@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2
 use std::{
     collections::HashMap,
     fs::{self, File as StdFile, OpenOptions},

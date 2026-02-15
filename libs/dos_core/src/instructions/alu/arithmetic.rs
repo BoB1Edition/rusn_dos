@@ -397,3 +397,60 @@ pub fn dec_ax(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+// libs/dos_core/src/instructions/alu.rs
+pub fn test_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg8(modrm.reg_field);
+    
+    // Приёмник: r/m8 (регистр или память) — читаем, но НЕ записываем результат
+    let dst_val = if modrm.is_register_mode() {
+        machine.read_reg8(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u8(addr)
+    };
+    
+    // Вычисляем логическое И (результат НЕ сохраняем!)
+    let result = dst_val & src_val;
+    
+    // Устанавливаем флаги (логическая операция: CF=0, OF=0)
+    machine.registers.set_flags(flags::compute_logical_flags_u8(result));
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn dec_si(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    bytes.push(0x4E); // опкод DEC SI
+    
+    let si = machine.registers.si();
+    let result = si.wrapping_sub(1);
+    
+    // Флаг вспомогательного переноса (AF): заём из бита 3 в бит 4
+    let af = (si & 0x0F) == 0;
+    
+    // Флаг переполнения (OF): знаковое переполнение при декременте
+    // Возникает при переходе 0x8000 → 0x7FFF (-32768 → 32767)
+    let of = si == 0x8000;
+    
+    // Сохраняем текущий флаг переноса (CF) — он НЕ изменяется
+    let current_cf = (machine.registers.flags() & 1) != 0;
+    
+    // Установка результата и флагов
+    machine.registers.set_si(result);
+    machine.registers.set_flags(flags::compute_flags_u16(result, current_cf, of, af));
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

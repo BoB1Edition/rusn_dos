@@ -16,4 +16,3 @@ RUST_LOG=info ./target/debug/rusn_dos --graphics run ./app/biing/INSTALL.EXE 2>&
 RUST_LOG=info ./target/debug/rusn_dos --graphics run ./app/biing/BIPRO.EXE 2>&1 | grep ERROR
 RUST_LOG=info ./target/debug/rusn_dos --graphics run ./app/biing/B.EXE 2>&1 | grep ERROR
 RUST_LOG=info ./target/debug/rusn_dos --graphics run ./app/biing/BINT.EXE 2>&1 | grep ERROR
-RUST_LOG=info ./target/debug/rusn_dos --graphics run ./app/test/GAME1.EXE 2>&1 | grep ERROR

@@ -312,8 +312,7 @@ pub fn mov_bl_imm8(machine: &mut DosMachine, prev: &[u8]) {
 
 pub fn stosw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
-    let mut bytes = prev.to_vec();
-    bytes.push(0xAB); // опкод STOSW
+    let bytes = prev.to_vec();
     
     // Читаем флаг направления DF (бит 10)
     let df = (machine.registers.flags() & (1 << 10)) != 0;
@@ -418,8 +417,7 @@ pub fn mov_ax_address16(machine: &mut DosMachine, prev: &[u8]) {
 // libs/dos_core/src/instructions/mov.rs
 pub fn stosb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
-    let mut bytes = prev.to_vec();
-    bytes.push(0xAA); // опкод STOSB
+    let bytes = prev.to_vec();
     
     // Читаем флаг направления DF (бит 10)
     let df = (machine.registers.flags() & (1 << 10)) != 0;
@@ -433,6 +431,101 @@ pub fn stosb(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_di(machine.registers.di().wrapping_sub(1));
     } else {
         machine.registers.set_di(machine.registers.di().wrapping_add(1));
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg8(modrm.reg_field);
+    
+    // Приёмник: r/m8 (регистр или память)
+    if modrm.is_register_mode() {
+        // MOV reg8, reg8
+        machine.write_reg8(modrm.rm_field, src_val);
+    } else {
+        // MOV [mem], reg8
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.write_phys_u8(addr, src_val);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+pub fn lodsb(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let bytes = prev.to_vec();
+    
+    // Определяем сегмент с учётом префикса
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    
+    // Читаем флаг направления DF (бит 10)
+    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    
+    // Загружаем байт из [segment:SI] в AL
+    let si = machine.registers.si();
+    let al = machine.read_u8(segment, si);
+    machine.registers.set_al(al);
+    
+    // Обновляем SI в зависимости от флага направления
+    if df {
+        machine.registers.set_si(si.wrapping_sub(1));
+    } else {
+        machine.registers.set_si(si.wrapping_add(1));
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/mov.rs
+pub fn mov_rm8_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем байт ModR/M
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    
+    // ⚠️ КРИТИЧЕСКАЯ ПРОВЕРКА: только reg_field = 0 допустимо для 0xC6
+    if modrm.reg_field != 0 {
+        log::error!(
+            "Invalid reg_field {} in MOV r/m8, imm8 (opcode 0xC6). Only /0 is valid.",
+            modrm.reg_field
+        );
+        machine.halted = true;
+        return;
+    }
+    
+    // Читаем непосредственное значение imm8
+    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    bytes.push(imm8);
+    
+    // Записываем значение в приёмник (регистр или память)
+    if modrm.is_register_mode() {
+        // MOV reg8, imm8
+        machine.write_reg8(modrm.rm_field, imm8);
+    } else {
+        // MOV [mem], imm8
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.write_phys_u8(addr, imm8);
     }
     
     machine.log_instruction(csip, &bytes).ok();

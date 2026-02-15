@@ -224,3 +224,68 @@ pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+// libs/dos_core/src/instructions/control.rs
+pub fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    // Читаем 8-битное смещение со знаком
+    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    machine.registers.step(None); // продвигаем на 1 байт (смещение)
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+    
+    // Проверяем флаг переноса CF (бит 0) — прыжок при CF=0
+    let cf = (machine.registers.flags() & 1) != 0;
+    
+    if !cf {
+        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
+        // В реальном режиме усекаем до 16 бит
+        let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
+        machine.registers.set_ip(new_ip);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/control.rs
+pub fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    // Читаем 8-битное смещение со знаком
+    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    machine.registers.step(None); // продвигаем на 1 байт (смещение)
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+    
+    // Проверяем флаги знака (SF) и переполнения (OF)
+    // SF = бит 7, OF = бит 11
+    let flags = machine.registers.flags();
+    let sf = (flags & (1 << 7)) != 0;   // Sign Flag (бит 7)
+    let of = (flags & (1 << 11)) != 0;  // Overflow Flag (бит 11)
+    
+    // Прыжок выполняется если SF == OF (результат >= 0 при знаковом сравнении)
+    if sf == of {
+        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
+        // В реальном режиме усекаем до 16 бит
+        let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
+        machine.registers.set_ip(new_ip);
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// libs/dos_core/src/instructions/control.rs
+pub fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    // Читаем 16-битное смещение со знаком (little-endian)
+    let rel16 = machine.read_u16(machine.registers.cs(), machine.registers.ip()) as i16;
+    machine.registers.step(Some(2)); // продвигаем на 2 байта (смещение)
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&rel16.to_le_bytes());
+    
+    // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel16)
+    // В реальном режиме усекаем до 16 бит
+    let new_ip = (machine.registers.ip() as i32).wrapping_add(rel16 as i32) as u16;
+    machine.registers.set_ip(new_ip);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
