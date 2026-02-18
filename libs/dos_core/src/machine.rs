@@ -389,3 +389,9 @@ impl DosMachine {
         self.window.map(|ptr| unsafe { &mut *ptr })
     }
 }
+
+impl Drop for DosMachine {
+    fn drop(&mut self) {
+
+    }
+}

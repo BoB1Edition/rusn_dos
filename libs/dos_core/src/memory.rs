@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2
 
 use std::ops::{Index, IndexMut};
 
@@ -78,13 +78,21 @@ impl Memory {
 impl Index<usize> for Memory {
     type Output = u8;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.data[index & 0xFFFFF]
+        let addr = index & 0xFFFFF;
+        if addr >= self.size {
+            panic!("Memory access out of bounds: 0x{:05X} >= 0x{:05X}", addr, self.size);
+        }
+        &self.data[addr]
     }
 }
 
 impl IndexMut<usize> for Memory {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.data[index & 0xFFFFF]
+        let addr = index & 0xFFFFF;
+        if addr >= self.size {
+            panic!("Memory access out of bounds: 0x{:05X} >= 0x{:05X}", addr, self.size);
+        }
+        &mut self.data[addr]
     }
 }
 

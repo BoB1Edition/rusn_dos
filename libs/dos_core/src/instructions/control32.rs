@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2
 use crate::{DosMachine, instructions::control, modrm::ModRm};
 
 pub fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
@@ -150,7 +150,7 @@ pub fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
     // Для 32-битной версии в реальном режиме используем 16-битное смещение
     let addr_u16 = addr as u16;
     let ip_offset = machine.read_u16(src_segment, addr_u16);
-    let cs_segment = machine.read_u16(src_segment, addr_u16 + 4); // +4 для 32-битного смещения
+    let cs_segment = machine.read_u16(src_segment, addr_u16.wrapping_add(2));
     
     // Сохраняем текущий CS:IP в стек
     let sp = machine.registers.sp().wrapping_sub(2);

@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2
 use std::{
     collections::HashMap,
     fs::{self, File as StdFile, OpenOptions},
@@ -54,14 +54,18 @@ impl FileSystem {
         if !self.drivers.contains_key(&letter) {
             return Err(format!("Drive {} not mounted", letter));
         }
-        
+
         // Нормализация пути: удаляем лишние слеши, приводим к единому формату
         let normalized = path
             .trim_start_matches(|c| c == '\\' || c == '/')
             .trim_end_matches(|c| c == '\\' || c == '/')
             .replace('/', "\\");
-        
-        log::info!("Current directory for drive {} set to: {}", letter, normalized);
+
+        log::info!(
+            "Current directory for drive {} set to: {}",
+            letter,
+            normalized
+        );
         self.current_directories.insert(letter, normalized);
         Ok(())
     }
@@ -85,13 +89,14 @@ impl FileSystem {
         let full_path = if !dos_path.contains(':') {
             // Определяем текущий диск (по умолчанию 'C')
             let current_drive = 'C';
-            
+
             // Получаем текущую директорию для диска
-            let current_dir = self.current_directories
+            let current_dir = self
+                .current_directories
                 .get(&current_drive)
                 .map(|s| s.as_str())
                 .unwrap_or("");
-            
+
             // Формируем полный путь в стиле DOS
             if current_dir.is_empty() {
                 format!("{}:\\{}", current_drive, dos_path)
@@ -163,6 +168,13 @@ impl FileSystem {
 
     pub fn open_file(&mut self, dos_path: &str, access_mode: u8) -> Result<u16, String> {
         let local_path = self.resolve_path(dos_path)?;
+
+        if access_mode == 0 && !local_path.exists() {
+            return Err(format!("File not found: {}", dos_path));
+        }
+        if local_path.is_dir() {
+            return Err(format!("Path is a directory: {}", dos_path));
+        }
 
         // Проверяем права на запись
         let drive_letter = dos_path.chars().next().unwrap_or('C');
