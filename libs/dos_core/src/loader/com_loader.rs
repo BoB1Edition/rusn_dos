@@ -1,3 +1,4 @@
+// Ver: 1
 use std::fs::File;
 
 use crate::{DosMachine, memory::Memory};

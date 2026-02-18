@@ -1,3 +1,4 @@
+
 use crate::{DosMachine, modrm::ModRm};
 
 pub fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
@@ -17,7 +18,6 @@ pub fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         // XCHG [addr], reg16
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
         let mem_val = machine.read_phys_u16(addr);
         let reg_val = machine.read_reg16(modrm.reg_field);
         machine.write_phys_u16(addr, reg_val);
@@ -42,7 +42,6 @@ pub fn xchg_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_reg32(modrm.reg_field, dst_val);
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
         let mem_val = machine.read_phys_u32(addr);
         let reg_val = machine.read_reg32(modrm.reg_field);
         machine.write_phys_u32(addr, reg_val);

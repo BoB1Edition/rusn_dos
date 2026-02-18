@@ -1,4 +1,4 @@
-// Ver: 21
+// Ver: 1
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -20,9 +20,16 @@ pub struct DosMachine {
     pub(crate) override_segment: Option<u16>,
     pub(crate) opcode_override_segment: Option<u8>,
     pub(crate) video: VideoSystem,
+    pub(crate) serial_buffer: Option<Vec<u8>>,
     pub filesystem: FileSystem,
     window: Option<*mut Window>,
     pub(crate) has_rep_prefix: bool,
+    pub(crate) rep_prefix_type: Option<u8>,
+    pub(crate) keyboard_led_command_pending: bool,
+    pub(crate) timer_channel_0: Option<u8>,
+    pub(crate) timer_channel_1: Option<u8>,
+    pub(crate) timer_channel_2: Option<u8>,
+    pub(crate) timer_initialized: bool,
 }
 
 impl DosMachine {
@@ -368,6 +375,13 @@ impl DosMachine {
             window: None,
             has_rep_prefix: false,
             filesystem: FileSystem::new(),
+            rep_prefix_type: None,
+            keyboard_led_command_pending: false,
+            timer_initialized: false,
+            timer_channel_0: None,
+            timer_channel_1: None,
+            timer_channel_2: None,
+            serial_buffer: Some(Vec::new()),
         }
     }
 

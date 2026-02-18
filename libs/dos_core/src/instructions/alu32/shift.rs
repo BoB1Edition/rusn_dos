@@ -1,3 +1,4 @@
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) {
@@ -126,23 +127,27 @@ pub fn shift_group_d1_32(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None); // продвигаем только на байт ModR/M
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-    
+
     if modrm.is_register_mode() {
         // ROL/ROR/RCL/RCR/SHL/SHR/SAR reg32, 1
         let value = machine.read_reg32(modrm.rm_field);
-        let (result, new_flags) = perform_shift(modrm.reg_field, value, 1, machine.registers.flags());
+        let (result, new_flags) =
+            perform_shift(modrm.reg_field, value, 1, machine.registers.flags());
         machine.write_reg32(modrm.rm_field, result);
         machine.registers.set_flags(new_flags);
     } else {
         // ROL/ROR/RCL/RCR/SHL/SHR/SAR [mem], 1
-        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         let value = machine.read_phys_u32(addr);
-        let (result, new_flags) = perform_shift(modrm.reg_field, value, 1, machine.registers.flags());
+        let (result, new_flags) =
+            perform_shift(modrm.reg_field, value, 1, machine.registers.flags());
         machine.write_phys_u32(addr, result);
         machine.registers.set_flags(new_flags);
     }
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -158,7 +163,7 @@ pub fn shift_group_c1_32(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     bytes.push(imm8);
     let modrm = ModRm::from_byte(modrm_byte);
-    
+
     let (value, addr_opt) = if modrm.is_register_mode() {
         (machine.read_reg32(modrm.rm_field), None)
     } else {
@@ -168,9 +173,10 @@ pub fn shift_group_c1_32(machine: &mut DosMachine, prev: &[u8]) {
         bytes.extend_from_slice(&addr.to_le_bytes());
         (machine.read_phys_u32(addr), Some(addr))
     };
-    
-    let (result, new_flags) = perform_shift(modrm.reg_field, value, imm8, machine.registers.flags());
-    
+
+    let (result, new_flags) =
+        perform_shift(modrm.reg_field, value, imm8, machine.registers.flags());
+
     if let Some(addr) = addr_opt {
         // Запись обратно в память
         machine.write_phys_u32(addr, result);
@@ -178,7 +184,153 @@ pub fn shift_group_c1_32(machine: &mut DosMachine, prev: &[u8]) {
         // Запись в регистр
         machine.write_reg32(modrm.rm_field, result);
     }
-    
+
     machine.registers.set_flags(new_flags);
     machine.log_instruction(csip, &bytes).ok();
+}
+
+/// Обработка опкода 0xD3 с префиксом 0x66 — 32-битные сдвиги/вращения
+pub fn shift_rm32_cl(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // Количество позиций = младшие 5 бит регистра CL (для 32-битных операций: 0..31)
+    let count = machine.registers.cl() & 0x1F;
+
+    // Особый случай: если количество = 0, флаги НЕ изменяются!
+    if count == 0 {
+        if !modrm.is_register_mode() {
+            let addr = modrm
+                .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+                .unwrap();
+            bytes.extend_from_slice(&addr.to_le_bytes());
+            let value = machine.read_phys_u32(addr);
+            machine.write_phys_u32(addr, value);
+        }
+        machine.log_instruction(csip, &bytes).ok();
+        return;
+    }
+
+    // Читаем исходное значение из регистра или памяти
+    let (value, is_register, addr) = if modrm.is_register_mode() {
+        (machine.read_reg32(modrm.rm_field), true, 0)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        (machine.read_phys_u32(addr), false, addr)
+    };
+
+    // Выполняем операцию
+    let (result, cf, of) = match modrm.reg_field {
+        0 => rol32(value, count),
+        1 => ror32(value, count),
+        2 => rcl32(value, count, machine.registers.flags() & 1 != 0),
+        3 => rcr32(value, count, machine.registers.flags() & 1 != 0),
+        4 | 6 => shl32(value, count),
+        5 => shr32(value, count),
+        7 => sar32(value, count),
+        _ => unreachable!(),
+    };
+
+    // Устанавливаем флаги (OF только для сдвига на 1 позицию)
+    let mut new_flags = flags::compute_flags_u32(result, cf, count == 1 && of, false);
+    // Сохраняем неизменяемые флаги
+    new_flags = (new_flags & 0x0FD5) | (machine.registers.flags() & !0x0FD5);
+    machine.registers.set_flags(new_flags as u16);
+
+    // Сохраняем результат
+    if is_register {
+        machine.write_reg32(modrm.rm_field, result);
+    } else {
+        machine.write_phys_u32(addr, result);
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+// Вспомогательные функции для 32-битных операций
+fn rol32(value: u32, count: u8) -> (u32, bool, bool) {
+    let count = count as usize % 32;
+    let result = (value << count) | (value >> (32 - count));
+    let cf = (result & 1) != 0;
+    let of = ((value ^ result) & 0x80000000) != 0;
+    (result, cf, of)
+}
+
+fn ror32(value: u32, count: u8) -> (u32, bool, bool) {
+    let count = count as usize % 32;
+    let result = (value >> count) | (value << (32 - count));
+    let cf = (result & 0x80000000) != 0;
+    let of = ((result ^ (result >> 1)) & 0x80000000) != 0;
+    (result, cf, of)
+}
+
+fn rcl32(value: u32, count: u8, cf_initial: bool) -> (u32, bool, bool) {
+    let count = count as usize % 33; // 33 потому что включаем CF в цикл
+    if count == 0 {
+        return (value, cf_initial, false);
+    }
+
+    let extended = (value as u64) | ((cf_initial as u64) << 32);
+    let rotated = (extended << count) | (extended >> (33 - count));
+    let result = (rotated & 0xFFFFFFFF) as u32;
+    let cf = (rotated & (1 << 32)) != 0;
+    let of = ((value as i32) < 0) != ((result as i32) < 0);
+    (result, cf, of)
+}
+
+fn rcr32(value: u32, count: u8, cf_initial: bool) -> (u32, bool, bool) {
+    let count = count as usize % 33;
+    if count == 0 {
+        return (value, cf_initial, false);
+    }
+
+    let extended = ((value as u64) << 1) | (cf_initial as u64);
+    let rotated = (extended >> count) | (extended << (33 - count));
+    let result = (rotated & 0xFFFFFFFF) as u32;
+    let cf = (rotated & 1) != 0;
+    let of = ((value as i32) < 0) != ((result as i32) < 0);
+    (result, cf, of)
+}
+
+fn shl32(value: u32, count: u8) -> (u32, bool, bool) {
+    let count = count as usize % 32;
+    let result = value << count;
+    let cf = if count > 0 {
+        (value >> (32 - count)) & 1 != 0
+    } else {
+        false
+    };
+    let of = ((value ^ result) & 0x80000000) != 0;
+    (result, cf, of)
+}
+
+fn shr32(value: u32, count: u8) -> (u32, bool, bool) {
+    let count = count as usize % 32;
+    let result = value >> count;
+    let cf = if count > 0 {
+        (value >> (count - 1)) & 1 != 0
+    } else {
+        false
+    };
+    let of = (value & 0x80000000) != 0;
+    (result, cf, of)
+}
+
+fn sar32(value: u32, count: u8) -> (u32, bool, bool) {
+    let count = count as usize % 32;
+    let result = ((value as i32) >> count) as u32;
+    let cf = if count > 0 {
+        (value >> (count - 1)) & 1 != 0
+    } else {
+        false
+    };
+    let of = false;
+    (result, cf, of)
 }

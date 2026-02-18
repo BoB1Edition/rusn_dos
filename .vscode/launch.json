@@ -20,7 +20,11 @@
                     "kind": "bin"
                 }
             },
-            "args": ["run", "./test/working.exe"],
+            "args": [
+                "--graphics",
+                "run",
+                "./app/biing/INSTALL.EXE"
+            ],
             "cwd": "${workspaceFolder}"
         },
         {

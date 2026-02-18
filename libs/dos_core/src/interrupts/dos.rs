@@ -1,10 +1,10 @@
-// Ver: 3
+// Ver: 1
 //! Обработка прерываний DOS (INT 21h, INT 2Fh)
 //! Содержит реализацию основных функций DOS API
 
-use crate::{DosMachine, filesystem, machine};
-use log::{error, info, warn};
-use std::{fs::{self, File as StdFile}, io::{Read, Seek, SeekFrom, Write}};
+use crate::DosMachine;
+use log::error;
+use std::io::{Read, Write};
 
 /// Обработчик прерывания INT 21h (основное DOS API)
 pub fn handle_int21(machine: &mut DosMachine) {

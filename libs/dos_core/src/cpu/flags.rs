@@ -1,3 +1,4 @@
+// Ver: 2
 //! Централизованная обработка флагов процессора x86 (FLAGS register)
 //! 
 //! Формат регистра FLAGS (16 бит):
@@ -20,6 +21,23 @@ pub const AF: u16 = 1 << 4;   // Auxiliary Flag
 pub const ZF: u16 = 1 << 6;   // Zero Flag
 pub const SF: u16 = 1 << 7;   // Sign Flag
 pub const OF: u16 = 1 << 11;  // Overflow Flag
+pub const IF: u16 = 1 << 9;
+pub const DF: u16 = 1 << 10;
+
+#[inline]
+pub fn test_df(flags: u16) -> bool {
+    test_flag(flags, DF)
+}
+
+#[inline]
+pub fn set_df(flags: &mut u16) {
+    *flags |= DF;
+}
+
+#[inline]
+pub fn test_if(flags: u16) -> bool {
+    test_flag(flags, IF)
+}
 
 /// Вычисляет все арифметические флаги для 8-битного результата
 #[inline]

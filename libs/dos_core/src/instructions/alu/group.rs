@@ -1,5 +1,4 @@
-use log::error;
-
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 // libs/dos_core/src/instructions/alu.rs
@@ -438,7 +437,7 @@ fn group_f6_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm8
             let al = machine.registers.al() as i8 as i16;
             let product = al * src;
             machine.registers.set_ax(product as u16);
-            let cf_of = (product < -128 || product > 127);
+            let cf_of = product < -128 || product > 127;
             let mut flags = machine.registers.flags();
             if cf_of {
                 flags |= 1 << 0;  // CF = 1
@@ -545,7 +544,7 @@ fn group_f6_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm8: Opt
             let al = machine.registers.al() as i8 as i16;
             let product = al * src;
             machine.registers.set_ax(product as u16);
-            let cf_of = (product < -128 || product > 127);
+            let cf_of = product < -128 || product > 127;
             let mut flags = machine.registers.flags();
             if cf_of {
                 flags |= 1 << 0 | 1 << 11;
@@ -686,7 +685,7 @@ fn group_f7_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm1
             let product = ax * src;
             machine.registers.set_ax((product & 0xFFFF) as u16);
             machine.registers.set_dx(((product >> 16) & 0xFFFF) as u16);
-            let cf_of = (product < -32768 || product > 32767);
+            let cf_of = product < -32768 || product > 32767;
             let mut flags = machine.registers.flags();
             if cf_of {
                 flags |= 1 << 0;  // CF = 1
@@ -795,7 +794,7 @@ fn group_f7_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm16: Op
             let product = ax * src;
             machine.registers.set_ax((product & 0xFFFF) as u16);
             machine.registers.set_dx(((product >> 16) & 0xFFFF) as u16);
-            let cf_of = (product < -32768 || product > 32767);
+            let cf_of = product < -32768 || product > 32767;
             let mut flags = machine.registers.flags();
             if cf_of {
                 flags |= 1 << 0 | 1 << 11;

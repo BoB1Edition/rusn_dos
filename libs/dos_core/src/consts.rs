@@ -1,3 +1,4 @@
+// Ver: 1
 /*
 #[allow(non_upper_case_globals)]
 pub const KiB: usize = 1024;

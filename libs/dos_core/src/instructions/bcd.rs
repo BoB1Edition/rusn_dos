@@ -1,5 +1,7 @@
+// Ver: 1
+
 // libs/dos_core/src/instructions/bcd.rs
-use crate::{DosMachine, flags};
+use crate::DosMachine;
 
 /// DAS — Decimal Adjust AL after Subtraction (опкод 0x2F)
 /// Корректирует регистр AL для получения правильного результата в упакованном BCD

@@ -612,9 +612,9 @@ pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     // Определяем сегмент источника с учётом префикса
     let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
     
-    // Читаем адрес источника (только для памяти)
-    let addr = if modrm.is_register_mode() {
-        // JMP far через регистр недопустим — вызывает #UD
+    // ВАЖНО: для mod=00, r/m=110 адрес операнда = disp16 (абсолютное смещение в сегменте)
+    // resolve_address возвращает ТОЛЬКО смещение, НЕ физический адрес!
+    let addr_offset = if modrm.is_register_mode() {
         log::error!("JMP far through register is undefined behavior at {:#04x}:{:#04x}",
                     machine.registers.cs(), machine.registers.ip());
         machine.halted = true;
@@ -624,11 +624,16 @@ pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap()
     };
+    // bytes.extend_from_slice(&addr_offset.to_le_bytes()); // ← УДАЛИТЬ! Это вычисленное смещение, не часть инструкции
+    
+    // КРИТИЧЕСКИ ВАЖНО: addr_offset — это СМЕЩЕНИЕ в сегменте src_segment
+    // Для чтения из памяти НЕ нужно приводить к u16 — resolve_address уже вернул u32/u16
+    let addr_u16 = addr_offset as u16;
     
     // Читаем 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-    let addr_u16 = addr as u16;
+    // ВАЖНО: читаем из СЕГМЕНТА src_segment (обычно DS), а не из CS!
     let ip_offset = machine.read_u16(src_segment, addr_u16);
-    let cs_segment = machine.read_u16(src_segment, addr_u16 + 2);
+    let cs_segment = machine.read_u16(src_segment, addr_u16.wrapping_add(2));
     
     // Загружаем новый сегмент и смещение (без сохранения старого состояния!)
     machine.registers.set_cs(cs_segment);
@@ -636,4 +641,18 @@ pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     
     // Флаги НЕ изменяются
     machine.log_instruction(csip, &bytes).ok();
+    
+    // Отладочное логирование для диагностики
+    #[cfg(debug_assertions)]
+    {
+        log::info!(
+            "JMP far: reading from [DS={:#04x}:{:#04x}] → IP={:#04x}, CS={:#04x} → jumping to {:#04x}:{:#04x}",
+            src_segment,
+            addr_u16,
+            ip_offset,
+            cs_segment,
+            cs_segment,
+            ip_offset
+        );
+    }
 }

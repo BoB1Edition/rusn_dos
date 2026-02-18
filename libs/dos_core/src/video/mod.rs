@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 1
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoMode {

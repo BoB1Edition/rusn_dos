@@ -1,4 +1,4 @@
-// Ver: 6
+// Ver: 1
 
 use std::ops::{Index, IndexMut};
 
@@ -63,11 +63,11 @@ impl Memory {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.data[..0x100000]
+        &self.data[..self.size.min(0x100000)]
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        &mut self.data[..0x100000]
+        &mut self.data[..self.size.min(0x100000)]
     }
 
     pub fn len(&self) -> usize {

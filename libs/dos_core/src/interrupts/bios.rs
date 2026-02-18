@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 1
 use std::io::Write;
 
 use crate::{DosMachine};

@@ -1,3 +1,4 @@
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 
@@ -186,7 +187,7 @@ fn group_f7_register_32(machine: &mut DosMachine, reg_field: u8, rm_field: u8, i
             let product = eax * src;
             machine.registers.set_eax((product & 0xFFFF_FFFF) as u32);
             machine.registers.set_edx(((product >> 32) & 0xFFFF_FFFF) as u32);
-            let cf_of = (product < -2_147_483_648 || product > 2_147_483_647);
+            let cf_of = product < -2_147_483_648 || product > 2_147_483_647;
             let mut flags = machine.registers.flags();
             if cf_of {
                 flags |= 1 << 0 | 1 << 11;
@@ -295,7 +296,7 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
             let product = eax * src;
             machine.registers.set_eax((product & 0xFFFF_FFFF) as u32);
             machine.registers.set_edx(((product >> 32) & 0xFFFF_FFFF) as u32);
-            let cf_of = (product < -2_147_483_648 || product > 2_147_483_647);
+            let cf_of = product < -2_147_483_648 || product > 2_147_483_647;
             let mut flags = machine.registers.flags();
             if cf_of {
                 flags |= 1 << 0 | 1 << 11;

@@ -1,3 +1,4 @@
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub fn xor_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {

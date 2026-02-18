@@ -1,2 +1,2 @@
-pub mod dos;
-pub mod bios;
+pub(crate) mod dos;
+pub(crate) mod bios;
