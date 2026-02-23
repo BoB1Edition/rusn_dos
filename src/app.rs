@@ -1,6 +1,7 @@
-// Ver: 1
+// Ver: 3
 use std::{
     error::Error,
+    ffi::OsStr,
     path::{Path, PathBuf},
 };
 
@@ -178,24 +179,34 @@ impl App {
 
     pub fn run(&self, program: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
         let mut dm = loader::load_executable(program.clone(), no_log)?;
-        self.init_drivers(&mut dm).ok();
+        self.init_drivers(&mut dm)?;
         self.setup_program_directory(&mut dm, &program)?;
-        dm.run(None)?;
-        Ok(())
+        if program.exists() && program.is_file() {
+            self.setup_program_directory(&mut dm, &program)?;
+            dm.run(None)?;
+            return Ok(());
+        } else {
+            let name = program.file_name().unwrap_or(OsStr::new("None")).display();
+            return Err(format!("program: {} not found or this no file", name).into());
+        }
     }
 
     pub fn run_with_graphics(&self, program: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
         let mut dm = loader::load_executable(program.clone(), no_log)?;
-        self.init_drivers(&mut dm).ok();
+        self.init_drivers(&mut dm)?;
         self.setup_program_directory(&mut dm, &program)?;
-        let mut window = Window::new(
-            &self.title,
-            self.resolution.width as usize,
-            self.resolution.height as usize,
-            WindowOptions::default(),
-        )?;
-        dm.run(Some(&mut window))?;
-
-        Ok(())
+        if program.exists() && program.is_file() {
+            let mut window = Window::new(
+                &self.title,
+                self.resolution.width as usize,
+                self.resolution.height as usize,
+                WindowOptions::default(),
+            )?;
+            dm.run(Some(&mut window))?;
+            Ok(())
+        } else {
+            let name = program.file_name().unwrap_or(OsStr::new("None")).display();
+            return Err(format!("program: {} not found or this no file", name).into());
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 3
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -273,6 +273,34 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 alu::imul_r16_rm16_imm16(machine, &full_bytes); // 16-битная версия ← ОСНОВНАЯ
             }
         }
+        0x6C => {
+            if machine.has_rep_prefix {
+                // REP INSB: повторяем пока CX != 0
+                while machine.registers.cx() != 0 {
+                    system::insb(machine, &full_bytes);
+                    machine
+                        .registers
+                        .set_cx(machine.registers.cx().wrapping_sub(1));
+                }
+            } else {
+                // Однократное выполнение INSB
+                system::insb(machine, &full_bytes);
+            }
+        }
+        0x6D => {
+            if machine.has_rep_prefix {
+                // REP INSW: повторяем пока CX != 0
+                while machine.registers.cx() != 0 {
+                    system::insw(machine, &full_bytes);
+                    machine
+                        .registers
+                        .set_cx(machine.registers.cx().wrapping_sub(1));
+                }
+            } else {
+                // Однократное выполнение INSW
+                system::insw(machine, &full_bytes);
+            }
+        }
         0x6E => {
             if machine.has_rep_prefix {
                 // REP OUTSB: повторяем пока CX != 0
@@ -456,7 +484,16 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                     let cx = machine.registers.cx() as usize;
                     let df = (machine.registers.flags() & (1 << 10)) != 0;
 
-                    if let Some(fb) = machine.video.framebuffer.as_mut() {
+                    let video_size = 320 * 200; // 64000 байт
+                    if si + cx > video_size || di + cx > video_size {
+                        // Выход за пределы видеопамяти — используем стандартную реализацию
+                        while machine.registers.cx() != 0 {
+                            mov::movsb(machine, &full_bytes);
+                            machine
+                                .registers
+                                .set_cx(machine.registers.cx().wrapping_sub(1));
+                        }
+                    } else if let Some(fb) = machine.video.framebuffer.as_mut() {
                         if !df && di > si && di < si + cx {
                             // Перекрывающиеся области — копируем назад во избежание порчи данных
                             for i in (0..cx).rev() {
@@ -505,7 +542,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         0xA6 => {
             if machine.has_rep_prefix {
                 // Используем ПРАВИЛЬНОЕ поле для определения типа префикса
-                let prefix_type = machine.rep_prefix_type.unwrap_or(0); // ← ИСПРАВЛЕНО
+                let prefix_type = machine.rep_prefix_type.unwrap_or(0);
 
                 if prefix_type == 0xF3 {
                     // REPE/REPZ — повторять пока совпадают (ZF=1)
@@ -924,7 +961,7 @@ fn execute_0f(machine: &mut DosMachine, opcode: u8) {
         }
         0xB7 => {
             if machine.has_operand_size_prefix {
-                extended::movzx_r16_rm16(machine, &full_bytes);
+                extended::movzx_r16_rm8(machine, &full_bytes);
             } else {
                 extended32::movzx_r32_rm16(machine, &full_bytes);
             }

@@ -35,7 +35,7 @@ pub fn handle_int10(machine: &mut DosMachine) {
             machine.registers.set_bh(0);  // активная страница
         }
         _ => {
-            log::debug!("Unsupported INT 10h / AH={:02X}", machine.registers.ah());
+            log::info!("Unsupported INT 10h / AH={:02X}", machine.registers.ah());
         }
     }
 }
@@ -47,7 +47,7 @@ pub fn handle_int16(machine: &mut DosMachine) {
             machine.registers.set_ax(0x3100); // '1' + сканкод
         }
         _ => {
-            log::debug!("Unsupported INT 16h / AH={:02X}", machine.registers.ah());
+            log::info!("Unsupported INT 16h / AH={:02X}", machine.registers.ah());
         }
     }
 }

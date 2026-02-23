@@ -207,7 +207,7 @@ mod tests {
         assert!(!test_cf(flags));  // CF=0 для логических операций
         assert!(!test_zf(flags));  // ZF=0 (результат ≠ 0)
         assert!(!test_sf(flags));  // SF=0 (старший бит = 0)
-        assert!(!test_pf(flags));  // PF=0 (0x0F = 00001111b → 4 единицы → чётное? НЕТ: 4 % 2 = 0 → чётное → PF=1)
+        assert!(test_pf(flags));  // PF=0 (0x0F = 00001111b → 4 единицы → чётное? НЕТ: 4 % 2 = 0 → чётное → PF=1)
         assert!(!test_of(flags));  // OF=0 для логических операций
     }
 }

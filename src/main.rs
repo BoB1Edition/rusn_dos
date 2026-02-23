@@ -37,7 +37,7 @@ enum Commands {
 fn set_workdir(workdir: &PathBuf) -> Result<(), Box<dyn Error>> {
     env::set_current_dir(workdir)
         .map_err(|e| e.into())
-        .map(|_| println!("Current directory: {}", workdir.display()))
+        .map(|_| log::debug!("Current directory: {}", workdir.display()))
 }
 
 fn main() -> Result<(), Box<dyn Error>>{
@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>>{
 fn run_program(program: PathBuf, config: PathBuf, no_log: bool, graphics: bool) -> Result<(), Box<dyn Error>> {
     let app = app::App::load_from_file(config);
     if graphics {
-        println!("graphics");
+        log::debug!("graphics");
         app.run_with_graphics(program, no_log)?;
     } else {
         app.run(program, no_log)?;

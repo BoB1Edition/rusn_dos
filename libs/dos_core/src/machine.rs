@@ -1,11 +1,15 @@
-// Ver: 1
+// Ver: 4
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
 use minifb::Window;
 
 use crate::{
-    filesystem::FileSystem, interrupts, memory::Memory, registers::Registers, video::{VideoMode, VideoSystem}
+    filesystem::FileSystem,
+    interrupts,
+    memory::Memory,
+    registers::Registers,
+    video::{VideoMode, VideoSystem},
 };
 
 #[derive(Debug)]
@@ -30,6 +34,9 @@ pub struct DosMachine {
     pub(crate) timer_channel_1: Option<u8>,
     pub(crate) timer_channel_2: Option<u8>,
     pub(crate) timer_initialized: bool,
+    pub(crate) a20_enabled: bool,
+    pub(crate) a20_command_pending: bool,
+    pub(crate) keyboard_status: u8,
 }
 
 impl DosMachine {
@@ -193,6 +200,7 @@ impl DosMachine {
     pub fn read_u8(&self, default_segment: u16, offset: u16) -> u8 {
         let segment = self.override_segment.unwrap_or(default_segment);
         let addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        let addr = self.apply_a20_mask(addr);
         self.memory.read_u8(addr)
     }
 
@@ -217,7 +225,8 @@ impl DosMachine {
     #[inline(always)]
     pub(crate) fn write_u8(&mut self, default_segment: u16, offset: u16, value: u8) {
         let segment = self.override_segment.unwrap_or(default_segment);
-        let addr = ((segment as u32) << 4).wrapping_add(offset as u32) & 0xFFFFF;
+        let raw_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        let addr = self.apply_a20_mask(raw_addr);
 
         if self.video.mode == VideoMode::Mode13h && addr >= 0xA0000 && addr < 0xB0000 {
             if let Some(fb) = self.video.framebuffer.as_mut() {
@@ -257,7 +266,8 @@ impl DosMachine {
     }
     #[inline(always)]
     pub fn read_phys_u8(&self, addr: u32) -> u8 {
-        self.memory.read_u8(addr & 0xFFFFF)
+        let masked = self.apply_a20_mask(addr);
+        self.memory.read_u8(masked)
     }
 
     #[inline(always)]
@@ -276,17 +286,20 @@ impl DosMachine {
 
     #[inline(always)]
     pub fn write_phys_u8(&mut self, addr: u32, value: u8) {
-        self.memory.write_u8(addr & 0xFFFFF, value);
+        let masked = self.apply_a20_mask(addr);
+        self.memory.write_u8(masked, value);
     }
 
     #[inline(always)]
     pub fn write_phys_u16(&mut self, addr: u32, value: u16) {
+        let addr = self.apply_a20_mask(addr);  // ← ИСПРАВИТЬ
         self.write_phys_u8(addr, value as u8);
         self.write_phys_u8(addr.wrapping_add(1), (value >> 8) as u8);
     }
 
     #[inline(always)]
     pub fn write_phys_u32(&mut self, addr: u32, value: u32) {
+        let addr = self.apply_a20_mask(addr);
         self.write_phys_u16(addr, value as u16);
         self.write_phys_u16(addr.wrapping_add(2), (value >> 16) as u16);
     }
@@ -382,16 +395,29 @@ impl DosMachine {
             timer_channel_1: None,
             timer_channel_2: None,
             serial_buffer: Some(Vec::new()),
+            a20_enabled: false,
+            a20_command_pending: false,
+            keyboard_status: 0x1C,
         }
     }
 
     pub(crate) fn window(&mut self) -> Option<&mut Window> {
         self.window.map(|ptr| unsafe { &mut *ptr })
     }
+    #[inline(always)]
+    pub(crate) fn apply_a20_mask(&self, addr: u32) -> u32 {
+        //log::info!("A20 test: addr={:#x}, a20={}", addr, self.a20_enabled);
+        if self.a20_enabled {
+            // A20 включён: разрешаем адреса до 0x10FFFF (1MB + 64KB)
+            // Адреса выше 0x10FFFF всё равно маскируем, т.к. память ограничена
+            addr.min(0x10FFFF)
+        } else {
+            // A20 выключен: классическое wrap-around real mode
+            addr & 0xFFFFF
+        }
+    }
 }
 
 impl Drop for DosMachine {
-    fn drop(&mut self) {
-
-    }
+    fn drop(&mut self) {}
 }

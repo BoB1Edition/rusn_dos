@@ -68,43 +68,26 @@ pub fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-
     let modrm = ModRm::from_byte(modrm_byte);
-    if modrm.is_register_mode() {
-        // CALL reg16 — не поддерживается в real mode
-        log::error!("CALL reg16 not supported in real mode");
-        machine.halted = true;
-        return;
-    }
-
-    // Поддерживаем только [disp16] (mod=00, rm=110)
-    if modrm.mod_field == 0 && modrm.rm_field == 6 {
-        let disp16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
-        machine.registers.step(Some(2));
-        bytes.extend_from_slice(&disp16.to_le_bytes());
-
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let target_ip = machine.read_u16(segment, disp16); // ← КОРРЕКТНО
-
-        // PUSH IP
-        let current_ip = machine.registers.ip();
-        machine.write_u16(
-            machine.registers.ss(),
-            machine.registers.sp().wrapping_sub(2),
-            current_ip,
-        );
-        machine
-            .registers
-            .set_sp(machine.registers.sp().wrapping_sub(2));
-
-        // JMP
-        machine.registers.set_ip(target_ip);
-
-        machine.log_instruction(csip, &bytes).ok();
+    
+    let target_ip = if modrm.is_register_mode() {
+        // CALL reg16 — читаем значение из регистра
+        machine.read_reg16(modrm.rm_field)
     } else {
-        log::error!("Unsupported memory mode in CALL r/m16");
-        machine.halted = true;
-    }
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .expect("Failed to resolve memory address in CALL r/m16");
+        
+        machine.read_phys_u16(addr)
+    };
+    
+    let current_ip = machine.registers.ip();
+    machine.registers.set_sp(machine.registers.sp().wrapping_sub(2));
+    machine.write_u16(machine.registers.ss(), machine.registers.sp(), current_ip);
+    
+    machine.registers.set_ip(target_ip);
+    
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn smsw(machine: &mut DosMachine, prev: &[u8]) {

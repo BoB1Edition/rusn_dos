@@ -1,4 +1,4 @@
-// Ver: 4
+// Ver: 8
 use log::{error, warn};
 
 use crate::{interrupts::bios, machine::DosMachine};
@@ -139,7 +139,6 @@ pub fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(port);
-
     let value = match port {
         0x60 => {
             // Порт данных клавиатуры (8042)
@@ -153,14 +152,32 @@ pub fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
             }
         }
         0x64 => {
-            // Порт статуса/команд контроллера клавиатуры (8042)
-            // Бит 0 (OBF): 1 = данные готовы в порту 0x60
-            // Бит 1 (IBF): 0 = контроллер свободен для приёма команд
-            // Бит 2 (SYS): 1 = система загружена (POST завершён)
-            // Бит 3 (CMD/DATA): 0 = следующая запись в 0x60 будет данными
-            // Биты 4-7: 0 = нет ошибок, нет мыши
-            0x1C // 00011100b = биты 2,3,4 установлены (система готова, ожидаем данные)
+            // Динамический статус контроллера клавиатуры 8042
+            // Бит 0: Output buffer status (1 = data available)
+            // Бит 1: Input buffer status (1 = buffer full) ← КРИТИЧНО для A20
+            // Бит 2: System flag
+            // Бит 3: Command/data (1 = command written to 0x64)
+            // Бит 4: Keyboard lock
+            // Бит 5: Receive timeout
+            // Бит 6: Transmit timeout
+            // Бит 7: Parity error
+
+            let mut status = machine.keyboard_status;
+
+            // Если есть ожидающая команда A20 — временно помечаем буфер как "занят"
+            if machine.a20_command_pending {
+                status |= 0x02; // Бит 1 = 1 (Input Buffer Full)
+            } else {
+                status &= !0x02; // Бит 1 = 0 (буфер свободен)
+            }
+
+            // Если есть данные для чтения из порта 0x60 — ставим бит 0
+            // (для простоты эмуляции: всегда считаем, что данные есть)
+            // status |= 0x01;  // Раскомментировать, если нужна эмуляция ввода
+
+            status
         }
+
         0x40..=0x42 => {
             // Порты таймера 8253/8254
             let now = std::time::SystemTime::now()
@@ -169,7 +186,13 @@ pub fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
             (now.as_millis() & 0xFF) as u8
         }
         0x20 | 0xA0 => 0x00, // PIC — всегда готов к обслуживанию
-        0x92 => 0x02,        // Fast A20 Gate — линия A20 включена
+        0x92 => {
+            if machine.a20_enabled {
+                0x02
+            } else {
+                0x00
+            }
+        } // Fast A20 Gate — линия A20 включена
         _ => {
             warn!("IN AL, imm8 from unimplemented port {:#02x}", port);
             0x00 // заглушка для неизвестных портов
@@ -195,7 +218,9 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
             let channel = port - 0x40;
             log::info!(
                 "OUT AL, {:#02x} to timer channel {} (port {:#02x})",
-                value, channel, port
+                value,
+                channel,
+                port
             );
 
             // Сохраняем значение счётчика для будущей эмуляции (опционально)
@@ -208,11 +233,11 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
         }
         0x43 => {
             // Порт управления таймером 8253/8254
-            let sc = (value >> 6) & 0x03;   // выбор канала (0-3)
-            let rw = (value >> 4) & 0x03;   // режим доступа
+            let sc = (value >> 6) & 0x03; // выбор канала (0-3)
+            let rw = (value >> 4) & 0x03; // режим доступа
             let mode = (value >> 1) & 0x07; // режим работы (0-5)
-            let bcd = value & 0x01;         // BCD/двоичный режим
-            
+            let bcd = value & 0x01; // BCD/двоичный режим
+
             // Декодируем для логирования
             let channel_name = match sc {
                 0 => "Channel 0 (IRQ0/system timer)",
@@ -221,7 +246,7 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
                 3 => "Read-back command",
                 _ => "Unknown",
             };
-            
+
             let access_mode = match rw {
                 0 => "latch count",
                 1 => "low byte only",
@@ -229,7 +254,7 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
                 3 => "low then high byte (16-bit)",
                 _ => "unknown",
             };
-            
+
             let operation_mode = match mode {
                 0 => "interrupt on terminal count",
                 1 => "one-shot",
@@ -239,12 +264,15 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
                 5 => "hardware triggered strobe",
                 _ => "unknown",
             };
-            
+
             log::info!(
                 "Timer control: {} | {} | {} | BCD={}",
-                channel_name, access_mode, operation_mode, bcd
+                channel_name,
+                access_mode,
+                operation_mode,
+                bcd
             );
-            
+
             // Особый случай: инициализация канала 0 для системного таймера
             if sc == 0 && mode == 2 && rw == 3 {
                 log::info!("Timer channel 0 initialized for periodic interrupts (IRQ0)");
@@ -257,6 +285,54 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
             // Бит 0: включение/выключение динамика
             // Бит 1: включение/выключение генератора частоты
         }
+        0x60 => {
+            if machine.a20_command_pending {
+                machine.a20_enabled = (value & 0x02) != 0;
+                machine.a20_command_pending = false;
+                machine.keyboard_status &= !0x02; // Буфер свободен
+                log::info!(
+                    "A20 gate {}...",
+                    if machine.a20_enabled {
+                        "ENABLED"
+                    } else {
+                        "DISABLED"
+                    }
+                );
+            } else {
+                match value {
+                    0xED => {
+                        // Следующий байт будет содержать состояние светодиодов
+                        // (бит 0 = Scroll Lock, бит 1 = Num Lock, бит 2 = Caps Lock)
+                        log::info!("Keyboard command 0xED received (set LEDs pending)");
+                        machine.keyboard_led_command_pending = true;
+                    }
+                    0xF4 => log::info!("Keyboard scanning enabled (command 0xF4)"),
+                    0xF5 => log::info!("Keyboard scanning disabled (command 0xF5)"),
+                    0xF6 => log::info!("Keyboard default parameters set (command 0xF6)"),
+                    0xFE => log::info!("Keyboard retransmit requested (command 0xFE)"),
+                    0xDF => {
+                        // Нестандартная команда — часто используется для установки светодиодов
+                        // Биты 0-2: состояние индикаторов (Scroll/Num/Caps Lock)
+                        let scroll_lock = (value & 0x01) != 0;
+                        let num_lock = (value & 0x02) != 0;
+                        let caps_lock = (value & 0x04) != 0;
+                        log::info!(
+                            "Keyboard LEDs set via 0xDF: Scroll={}, Num={}, Caps={}",
+                            scroll_lock,
+                            num_lock,
+                            caps_lock
+                        );
+                    }
+                    _ => {
+                        // Любая другая команда — игнорируем, но логируем для отладки
+                        log::info!(
+                            "Keyboard command {:#02x} written to port 0x60 (ignored)",
+                            value
+                        );
+                    }
+                }
+            }
+        }
         0x20 | 0xA0 => {
             // PIC (Programmable Interrupt Controller)
             if value == 0x20 {
@@ -265,58 +341,29 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
                 log::info!("OUT AL, {:#02x} to PIC port {:#02x}", value, port);
             }
         }
-        0x60 => {
-            // Порт данных клавиатуры (8042)
-            // Обрабатываем команды контроллера клавиатуры
-            match value {
-                0xED => {
-                    // Следующий байт будет содержать состояние светодиодов
-                    // (бит 0 = Scroll Lock, бит 1 = Num Lock, бит 2 = Caps Lock)
-                    log::info!("Keyboard command 0xED received (set LEDs pending)");
-                    machine.keyboard_led_command_pending = true;
-                }
-                0xF4 => log::info!("Keyboard scanning enabled (command 0xF4)"),
-                0xF5 => log::info!("Keyboard scanning disabled (command 0xF5)"),
-                0xF6 => log::info!("Keyboard default parameters set (command 0xF6)"),
-                0xFE => log::info!("Keyboard retransmit requested (command 0xFE)"),
-                0xDF => {
-                    // Нестандартная команда — часто используется для установки светодиодов
-                    // Биты 0-2: состояние индикаторов (Scroll/Num/Caps Lock)
-                    let scroll_lock = (value & 0x01) != 0;
-                    let num_lock = (value & 0x02) != 0;
-                    let caps_lock = (value & 0x04) != 0;
-                    log::info!(
-                        "Keyboard LEDs set via 0xDF: Scroll={}, Num={}, Caps={}",
-                        scroll_lock,
-                        num_lock,
-                        caps_lock
-                    );
-                }
-                _ => {
-                    // Любая другая команда — игнорируем, но логируем для отладки
-                    log::info!(
-                        "Keyboard command {:#02x} written to port 0x60 (ignored)",
-                        value
-                    );
-                }
-            }
-        }
+
         0x64 => {
             // Порт команд контроллера клавиатуры (8042)
             match value {
                 0xAD => log::info!("Keyboard disabled via port 0x64"),
                 0xAE => log::info!("Keyboard enabled via port 0x64"),
+                0xD1 => {
+                    machine.a20_command_pending = true;
+                    // Сбрасываем бит "input buffer full", так как команда принята
+                    machine.keyboard_status &= !0x02;
+                    log::info!("Keyboard controller: A20 gate command pending...");
+                }
                 0xFF => log::info!("Keyboard reset requested via port 0x64"),
                 _ => log::info!("Keyboard command {:#02x} to port 0x64 (ignored)", value),
             }
         }
         0x92 => {
-            // Fast A20 Gate / Keyboard Control
-            if value & 0x80 != 0 {
-                warn!("System reset requested via port 0x92 — halting CPU");
-                machine.halted = true;
+            if value & 0x02 != 0 {
+                machine.a20_enabled = true;
+                log::info!("A20 gate ENABLED via port 0x92");
             } else {
-                log::info!("A20 gate control: value={:#02x}", value);
+                machine.a20_enabled = false;
+                log::info!("A20 gate DISABLED via port 0x92");
             }
         }
         _ => {
@@ -392,26 +439,30 @@ pub fn outsw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     bytes.push(0x6F); // опкод OUTSW
-    
+
     // Определяем сегмент источника с учётом префикса
     let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    
+
     // Читаем слово из источника [DS:SI] → AX
     let si = machine.registers.si();
     let word = machine.read_u16(src_segment, si);
     machine.registers.set_ax(word);
-    
+
     // Выводим слово в порт DX (эмуляция)
     let port = machine.registers.dx();
     let value = word;
-    
+
     // Эмуляция вывода слова в порт (реально требует двух операций OUT)
     match port {
         0x3F8..=0x3FF => {
             // COM1 последовательный порт — эмулируем вывод символа
             let char = (value & 0xFF) as u8;
             if char >= 32 && char < 127 {
-                log::info!("OUTSW to COM1 (port {:#04x}): character '{}'", port, char as char);
+                log::info!(
+                    "OUTSW to COM1 (port {:#04x}): character '{}'",
+                    port,
+                    char as char
+                );
             } else {
                 log::info!("OUTSW to COM1 (port {:#04x}): byte {:#02x}", port, char);
             }
@@ -421,10 +472,14 @@ pub fn outsw(machine: &mut DosMachine, prev: &[u8]) {
             log::info!("OUTSW to LPT1 (port {:#04x}): value {:#04x}", port, value);
         }
         _ => {
-            log::info!("OUTSW to port {:#04x}: value {:#04x} (ignored)", port, value);
+            log::info!(
+                "OUTSW to port {:#04x}: value {:#04x} (ignored)",
+                port,
+                value
+            );
         }
     }
-    
+
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
     let df = (machine.registers.flags() & (1 << 10)) != 0;
     if df {
@@ -432,7 +487,7 @@ pub fn outsw(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         machine.registers.set_si(si.wrapping_add(2));
     }
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -443,21 +498,25 @@ pub fn outsd(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(0x66); // префикс операнда
     bytes.push(0x6F); // опкод OUTSD
-    
+
     // Определяем сегмент источника с учётом префикса
     let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    
+
     // Читаем двойное слово из источника [DS:ESI] → EAX
     let esi = machine.registers.esi();
     let dword = machine.read_u32(src_segment, (esi & 0xFFFF) as u16); // усечение до 16 бит для реального режима
     machine.registers.set_eax(dword);
-    
+
     // Выводим двойное слово в порт DX (эмуляция)
     let port = machine.registers.dx();
     let value = dword;
-    
-    log::info!("OUTSD to port {:#04x}: value {:#08x} (ignored in real mode)", port, value);
-    
+
+    log::info!(
+        "OUTSD to port {:#04x}: value {:#08x} (ignored in real mode)",
+        port,
+        value
+    );
+
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
     let df = (machine.registers.flags() & (1 << 10)) != 0;
     if df {
@@ -465,7 +524,7 @@ pub fn outsd(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         machine.registers.set_esi(esi.wrapping_add(4));
     }
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -473,43 +532,42 @@ pub fn lahf(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     bytes.push(0x9F); // опкод LAHF
-    
+
     // Читаем текущие флаги (тип u16)
     let flags = machine.registers.flags();
-    
+
     // Извлекаем нужные биты и формируем значение для AH
     // Биты копируются в те же позиции (0→0, 2→2, 4→4, 6→6, 7→7)
     let ah = ((flags & 0x01) << 0)   // CF → бит 0
            | ((flags & 0x04) << 0)   // PF → бит 2 (маска 0x04 = бит 2)
            | ((flags & 0x10) << 0)   // AF → бит 4 (маска 0x10 = бит 4)
            | ((flags & 0x40) << 0)   // ZF → бит 6 (маска 0x40 = бит 6)
-           | ((flags & 0x80) << 0);  // SF → бит 7 (маска 0x80 = бит 7)
-    
+           | ((flags & 0x80) << 0); // SF → бит 7 (маска 0x80 = бит 7)
+
     // Устанавливаем значение в регистр AH
     machine.registers.set_ah(ah as u8);
-    
+
     // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
-
 
 pub fn outsb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     bytes.push(0x6E); // опкод OUTSB
-    
+
     // Определяем сегмент источника с учётом префикса
     let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    
+
     // Читаем байт из источника [DS:SI] → AL
     let si = machine.registers.si();
     let byte = machine.read_u8(src_segment, si);
     machine.registers.set_al(byte);
-    
+
     // Выводим байт в порт DX (эмуляция)
     let port = machine.registers.dx();
     let value = byte;
-    
+
     // Эмуляция вывода в различные порты
     match port {
         0x60 => {
@@ -541,10 +599,14 @@ pub fn outsb(machine: &mut DosMachine, prev: &[u8]) {
             log::info!("OUTSB to LPT1 (port 0x378): value {:#02x}", value);
         }
         _ => {
-            log::info!("OUTSB to port {:#04x}: value {:#02x} (ignored)", port, value);
+            log::info!(
+                "OUTSB to port {:#04x}: value {:#02x} (ignored)",
+                port,
+                value
+            );
         }
     }
-    
+
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
     let df = (machine.registers.flags() & (1 << 10)) != 0;
     if df {
@@ -552,19 +614,122 @@ pub fn outsb(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         machine.registers.set_si(si.wrapping_add(1));
     }
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn wait(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let bytes = prev.to_vec();
-    
+
     // В эмуляторе без поддержки FPU инструкция является no-op
     // Но логируем для отладки программ, использующих сопроцессор
-    log::info!("WAIT/FWAIT executed at {:#04x}:{:#04x} (no-op in emulator without FPU)", 
-                machine.registers.cs(), machine.registers.ip());
-    
+    log::info!(
+        "WAIT/FWAIT executed at {:#04x}:{:#04x} (no-op in emulator without FPU)",
+        machine.registers.cs(),
+        machine.registers.ip()
+    );
+
     // Флаги НЕ изменяются — критически важно!
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// INSB — Input String Byte
+/// Читает байт из порта DX и записывает его в [ES:DI], затем обновляет DI
+pub fn insb(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    bytes.push(0x6C); // опкод INSB
+
+    // Читаем байт из порта DX
+    let port = machine.registers.dx();
+    let value = match port {
+        0x60 => {
+            // Порт клавиатуры (8042) — возвращаем сканкод клавиши
+            // Для демо-режима возвращаем '1' (сканкод 0x02) с периодической сменой
+            let tick = machine.registers.ip() as u64 / 1000;
+            match tick % 4 {
+                0 => 0x02, // '1'
+                1 => 0x03, // '2'
+                2 => 0x04, // '3'
+                _ => 0x01, // ESC (для выхода)
+            }
+        }
+        0x40..=0x42 => {
+            // Порты таймера 8253/8254 — возвращаем текущее время в мс
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            (now.as_millis() & 0xFF) as u8
+        }
+        0x20 | 0xA0 => {
+            // PIC (Programmable Interrupt Controller) — всегда готов к обслуживанию
+            0x00
+        }
+        0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF => {
+            // VGA контроллер — заглушка для совместимости
+            0x00
+        }
+        _ => {
+            log::warn!("INSB from unimplemented port {:#04x}", port);
+            0x00 // заглушка для неизвестных портов
+        }
+    };
+
+    // Записываем байт в [ES:DI]
+    let di = machine.registers.di();
+    machine.write_u8(machine.registers.es(), di, value);
+
+    // Обновляем указатель в зависимости от флага направления DF (бит 10)
+    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    if df {
+        machine.registers.set_di(di.wrapping_sub(1));
+    } else {
+        machine.registers.set_di(di.wrapping_add(1));
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// INSW — Input String Word
+/// Читает слово из порта DX и записывает его в [ES:DI], затем обновляет DI на ±2
+pub fn insw(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    bytes.push(0x6D); // опкод INSW
+
+    // Читаем слово из порта DX
+    let port = machine.registers.dx();
+    let value = match port {
+        0x40..=0x42 => {
+            // Порты таймера 8253/8254 — возвращаем текущее время в мс
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            (now.as_millis() & 0xFFFF) as u16
+        }
+        0x3F8..=0x3FF => {
+            // COM1 последовательный порт — эмуляция ввода символа
+            // Для простоты возвращаем фиксированный символ
+            0x41 // 'A'
+        }
+        _ => {
+            log::warn!("INSW from unimplemented port {:#04x}", port);
+            0x0000 // заглушка для неизвестных портов
+        }
+    };
+
+    // Записываем слово в [ES:DI]
+    let di = machine.registers.di();
+    machine.write_u16(machine.registers.es(), di, value);
+
+    // Обновляем указатель в зависимости от флага направления DF (бит 10)
+    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    if df {
+        machine.registers.set_di(di.wrapping_sub(2));
+    } else {
+        machine.registers.set_di(di.wrapping_add(2));
+    }
+
     machine.log_instruction(csip, &bytes).ok();
 }

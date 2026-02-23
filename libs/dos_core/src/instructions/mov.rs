@@ -75,7 +75,7 @@ pub fn mov_bx(machine: &mut DosMachine, prev: &[u8]) {
 }*/
 
 pub fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
-    log::debug!("mov_rm16_sreg");
+    log::info!("mov_rm16_sreg");
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
     let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());

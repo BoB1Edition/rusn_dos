@@ -8,8 +8,8 @@ use std::io::{Read, Write};
 
 /// Обработчик прерывания INT 21h (основное DOS API)
 pub fn handle_int21(machine: &mut DosMachine) {
-    log::info!("int 21");
-    log::debug!("int 21: {}", machine.registers.ah());
+    log::debug!("int 21");
+    log::info!("int 21: {}", machine.registers.ah());
     match machine.registers.ah() {
         0x01 => read_char_with_echo(machine),
         0x02 => print_char(machine),

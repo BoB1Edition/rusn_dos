@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 4
 
 use std::ops::{Index, IndexMut};
 
@@ -26,14 +26,30 @@ impl Memory {
 
     #[inline(always)]
     pub fn read_u8(&self, addr: u32) -> u8 {
-        let addr_20bit = addr & 0xFFFFF;
-        self.data[addr_20bit as usize]
+        if addr >= self.size as u32 {
+            log::warn!("Memory read out of bounds: {:#x}", addr);
+            return 0;
+        }
+        if addr >= 0x100000 {
+            log::debug!(
+                "MEM READ: addr={:#x}, value={:#02x}",
+                addr,
+                self.data[addr as usize]
+            );
+        }
+        self.data[addr as usize]
     }
 
     #[inline(always)]
     pub fn write_u8(&mut self, addr: u32, value: u8) {
-        let addr_20bit = addr & 0xFFFFF;
-        self.data[addr_20bit as usize] = value;
+        if addr >= self.size as u32 {
+            log::warn!("Memory write out of bounds: {:#x}", addr);
+            return;
+        }
+        if addr >= 0x100000 {
+            log::debug!("MEM WRITE: addr={:#x}, value={:#02x}", addr, value);
+        }
+        self.data[addr as usize] = value;
     }
 
     #[inline(always)]
@@ -78,21 +94,25 @@ impl Memory {
 impl Index<usize> for Memory {
     type Output = u8;
     fn index(&self, index: usize) -> &Self::Output {
-        let addr = index & 0xFFFFF;
-        if addr >= self.size {
-            panic!("Memory access out of bounds: 0x{:05X} >= 0x{:05X}", addr, self.size);
+        if index >= self.size {
+            panic!(
+                "Memory access out of bounds: 0x{:05X} >= 0x{:05X}",
+                index, self.size
+            );
         }
-        &self.data[addr]
+        &self.data[index]
     }
 }
 
 impl IndexMut<usize> for Memory {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let addr = index & 0xFFFFF;
-        if addr >= self.size {
-            panic!("Memory access out of bounds: 0x{:05X} >= 0x{:05X}", addr, self.size);
+        if index >= self.size {
+            panic!(
+                "Memory access out of bounds: 0x{:05X} >= 0x{:05X}",
+                index, self.size
+            );
         }
-        &mut self.data[addr]
+        &mut self.data[index]
     }
 }
 
