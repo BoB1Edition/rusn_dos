@@ -3,8 +3,6 @@ use std::fs::File;
 
 use crate::{DosMachine, memory::Memory};
 
-
-
 #[derive(Debug, Clone, Default)]
 pub struct ComLoader {
     data: Vec<u8>,
@@ -17,9 +15,9 @@ impl ComLoader {
     }
 
     pub fn exec(self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
-        const PSP_SEGMENT: u16 = 0x0000;      // PSP всегда в сегменте 0
-        const CODE_OFFSET: u16 = 0x0100;      // Код начинается со смещения 0x100
-        const STACK_TOP: u16 = 0xFFFE;        // Вершина стека (64 КБ - 2)
+        const PSP_SEGMENT: u16 = 0x0000; // PSP всегда в сегменте 0
+        const CODE_OFFSET: u16 = 0x0100; // Код начинается со смещения 0x100
+        const STACK_TOP: u16 = 0xFFFE; // Вершина стека (64 КБ - 2)
 
         // 1. Создаём память и инициализируем нулями
         let mut memory = Memory::new();
@@ -37,8 +35,8 @@ impl ComLoader {
         }
 
         let logfile = if no_log {
-            File::create("/dev/null")?  // Unix
-            // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
+            File::create("/dev/null")? // Unix
+        // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
         } else {
             File::create("logopcode.txt")?
         };
@@ -51,16 +49,22 @@ impl ComLoader {
         //    - IP = 0x0100 (начало кода после PSP)
         //    - SP = 0xFFFE (стек растёт вниз от конца сегмента)
         machine.registers.set_cs(PSP_SEGMENT);
-        machine.registers.set_ds(PSP_SEGMENT);  // DS указывает на PSP (для доступа к параметрам)
+        machine.registers.set_ds(PSP_SEGMENT); // DS указывает на PSP (для доступа к параметрам)
         machine.registers.set_es(PSP_SEGMENT);
         machine.registers.set_ss(PSP_SEGMENT);
         machine.registers.set_ip(CODE_OFFSET);
+        machine.registers.set_fs(PSP_SEGMENT);
+        machine.registers.set_gs(PSP_SEGMENT);
         machine.registers.set_sp(STACK_TOP);
 
-        log::info!("Loaded .COM file: CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X}, DS={:04X}",
-            machine.registers.cs(), machine.registers.ip(),
-            machine.registers.ss(), machine.registers.sp(),
-            machine.registers.ds());
+        log::info!(
+            "Loaded .COM file: CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X}, DS={:04X}",
+            machine.registers.cs(),
+            machine.registers.ip(),
+            machine.registers.ss(),
+            machine.registers.sp(),
+            machine.registers.ds()
+        );
 
         Ok(machine)
     }

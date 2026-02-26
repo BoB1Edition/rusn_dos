@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 1
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -956,8 +956,11 @@ fn execute_0f(machine: &mut DosMachine, opcode: u8) {
                 .ok();
         }
         0x84 => {
-            // JZ/JE rel32 — условный переход при ZF=1
-            control32::jz_rel32(machine, &full_bytes);
+            if machine.has_operand_size_prefix {
+                control32::jz_rel32(machine, &full_bytes); // 32-бит (rel32)
+            } else {
+                control::jz_rel16(machine, &full_bytes); // 16-бит (rel16) ← НОВАЯ ФУНКЦИЯ
+            }
         }
         0xB7 => {
             if machine.has_operand_size_prefix {

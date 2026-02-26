@@ -27,7 +27,7 @@ pub fn load_executable(path: PathBuf, no_log: bool) -> Result<DosMachine, Box<dy
             loader.exec(no_log)
         }
         ExecutableType::Exe => {
-            let loader = exe_loader::ExeLoader::from_file(&path)?;
+            let mut loader = exe_loader::ExeLoader::from_file(&path)?;
             loader.exec(no_log)
         }
     }

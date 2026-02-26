@@ -1,4 +1,4 @@
-// Ver: 8
+// Ver: 4
 use log::{error, warn};
 
 use crate::{interrupts::bios, machine::DosMachine};
@@ -15,6 +15,7 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
         0x2F => machine.handle_int2f(),
         0x20 => machine.halted = true,
         0x10 => bios::handle_int10(machine),
+        0x15 => bios::handle_int15(machine),
         0x16 => bios::handle_int16(machine),
         _ => {
             error!("Unsupported interrupt: INT {:#02X}", vector);
@@ -152,28 +153,22 @@ pub fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
             }
         }
         0x64 => {
-            // Динамический статус контроллера клавиатуры 8042
-            // Бит 0: Output buffer status (1 = data available)
-            // Бит 1: Input buffer status (1 = buffer full) ← КРИТИЧНО для A20
-            // Бит 2: System flag
-            // Бит 3: Command/data (1 = command written to 0x64)
-            // Бит 4: Keyboard lock
-            // Бит 5: Receive timeout
-            // Бит 6: Transmit timeout
-            // Бит 7: Parity error
+            // Статус контроллера клавиатуры 8042
+            // Бит 0: Output buffer status (1 = данные готовы для чтения из порта 0x60)
+            // Бит 1: Input buffer status (1 = буфер занят, 0 = свободен) ← КРИТИЧНО!
 
-            let mut status = machine.keyboard_status;
+            let mut status = 0x18; // Базовый статус: система OK, буферы свободны
 
-            // Если есть ожидающая команда A20 — временно помечаем буфер как "занят"
-            if machine.a20_command_pending {
-                status |= 0x02; // Бит 1 = 1 (Input Buffer Full)
-            } else {
-                status &= !0x02; // Бит 1 = 0 (буфер свободен)
-            }
+            // Бит 1 ставим в 1 ТОЛЬКО если команда ещё не обработана
+            // В реальной hardware: ~100 мкс после записи команды
+            // В эмуляции: считаем команду обработанной сразу после записи
+            // machine.a20_command_pending используется ВНУТРЕННЕ, не влияет на статус
 
-            // Если есть данные для чтения из порта 0x60 — ставим бит 0
-            // (для простоты эмуляции: всегда считаем, что данные есть)
-            // status |= 0x01;  // Раскомментировать, если нужна эмуляция ввода
+            log::debug!(
+                "Keyboard controller status read: {:#04x} (a20_pending={})",
+                status,
+                machine.a20_command_pending
+            );
 
             status
         }
@@ -187,6 +182,7 @@ pub fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
         }
         0x20 | 0xA0 => 0x00, // PIC — всегда готов к обслуживанию
         0x92 => {
+            log::debug!("0x92 in a20_enabled: {}", machine.a20_enabled);
             if machine.a20_enabled {
                 0x02
             } else {
@@ -287,50 +283,22 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
         }
         0x60 => {
             if machine.a20_command_pending {
+                // Это байт данных для команды 0xD1 (управление выходным портом)
+                // Бит 1 выходного порта = состояние A20
                 machine.a20_enabled = (value & 0x02) != 0;
-                machine.a20_command_pending = false;
-                machine.keyboard_status &= !0x02; // Буфер свободен
+                machine.a20_command_pending = false; // ← Сбрасываем после получения данных
                 log::info!(
-                    "A20 gate {}...",
+                    "Keyboard controller: A20 gate {} via port 0x60 (value={:#02x})",
                     if machine.a20_enabled {
                         "ENABLED"
                     } else {
                         "DISABLED"
-                    }
+                    },
+                    value
                 );
             } else {
-                match value {
-                    0xED => {
-                        // Следующий байт будет содержать состояние светодиодов
-                        // (бит 0 = Scroll Lock, бит 1 = Num Lock, бит 2 = Caps Lock)
-                        log::info!("Keyboard command 0xED received (set LEDs pending)");
-                        machine.keyboard_led_command_pending = true;
-                    }
-                    0xF4 => log::info!("Keyboard scanning enabled (command 0xF4)"),
-                    0xF5 => log::info!("Keyboard scanning disabled (command 0xF5)"),
-                    0xF6 => log::info!("Keyboard default parameters set (command 0xF6)"),
-                    0xFE => log::info!("Keyboard retransmit requested (command 0xFE)"),
-                    0xDF => {
-                        // Нестандартная команда — часто используется для установки светодиодов
-                        // Биты 0-2: состояние индикаторов (Scroll/Num/Caps Lock)
-                        let scroll_lock = (value & 0x01) != 0;
-                        let num_lock = (value & 0x02) != 0;
-                        let caps_lock = (value & 0x04) != 0;
-                        log::info!(
-                            "Keyboard LEDs set via 0xDF: Scroll={}, Num={}, Caps={}",
-                            scroll_lock,
-                            num_lock,
-                            caps_lock
-                        );
-                    }
-                    _ => {
-                        // Любая другая команда — игнорируем, но логируем для отладки
-                        log::info!(
-                            "Keyboard command {:#02x} written to port 0x60 (ignored)",
-                            value
-                        );
-                    }
-                }
+                // Обычная запись в порт клавиатуры (игнорируем)
+                log::debug!("Keyboard port 0x60 write: {:#02x}", value);
             }
         }
         0x20 | 0xA0 => {
@@ -343,18 +311,28 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
         }
 
         0x64 => {
-            // Порт команд контроллера клавиатуры (8042)
             match value {
-                0xAD => log::info!("Keyboard disabled via port 0x64"),
-                0xAE => log::info!("Keyboard enabled via port 0x64"),
                 0xD1 => {
+                    // Команда: "Записать байт в выходной порт контроллера"
+                    // Следующая запись в порт 0x60 будет данными
                     machine.a20_command_pending = true;
-                    // Сбрасываем бит "input buffer full", так как команда принята
-                    machine.keyboard_status &= !0x02;
-                    log::info!("Keyboard controller: A20 gate command pending...");
+                    // НЕ меняем keyboard_status - он больше не используется
+                    log::info!(
+                        "Keyboard controller: A20 command 0xD1 received (waiting for data on port 0x60)"
+                    );
                 }
-                0xFF => log::info!("Keyboard reset requested via port 0x64"),
-                _ => log::info!("Keyboard command {:#02x} to port 0x64 (ignored)", value),
+                0xAE => {
+                    log::info!("Keyboard enabled via port 0x64");
+                }
+                0xAD => {
+                    log::info!("Keyboard disabled via port 0x64");
+                }
+                0xFF => {
+                    log::info!("Keyboard reset requested via port 0x64");
+                }
+                _ => {
+                    log::debug!("Keyboard command {:#02x} to port 0x64", value);
+                }
             }
         }
         0x92 => {

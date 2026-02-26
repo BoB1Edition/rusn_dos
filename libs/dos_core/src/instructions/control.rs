@@ -639,3 +639,30 @@ pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
         );
     }
 }
+
+// В libs/dos_core/src/instructions/control.rs (НЕ control32.rs!)
+
+pub fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // ← Читаем 16-битное смещение (sign-extended)
+    let rel16 = machine.read_u16(machine.registers.cs(), machine.registers.ip()) as i16;
+    machine.registers.step(Some(2));  // ← 2 байта для rel16!
+    
+    bytes.extend_from_slice(&rel16.to_le_bytes());
+    
+    // Проверяем флаг ZF (бит 6)
+    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    
+    if zf {
+        // Вычисляем новый IP: текущий IP + sign_extend(rel16)
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel16 as i32) as u16;
+        machine.registers.set_ip(new_ip);
+        log::debug!("JZ rel16: TAKEN (ZF=1), new IP={:#04x}", new_ip);
+    } else {
+        log::debug!("JZ rel16: NOT TAKEN (ZF=0), continue");
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}

@@ -233,7 +233,6 @@ impl Registers {
     }
 }
 
-// eip
 impl Registers {
     pub(crate) fn ip(&self) -> u16 {
         self.ip as u16

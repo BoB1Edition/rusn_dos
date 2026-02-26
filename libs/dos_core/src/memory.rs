@@ -1,4 +1,4 @@
-// Ver: 4
+// Ver: 2
 
 use std::ops::{Index, IndexMut};
 
@@ -24,19 +24,24 @@ impl Memory {
         }
     }
 
+    // В memory.rs
+
     #[inline(always)]
     pub fn read_u8(&self, addr: u32) -> u8 {
         if addr >= self.size as u32 {
             log::warn!("Memory read out of bounds: {:#x}", addr);
             return 0;
         }
-        if addr >= 0x100000 {
+
+        // ← ИСПРАВЛЕНИЕ: логируем ОБА адреса теста A20
+        if addr == 0x000000 || addr == 0x100000 || addr >= 0x100000 {
             log::debug!(
                 "MEM READ: addr={:#x}, value={:#02x}",
                 addr,
                 self.data[addr as usize]
             );
         }
+
         self.data[addr as usize]
     }
 
@@ -46,9 +51,12 @@ impl Memory {
             log::warn!("Memory write out of bounds: {:#x}", addr);
             return;
         }
-        if addr >= 0x100000 {
+
+        // ← ИСПРАВЛЕНИЕ: логируем ОБА адреса теста A20
+        if addr == 0x000000 || addr == 0x100000 || addr >= 0x100000 {
             log::debug!("MEM WRITE: addr={:#x}, value={:#02x}", addr, value);
         }
+
         self.data[addr as usize] = value;
     }
 

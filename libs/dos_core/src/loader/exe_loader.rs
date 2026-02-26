@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2
 use crate::{DosMachine, loader::exe_header::MzHeader, memory::Memory};
 use std::fs::File;
 
@@ -65,7 +65,7 @@ impl ExeLoader {
         })
     }
 
-    pub fn exec(self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
+    pub fn exec(&mut self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
         const LOAD_SEGMENT: u16 = 0x1000; // Базовый сегмент загрузки
         const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10; // PSP на 256 байт ниже кода
 
@@ -90,8 +90,8 @@ impl ExeLoader {
         self.apply_relocations(&mut memory, LOAD_SEGMENT);
 
         let logfile = if no_log {
-            File::create("/dev/null")?  // Unix
-            // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
+            File::create("/dev/null")? // Unix
+        // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
         } else {
             File::create("logopcode.txt")?
         };
@@ -111,8 +111,8 @@ impl ExeLoader {
         let sp = self.header.sp;
 
         machine.registers.set_cs(cs);
-        machine.registers.set_ds(LOAD_SEGMENT); // ← КРИТИЧНО: не PSP, а сегмент данных!
-        machine.registers.set_es(LOAD_SEGMENT); // ← КРИТИЧНО: не PSP, а сегмент данных!
+        machine.registers.set_ds(LOAD_SEGMENT);
+        machine.registers.set_es(LOAD_SEGMENT);
         machine.registers.set_ss(ss);
         machine.registers.set_ip(ip);
         machine.registers.set_sp(sp);
@@ -129,7 +129,7 @@ impl ExeLoader {
         Ok(machine)
     }
 
-    fn apply_relocations(&self, memory: &mut Memory, load_segment: u16) {
+    /*fn apply_relocations(&self, memory: &mut Memory, load_segment: u16) {
         let reloc_table_offset = self.header.e_lfarlc as usize; // Смещение в БАЙТАХ (не параграфах!)
         let reloc_count = self.header.e_relc as usize;
 
@@ -146,11 +146,78 @@ impl ExeLoader {
 
             // Вычисляем физический адрес для релокации
             let fixup_addr = ((load_segment as u32 + segment as u32) << 4) + offset as u32;
+            if fixup_addr as usize + 2 > memory.len() {
+                log::warn!(
+                    "Relocation #{i}: fixup_addr {:#x} out of bounds (memory size: {})",
+                    fixup_addr,
+                    memory.len()
+                );
+                continue; // Пропускаем опасную релокацию
+            }
             let current = memory.read_u16(fixup_addr);
             let corrected = current.wrapping_add(load_segment);
 
             // Записываем скорректированное значение
+            log::debug!(
+                "Reloc #{:03}: seg={:#04x}:off={:#04x} → phys={:#06x}, val: {:#04x} → {:#04x}",
+                i,
+                segment,
+                offset,
+                fixup_addr,
+                current,
+                corrected
+            );
             memory.write_u16(fixup_addr, corrected);
+        }
+    }*/
+
+    fn apply_relocations(&self, memory: &mut Memory, load_segment: u16) {
+        let reloc_table_offset = self.header.e_lfarlc as usize;
+        let reloc_count = self.header.e_relc as usize;
+
+        log::debug!(
+            "Applying {} relocations at offset {:#x}",
+            reloc_count,
+            reloc_table_offset
+        );
+
+        for i in 0..reloc_count {
+            let entry_offset = reloc_table_offset + i * 4;
+
+            // Проверка: хватает ли байт в файле на эту запись
+            if entry_offset + 4 > self.data.len() {
+                log::warn!("Relocation table truncated at entry {}", i);
+                break;
+            }
+
+            let offset = u16::from_le_bytes([self.data[entry_offset], self.data[entry_offset + 1]]);
+            let segment =
+                u16::from_le_bytes([self.data[entry_offset + 2], self.data[entry_offset + 3]]);
+
+            let fixup_addr = ((load_segment as u32 + segment as u32) << 4) + offset as u32;
+
+            // Проверка: не выходит ли адрес за пределы эмулируемой памяти
+            if fixup_addr as usize + 2 > memory.len() {
+                log::warn!(
+                    "Relocation #{i}: address {:#06x} out of bounds (memory: {} bytes), skipping",
+                    fixup_addr,
+                    memory.len()
+                );
+                continue;
+            }
+
+            let current = memory.read_u16(fixup_addr);
+            let corrected = current.wrapping_add(load_segment);
+            memory.write_u16(fixup_addr, corrected);
+
+            log::trace!(
+                "Reloc #{i}: {:#04x}:{:#04x} → {:#06x}: {:#04x}→{:#04x}",
+                segment,
+                offset,
+                fixup_addr,
+                current,
+                corrected
+            );
         }
     }
 

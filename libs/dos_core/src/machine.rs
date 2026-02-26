@@ -1,4 +1,4 @@
-// Ver: 4
+// Ver: 1
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -292,14 +292,12 @@ impl DosMachine {
 
     #[inline(always)]
     pub fn write_phys_u16(&mut self, addr: u32, value: u16) {
-        let addr = self.apply_a20_mask(addr);  // ← ИСПРАВИТЬ
         self.write_phys_u8(addr, value as u8);
         self.write_phys_u8(addr.wrapping_add(1), (value >> 8) as u8);
     }
 
     #[inline(always)]
     pub fn write_phys_u32(&mut self, addr: u32, value: u32) {
-        let addr = self.apply_a20_mask(addr);
         self.write_phys_u16(addr, value as u16);
         self.write_phys_u16(addr.wrapping_add(2), (value >> 16) as u16);
     }
@@ -397,22 +395,32 @@ impl DosMachine {
             serial_buffer: Some(Vec::new()),
             a20_enabled: false,
             a20_command_pending: false,
-            keyboard_status: 0x1C,
+            keyboard_status: 0x18,
         }
     }
 
     pub(crate) fn window(&mut self) -> Option<&mut Window> {
         self.window.map(|ptr| unsafe { &mut *ptr })
     }
+
     #[inline(always)]
     pub(crate) fn apply_a20_mask(&self, addr: u32) -> u32 {
-        //log::info!("A20 test: addr={:#x}, a20={}", addr, self.a20_enabled);
+        if addr >= 0x0FFFF0 {
+            log::debug!(
+                "A20 MASK: raw={:#x}, enabled={}, result={:#x}",
+                addr,
+                self.a20_enabled,
+                if self.a20_enabled {
+                    addr.min(0x10FFFF)
+                } else {
+                    addr & 0xFFFFF
+                }
+            );
+        }
+
         if self.a20_enabled {
-            // A20 включён: разрешаем адреса до 0x10FFFF (1MB + 64KB)
-            // Адреса выше 0x10FFFF всё равно маскируем, т.к. память ограничена
             addr.min(0x10FFFF)
         } else {
-            // A20 выключен: классическое wrap-around real mode
             addr & 0xFFFFF
         }
     }

@@ -9,7 +9,6 @@ pub mod error {
 mod registers;
 mod memory;
 mod machine;
-mod dos_api;
 mod consts;
 mod modrm;
 mod instructions;

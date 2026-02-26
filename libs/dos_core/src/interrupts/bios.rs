@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 3
 use std::io::Write;
 
 use crate::{DosMachine};
@@ -48,6 +48,49 @@ pub fn handle_int16(machine: &mut DosMachine) {
         }
         _ => {
             log::info!("Unsupported INT 16h / AH={:02X}", machine.registers.ah());
+        }
+    }
+}
+
+pub fn handle_int15(machine: &mut DosMachine) {
+    let ax = machine.registers.ax();
+    
+    match ax {
+        0x2401 => {
+            // Enable A20 gate
+            machine.a20_enabled = true;
+            // CF=0 (успех), AH=0
+            let mut flags = machine.registers.flags();
+            flags &= !(1 << 0);  // CF = 0
+            machine.registers.set_flags(flags);
+            machine.registers.set_ah(0);
+            log::info!("INT 15h/AX=2401h: A20 gate ENABLED via BIOS");
+        }
+        0x2402 => {
+            // Disable A20 gate
+            machine.a20_enabled = false;
+            let mut flags = machine.registers.flags();
+            flags &= !(1 << 0);  // CF = 0
+            machine.registers.set_flags(flags);
+            machine.registers.set_ah(0);
+            log::info!("INT 15h/AX=2402h: A20 gate DISABLED via BIOS");
+        }
+        0x2403 => {
+            // Query A20 status
+            let status = if machine.a20_enabled { 1 } else { 0 };
+            let mut flags = machine.registers.flags();
+            flags &= !(1 << 0);  // CF = 0
+            machine.registers.set_flags(flags);
+            machine.registers.set_al(status);
+            log::info!("INT 15h/AX=2403h: A20 status = {}", status);
+        }
+        _ => {
+            // Неизвестная функция — возвращаем ошибку
+            let mut flags = machine.registers.flags();
+            flags |= 1 << 0;  // CF = 1 (ошибка)
+            machine.registers.set_flags(flags);
+            machine.registers.set_ah(0x86);  // Function not supported
+            log::warn!("INT 15h/AX={:#04x}: unsupported", ax);
         }
     }
 }
