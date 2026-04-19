@@ -14,11 +14,10 @@ use crate::{
     video,
 };
 
-/// Основной цикл выполнения программы
 pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>> {
     let palette = video::load_vga_palette();
     while !machine.halted {
-        let opcode = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+        let opcode = machine.read_instr_u8(machine.registers.ip());
         machine.registers.step(None);
 
         match opcode {
@@ -64,7 +63,6 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
                 } else {
                     execute(machine, opcode);
                 }
-                // Сброс флагов префиксов после выполнения инструкции
                 machine.has_address_size_prefix = false;
                 machine.has_operand_size_prefix = false;
                 machine.has_extended_prefix = false;
@@ -261,21 +259,20 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         }
         0x68 => {
             if machine.has_operand_size_prefix {
-                stack::push_imm32(machine, &full_bytes); // 16-битная версия ← ОСНОВНАЯ
+                stack::push_imm32(machine, &full_bytes);
             } else {
-                stack::push_imm16(machine, &full_bytes); // 16-битная версия ← ОСНОВНАЯ
+                stack::push_imm16(machine, &full_bytes);
             }
         }
         0x69 => {
             if machine.has_operand_size_prefix {
-                alu32::imul_r32_rm32_imm32(machine, &full_bytes); // 32-битная версия
+                alu32::imul_r32_rm32_imm32(machine, &full_bytes);
             } else {
-                alu::imul_r16_rm16_imm16(machine, &full_bytes); // 16-битная версия ← ОСНОВНАЯ
+                alu::imul_r16_rm16_imm16(machine, &full_bytes);
             }
         }
         0x6C => {
             if machine.has_rep_prefix {
-                // REP INSB: повторяем пока CX != 0
                 while machine.registers.cx() != 0 {
                     system::insb(machine, &full_bytes);
                     machine
@@ -283,13 +280,11 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                         .set_cx(machine.registers.cx().wrapping_sub(1));
                 }
             } else {
-                // Однократное выполнение INSB
                 system::insb(machine, &full_bytes);
             }
         }
         0x6D => {
             if machine.has_rep_prefix {
-                // REP INSW: повторяем пока CX != 0
                 while machine.registers.cx() != 0 {
                     system::insw(machine, &full_bytes);
                     machine
@@ -297,13 +292,11 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                         .set_cx(machine.registers.cx().wrapping_sub(1));
                 }
             } else {
-                // Однократное выполнение INSW
                 system::insw(machine, &full_bytes);
             }
         }
         0x6E => {
             if machine.has_rep_prefix {
-                // REP OUTSB: повторяем пока CX != 0
                 while machine.registers.cx() != 0 {
                     system::outsb(machine, &full_bytes);
                     machine
@@ -311,15 +304,12 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                         .set_cx(machine.registers.cx().wrapping_sub(1));
                 }
             } else {
-                // Однократное выполнение OUTSB
                 system::outsb(machine, &full_bytes);
             }
         }
         0x6F => {
             if machine.has_rep_prefix {
-                // REP OUTSW/OUTSD: повторяем пока CX/ECX != 0
                 if machine.has_operand_size_prefix {
-                    // 32-битный режим: используем ECX
                     while machine.registers.ecx() != 0 {
                         system::outsd(machine, &full_bytes);
                         machine
@@ -327,7 +317,6 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                             .set_ecx(machine.registers.ecx().wrapping_sub(1));
                     }
                 } else {
-                    // 16-битный режим: используем CX
                     while machine.registers.cx() != 0 {
                         system::outsw(machine, &full_bytes);
                         machine
@@ -336,7 +325,6 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                     }
                 }
             } else {
-                // Однократное выполнение OUTSW/OUTSD
                 if machine.has_operand_size_prefix {
                     system::outsd(machine, &full_bytes);
                 } else {
@@ -365,9 +353,9 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         0x84 => alu::test_rm8_r8(machine, &full_bytes),
         0x85 => {
             if machine.has_operand_size_prefix {
-                alu32::test_rm32_r32(machine, &full_bytes); // 32-битная версия (если реализована)
+                alu32::test_rm32_r32(machine, &full_bytes);
             } else {
-                alu::test_rm16_r16(machine, &full_bytes); // 16-битная версия ← НОВОЕ
+                alu::test_rm16_r16(machine, &full_bytes);
             }
         }
         0x87 => {
@@ -396,41 +384,23 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         0x8C => mov::mov_rm16_sreg(machine, &full_bytes),
         0x8D => {
             if machine.has_operand_size_prefix {
-                // Для 32-битного режима потребуется отдельная реализация в mov32.rs
                 mov32::lea_r32_rm32(machine, &full_bytes);
             } else {
-                mov::lea_r16_rm16(machine, &full_bytes); // 16-битная версия ← КРИТИЧЕСКИ ВАЖНО
+                mov::lea_r16_rm16(machine, &full_bytes);
             }
         }
         0x8E => mov::mov_sreg_rm16(machine, &full_bytes),
         0x8F => {
-            // Проверяем код операции через ModR/M.reg_field
-            // Для POP r/m16 должен быть /0 (reg_field = 0)
-            let peek_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-            let modrm = ModRm::from_byte(peek_byte);
-
-            if modrm.reg_field == 0 {
-                stack::pop_rm16(machine, &full_bytes);
-            } else {
-                // Другие коды операции для 0x8F зарезервированы или не реализованы
-                log::error!(
-                    "Unsupported opcode extension /{} for 0x8F at {:#04x}:{:#04x}",
-                    modrm.reg_field,
-                    machine.registers.cs(),
-                    machine.registers.ip()
-                );
-                machine.halted = true;
-                return;
-            }
+            stack::pop_rm16(machine, &full_bytes);
         }
         0x90 => system::nop(machine, &full_bytes),
 
         0x98 => alu::cbw(machine, &full_bytes),
         0x99 => {
             if machine.has_operand_size_prefix {
-                alu32::cdq(machine, &full_bytes); // 32-битная версия (CDQ)
+                alu32::cdq(machine, &full_bytes);
             } else {
-                alu::cwd(machine, &full_bytes); // 16-битная версия (CWD) ← КРИТИЧЕСКИ ВАЖНО
+                alu::cwd(machine, &full_bytes);
             }
         }
         0x9B => system::wait(machine, &full_bytes),
@@ -452,13 +422,33 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 mov::mov_al_address16(machine, &full_bytes);
             }
         }
-        // libs/dos_core/src/cpu/executor.rs → fn execute()
         0xA1 => {
-            if machine.has_operand_size_prefix {
-                mov32::mov_eax_address32(machine, &full_bytes);
+            let addr_size = if machine.has_address_size_prefix {
+                32
             } else {
-                // Для 16-битного режима: читаем слово в AX (стандартное поведение 8086)
-                mov::mov_ax_address16(machine, &full_bytes);
+                16
+            };
+            let op_size = if machine.has_operand_size_prefix {
+                32
+            } else {
+                16
+            };
+
+            match (addr_size, op_size) {
+                (16, 16) => mov::mov_ax_address16(machine, &full_bytes),
+                (16, 32) => mov32::mov_eax_address16(machine, &full_bytes),
+                (32, 16) => mov::mov_ax_address32(machine, &full_bytes),
+                (32, 32) => mov32::mov_eax_address32(machine, &full_bytes),
+                _ => {
+                    log::error!(
+                        "Invalid addr_size/op_size combination: {}/{} at CS:IP={:#04x}:{:#04x}",
+                        addr_size,
+                        op_size,
+                        machine.registers.cs(),
+                        machine.registers.ip()
+                    );
+                    machine.halted = true;
+                }
             }
         }
         0xA3 => {
@@ -485,7 +475,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                     let df = (machine.registers.flags() & (1 << 10)) != 0;
 
                     let video_size = 320 * 200; // 64000 байт
-                    if si + cx > video_size || di + cx > video_size {
+                    if si.saturating_add(cx) > video_size || di.saturating_add(cx) > video_size {
                         // Выход за пределы видеопамяти — используем стандартную реализацию
                         while machine.registers.cx() != 0 {
                             mov::movsb(machine, &full_bytes);
@@ -854,7 +844,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         }
         0xFE => alu::group_fe_rm8(machine, &full_bytes),
         0xFF => {
-            let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+            let modrm_byte = machine.read_instr_u8(machine.registers.ip());
             let modrm = ModRm::from_byte(modrm_byte);
 
             match modrm.reg_field {
@@ -964,9 +954,9 @@ fn execute_0f(machine: &mut DosMachine, opcode: u8) {
         }
         0xB7 => {
             if machine.has_operand_size_prefix {
-                extended::movzx_r16_rm8(machine, &full_bytes);
-            } else {
                 extended32::movzx_r32_rm16(machine, &full_bytes);
+            } else {
+                extended::movzx_r16_rm8(machine, &full_bytes);
             }
         }
         _ => {

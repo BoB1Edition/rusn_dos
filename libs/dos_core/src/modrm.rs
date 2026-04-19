@@ -42,13 +42,16 @@ impl ModRm {
                 1 => machine.registers.ecx(),
                 2 => machine.registers.edx(),
                 3 => machine.registers.ebx(),
-                4 => 0,
+                4 => {
+                    log::error!("SIB not unimplemented");
+                    unimplemented!("addr32_mode: 4");
+                },
                 5 => {
                     if self.mod_field == 0 {
                         // [disp32]
                         let disp = machine.read_u32(machine.registers.cs(), machine.registers.ip());
                         machine.registers.step(Some(4));
-                        return Some(((segment as u32) << 4).wrapping_add(disp) & 0xFFFFF);
+                        return Some(((segment as u32) << 4).wrapping_add(disp));
                     } else {
                         machine.registers.esp()
                     }
@@ -61,7 +64,7 @@ impl ModRm {
             let disp = match self.mod_field {
                 0 => 0,
                 1 => {
-                    let d = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8
+                    let d = machine.read_instr_u8(machine.registers.ip())
                         as i32;
                     machine.registers.step(None);
                     d
@@ -75,7 +78,7 @@ impl ModRm {
             };
 
             let linear = (base as i32).wrapping_add(disp) as u32;
-            Some(((segment as u32) << 4).wrapping_add(linear) & 0xFFFFF)
+            Some(((segment as u32) << 4).wrapping_add(linear))
         } else {
             let (base, index) = match self.rm_field {
                 0 => (machine.registers.bx(), machine.registers.si()),
@@ -95,7 +98,7 @@ impl ModRm {
                         } else {
                             segment
                         };
-                        return Some(((seg as u32) << 4).wrapping_add(disp as u32) & 0xFFFFF);
+                        return Some(((seg as u32) << 4).wrapping_add(disp as u32));
                     } else {
                         (machine.registers.bp(), 0)
                     }
@@ -107,7 +110,7 @@ impl ModRm {
             let disp = match self.mod_field {
                 0 => 0,
                 1 => {
-                    let d = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8
+                    let d = machine.read_instr_u8(machine.registers.ip())
                         as i16;
                     machine.registers.step(None);
                     d as i32
@@ -131,7 +134,7 @@ impl ModRm {
                 segment
             };
 
-            Some(((effective_segment as u32) << 4).wrapping_add(effective) & 0xFFFFF)
+            Some(((effective_segment as u32) << 4).wrapping_add(effective))
         }
     }
 }

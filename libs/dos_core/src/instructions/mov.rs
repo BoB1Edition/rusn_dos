@@ -628,8 +628,8 @@ pub fn lea_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
 ///   00 100 = [SI],    00 101 = [DI],    00 110 = disp16,   00 111 = [BX]
 ///   01 xxx = [reg+disp8], 10 xxx = [reg+disp16]
 fn compute_lea_offset_16(machine: &mut DosMachine, modrm: &ModRm, bytes: &mut Vec<u8>) -> u16 {
-    let mod_field = (modrm.mod_field >> 6) & 0x03;
-    let rm_field = modrm.rm_field & 0x07;
+    let mod_field = modrm.mod_field; // ← уже 0-3
+    let rm_field = modrm.rm_field; // ← уже 0-7
 
     // Определяем базовый адрес на основе поля rm_field и mod_field
     let base = match (mod_field, rm_field) {
@@ -829,5 +829,36 @@ pub fn mov_bp_imm16(machine: &mut DosMachine, prev: &[u8]) {
     // Загружаем значение в регистр BP
     machine.registers.set_bp(imm16);
 
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn mov_ax_address32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 32-битное смещение из потока инструкций
+    let addr32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(4));
+    bytes.extend_from_slice(&addr32.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса override
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    
+    // В реальном режиме 32-битный адрес усекается до 16 бит перед применением сегмента
+    // Это поведение совместимо с 80386+ в real mode
+    let offset = (addr32 & 0xFFFF) as u16;
+    
+    // Читаем 16-битное значение из памяти (без префикса 0x66 = 16 бит)
+    let value = machine.read_u16(segment, offset);
+    
+    // Записываем в AX (не EAX!)
+    machine.registers.set_ax(value);
+    
+    let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+    log::trace!(
+        "MOV AX, [addr32]: segment={:#04x}, offset32={:#08x}, offset16={:#04x}, phys={:#06x}, value={:#04x}",
+        segment, addr32, offset, phys_addr, value
+    );
+    
     machine.log_instruction(csip, &bytes).ok();
 }

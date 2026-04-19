@@ -1,4 +1,4 @@
-// Ver: 6
+// Ver: 1
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn call(machine: &mut DosMachine, prev: &[u8]) {

@@ -107,6 +107,7 @@ impl DosMachine {
             2 => self.registers.ss(),
             3 => self.registers.ds(),
             4 => self.registers.fs(),
+            5 => self.registers.gs(),
             _ => 0, // зарезервировано
         }
     }
@@ -227,15 +228,15 @@ impl DosMachine {
         let segment = self.override_segment.unwrap_or(default_segment);
         let raw_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         let addr = self.apply_a20_mask(raw_addr);
-
-        if self.video.mode == VideoMode::Mode13h && addr >= 0xA0000 && addr < 0xB0000 {
-            if let Some(fb) = self.video.framebuffer.as_mut() {
-                let video_offset = (addr - 0xA0000) as usize;
-                if video_offset < 320 * 200 {
+        if addr >= 0xA0000 && addr < 0xC0000 {
+            if self.video.mode == VideoMode::Mode13h && addr < 0xA0000 + 320 * 200 {
+                if let Some(fb) = self.video.framebuffer.as_mut() {
+                    let video_offset = (addr - 0xA0000) as usize;
                     fb.data[video_offset] = value;
                     self.video.dirty = true;
                 }
             }
+            return;
         }
 
         if addr < self.memory.len() as u32 {
@@ -244,6 +245,7 @@ impl DosMachine {
             log::error!("Memory write out of bounds: {:#x}", addr);
         }
     }
+
     #[inline(always)]
     pub fn write_u16(&mut self, default_segment: u16, offset: u16, value: u16) {
         let segment = self.override_segment.unwrap_or(default_segment);
@@ -305,70 +307,11 @@ impl DosMachine {
     pub fn print_char(&self) {
         let ch = self.registers.dl() as char;
         print!("{}", ch);
-        std::io::stdout().flush().ok(); // Сразу сбросить буфер для немедленного отображения
+        std::io::stdout().flush().ok();
     }
 
-    fn direct_console_io(&mut self) {
-        let dl = self.registers.dl();
-
-        if dl == 0xFF {
-            // Неблокирующий ввод — в неинтерактивном режиме всегда возвращаем "нет ввода"
-            self.registers.set_al(0); // AL не определён по спецификации, но устанавливаем 0 для определённости
-            // Устанавливаем флаг ZF=1 (нет ввода)
-            let mut flags = self.registers.flags();
-            flags |= 1 << 6; // ZF = 1
-            self.registers.set_flags(flags);
-        } else {
-            // Вывод символа
-            let ch = dl as char;
-            print!("{}", ch);
-            std::io::stdout().flush().ok();
-
-            // Устанавливаем AL = DL (эхо символа)
-            self.registers.set_al(dl);
-
-            // Сбрасываем флаг ZF=0
-            let mut flags = self.registers.flags();
-            flags &= !(1 << 6); // ZF = 0
-            self.registers.set_flags(flags);
-        }
-    }
     pub fn handle_int2f(&mut self) {
         interrupts::dos::handle_int2f(self);
-    }
-
-    fn open_file(&mut self) {
-        // AL = режим доступа (биты 0-2: 0=только чтение, 1=только запись, 2=чтение+запись)
-        let access_mode = self.registers.al() & 0x07;
-
-        // DS:DX = указатель на строку с именем файла (заканчивается нулём)
-        let mut addr = ((self.registers.ds() as u32) << 4).wrapping_add(self.registers.dx() as u32);
-        let mut filename = String::new();
-        loop {
-            if addr >= self.memory.len() as u32 {
-                log::error!("Filename string exceeds memory bounds");
-                break;
-            }
-            let byte = self.memory.read_u8(addr);
-            if byte == 0 {
-                break;
-            }
-            filename.push(byte as char);
-            addr = addr.wrapping_add(1);
-        }
-
-        log::warn!(
-            "INT 21h / AH=3Dh: Open file '{}' (mode={}) — not fully implemented",
-            filename,
-            access_mode
-        );
-
-        // Возвращаем фиктивный дескриптор файла (5 = первый доступный после стандартных: 0=stdin, 1=stdout, 2=stderr, 3=AUX, 4=PRN)
-        // CF=0 (успех), AX=дескриптор
-        let mut flags = self.registers.flags();
-        flags &= !(1 << 0); // CF = 0
-        self.registers.set_flags(flags);
-        self.registers.set_ax(5); // фиктивный дескриптор
     }
 
     pub fn new_with_memory(memory: Memory, logfile: File) -> Self {
@@ -423,6 +366,12 @@ impl DosMachine {
         } else {
             addr & 0xFFFFF
         }
+    }
+    #[inline(always)]
+    pub fn read_instr_u8(&self, offset: u16) -> u8 {
+        let addr = ((self.registers.cs() as u32) << 4).wrapping_add(offset as u32);
+        let addr = self.apply_a20_mask(addr);
+        self.memory.read_u8(addr)
     }
 }
 

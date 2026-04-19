@@ -49,6 +49,33 @@ pub fn mov_edx_data(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_edx(data);
 }
 
+pub fn mov_eax_address16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 16-битное смещение из потока инструкций
+    let addr16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    machine.registers.step(Some(2));
+    bytes.extend_from_slice(&addr16.to_le_bytes());
+    
+    // Определяем сегмент с учётом префикса override
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    
+    // Читаем 32-битное значение из памяти (префикс 0x66 влияет на размер данных)
+    let value = machine.read_u32(segment, addr16);
+    
+    // Записываем в EAX (не AX!)
+    machine.registers.set_eax(value);
+    
+    let phys_addr = ((segment as u32) << 4).wrapping_add(addr16 as u32);
+    log::trace!(
+        "MOV EAX, [addr16]: segment={:#04x}, offset={:#04x}, phys={:#06x}, value={:#08x}",
+        segment, addr16, phys_addr, value
+    );
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
 pub fn mov_ebx_data(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();

@@ -1,38 +1,5 @@
-// Ver: 2
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
-
-/*pub fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let mut bytes = prev.to_vec();
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None);
-
-    bytes.push(modrm_byte);
-
-    let modrm = ModRm::from_byte(modrm_byte);
-
-    let src_val = if modrm.is_register_mode() {
-        machine.read_reg8(modrm.rm_field)
-    } else {
-        let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap();
-        machine.read_phys_u8(addr)
-    };
-    let dst_val = machine.read_reg8(modrm.rm_field); // приёмник
-    let res = (dst_val as u16) + (src_val as u16);
-    let result = res as u8;
-
-    let cf = res > 0xFF;
-    let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
-    let of = (((dst_val ^ src_val) & 0x80) == 0) && ((dst_val ^ result) & 0x80) != 0;
-
-    machine.write_reg8(modrm.rm_field, result);
-    machine
-        .registers
-        .set_flags(flags::compute_flags_u8(result, cf, of, af));
-    machine.log_instruction(csip, &bytes).ok();
-}*/
 
 pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
@@ -42,15 +9,11 @@ pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
     
-    // ← ИСПРАВЛЕНИЕ: Источник = регистр из `reg_field`
     let src_val = machine.read_reg8(modrm.reg_field);
     
-    // ← ИСПРАВЛЕНИЕ: Приёмник = регистр или память из `rm_field`
     let (dst_val, is_register, addr) = if modrm.is_register_mode() {
-        // Приёмник — регистр
         (machine.read_reg8(modrm.rm_field), true, 0)
     } else {
-        // Приёмник — память
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
@@ -58,23 +21,18 @@ pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
         (machine.read_phys_u8(addr), false, addr)
     };
     
-    // Выполняем сложение
     let res = (dst_val as u16) + (src_val as u16);
     let result = res as u8;
     
-    // Вычисляем флаги
     let cf = res > 0xFF;
     let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
     let of = (((dst_val ^ src_val) & 0x80) == 0) && ((dst_val ^ result) & 0x80) != 0;
-    
-    // ← ИСПРАВЛЕНИЕ: Сохраняем результат в приёмник
     if is_register {
         machine.write_reg8(modrm.rm_field, result);
     } else {
         machine.write_phys_u8(addr, result);
     }
-    
-    // Устанавливаем флаги
+
     machine
         .registers
         .set_flags(flags::compute_flags_u8(result, cf, of, af));
@@ -133,7 +91,7 @@ pub fn add_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
 pub fn add_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(imm8);
     let al = machine.registers.al();
@@ -149,12 +107,12 @@ pub fn add_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let result_sign = (result8 as i8) < 0;
     let of = (al_sign == imm_sign) && (result_sign != al_sign);
     let mut flags = 0u16;
-    if cf { flags |= 1 << 0; }   // CF
-    if pf { flags |= 1 << 2; }   // PF
-    if af { flags |= 1 << 4; }   // AF
-    if zf { flags |= 1 << 6; }   // ZF
-    if sf { flags |= 1 << 7; }   // SF
-    if of { flags |= 1 << 11; }  // OF
+    if cf { flags |= 1 << 0; }
+    if pf { flags |= 1 << 2; }
+    if af { flags |= 1 << 4; }
+    if zf { flags |= 1 << 6; }
+    if sf { flags |= 1 << 7; }
+    if of { flags |= 1 << 11; }
     machine.registers.set_flags(flags);
     machine.registers.set_al(result8);
     machine.log_instruction(csip, &bytes).ok();

@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 1
 
 use std::ops::{Index, IndexMut};
 
@@ -10,7 +10,7 @@ pub struct Memory {
 
 impl Memory {
     pub fn new() -> Self {
-        const DOS_MEMORY_SIZE: usize = 0x110000; // 1 MiB + 64 KiB
+        const DOS_MEMORY_SIZE: usize = 0x110000;
         Self {
             data: vec![0u8; DOS_MEMORY_SIZE].into_boxed_slice(),
             size: DOS_MEMORY_SIZE,
@@ -24,8 +24,6 @@ impl Memory {
         }
     }
 
-    // В memory.rs
-
     #[inline(always)]
     pub fn read_u8(&self, addr: u32) -> u8 {
         if addr >= self.size as u32 {
@@ -33,7 +31,6 @@ impl Memory {
             return 0;
         }
 
-        // ← ИСПРАВЛЕНИЕ: логируем ОБА адреса теста A20
         if addr == 0x000000 || addr == 0x100000 || addr >= 0x100000 {
             log::debug!(
                 "MEM READ: addr={:#x}, value={:#02x}",
@@ -52,7 +49,6 @@ impl Memory {
             return;
         }
 
-        // ← ИСПРАВЛЕНИЕ: логируем ОБА адреса теста A20
         if addr == 0x000000 || addr == 0x100000 || addr >= 0x100000 {
             log::debug!("MEM WRITE: addr={:#x}, value={:#02x}", addr, value);
         }
@@ -87,11 +83,11 @@ impl Memory {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.data[..self.size.min(0x100000)]
+        &self.data[..self.size]
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        &mut self.data[..self.size.min(0x100000)]
+        &mut self.data[..self.size]
     }
 
     pub fn len(&self) -> usize {

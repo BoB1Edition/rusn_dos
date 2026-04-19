@@ -1,4 +1,4 @@
-// Ver: 4
+// Ver: 1
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn push_cs(machine: &mut DosMachine) {
@@ -119,15 +119,12 @@ pub fn pushad(machine: &mut DosMachine) {
         machine.registers.esi(),
         machine.registers.edi(),
     ];
+    let base = (machine.registers.ss() as u32) << 4;
     for &reg in regs.iter().rev() {
-        machine
-            .registers
-            .set_esp(machine.registers.esp().wrapping_sub(4));
-        let sp = machine.registers.sp();
-        machine.write_phys_u32(
-            (machine.registers.ss() as u32 * 16 + sp as u32) & 0xFFFFF,
-            reg,
-        );
+        let new_esp = machine.registers.esp().wrapping_sub(4);
+        machine.registers.set_esp(new_esp);
+        let phys_addr = base.wrapping_add(new_esp); // A20 применится в write_phys_u32
+        machine.write_phys_u32(phys_addr, reg);
     }
     let csip = [machine.registers.cs(), machine.registers.ip()];
     machine.log_instruction(csip, &[0x66, 0x60]).ok();
@@ -187,57 +184,33 @@ pub fn popa(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x61]).ok();
 }
 
-/// POPAD — восстановление всех 32-битных регистров из стека
-/// Аналогично POPA, но с 32-битными значениями и игнорированием оригинального ESP
 pub fn popad(machine: &mut DosMachine) {
-    let edi = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
+    let base = (machine.registers.ss() as u32) << 4;
+    let mut esp = machine.registers.esp();
+    
+    // Читаем в порядке: EDI, ESI, EBP, [skip ESP], EBX, EDX, ECX, EAX
+    let edi = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    let esi = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    let ebp = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    
+    // Пропускаем сохранённое значение ESP (стандартное поведение POPAD)
+    esp = esp.wrapping_add(4);
+    
+    let ebx = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    let edx = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    let ecx = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    let eax = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
+    
+    // Восстанавливаем регистры
     machine.registers.set_edi(edi);
-
-    let esi = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
     machine.registers.set_esi(esi);
-
-    let ebp = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
     machine.registers.set_ebp(ebp);
-
-    // Пропускаем оригинальное значение ESP (сохранённое при PUSHAD)
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
-
-    let ebx = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
+    machine.registers.set_esp(esp);
     machine.registers.set_ebx(ebx);
-
-    let edx = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
     machine.registers.set_edx(edx);
-
-    let ecx = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
     machine.registers.set_ecx(ecx);
-
-    let eax = machine.read_u32(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(4));
     machine.registers.set_eax(eax);
-
-    // Логирование
+    
     let csip = [machine.registers.cs(), machine.registers.ip()];
     machine.log_instruction(csip, &[0x66, 0x61]).ok();
 }
@@ -326,10 +299,12 @@ pub fn push_imm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
     machine.registers.step(Some(4));
-    let new_sp = machine.registers.sp().wrapping_sub(4);
-    machine.registers.set_sp(new_sp);
-    machine.write_phys_u32(new_sp as u32, imm32);
-    // Логирование (упрощённо)
+    
+    let new_esp = machine.registers.esp().wrapping_sub(4);
+    machine.registers.set_esp(new_esp);
+    let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_esp);
+    machine.write_phys_u32(phys_addr, imm32);
+    
     machine.log_instruction(csip, prev).ok();
 }
 

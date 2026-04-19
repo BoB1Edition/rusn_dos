@@ -1,0 +1,78 @@
+.
+├── app
+├── Cargo.lock
+├── Cargo.toml
+├── config.json
+├── config.toml
+├── libs
+│   └── dos_core
+│       ├── Cargo.toml
+│       └── src
+│           ├── consts.rs
+│           ├── cpu
+│           │   ├── executor.rs
+│           │   ├── flags.rs
+│           │   └── mod.rs
+│           ├── filesystem.rs
+│           ├── instructions
+│           │   ├── alu
+│           │   │   ├── arithmetic.rs
+│           │   │   ├── group.rs
+│           │   │   ├── logical.rs
+│           │   │   ├── mod.rs
+│           │   │   └── shift.rs
+│           │   ├── alu32
+│           │   │   ├── arithmetic.rs
+│           │   │   ├── group.rs
+│           │   │   ├── logical.rs
+│           │   │   ├── mod.rs
+│           │   │   └── shift.rs
+│           │   ├── bcd.rs
+│           │   ├── control.rs
+│           │   ├── control32.rs
+│           │   ├── exchange.rs
+│           │   ├── extended.rs
+│           │   ├── extended32.rs
+│           │   ├── mod.rs
+│           │   ├── mov.rs
+│           │   ├── mov32.rs
+│           │   ├── segment.rs
+│           │   ├── stack.rs
+│           │   └── system.rs
+│           ├── interrupts
+│           │   ├── bios.rs
+│           │   ├── dos.rs
+│           │   └── mod.rs
+│           ├── lib.rs
+│           ├── loader
+│           │   ├── com_loader.rs
+│           │   ├── exe_header.rs
+│           │   ├── exe_loader.rs
+│           │   └── mod.rs
+│           ├── machine.rs
+│           ├── memory.rs
+│           ├── modrm.rs
+│           ├── registers.rs
+│           ├── utils
+│           │   └── logging.rs
+│           └── video
+│               └── mod.rs
+├── shufled.py
+├── src
+│   ├── app.rs
+│   └── main.rs
+├── test
+│   ├── game1.asm
+│   ├── hard_emuland.asm
+│   ├── tasm_test3.asm
+│   ├── tasm_test4.asm
+│   ├── tasm_work.asm
+│   ├── tasm_work2.asm
+│   ├── test1.asm
+│   ├── test2.asm
+│   ├── test3.asm
+│   ├── test4.asm
+│   └── working.asm
+├── test.sh
+└── tree.tree
+

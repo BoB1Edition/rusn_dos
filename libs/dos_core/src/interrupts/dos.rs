@@ -114,6 +114,7 @@ fn adjust_memory_block(machine: &mut DosMachine) {
         flags |= 1 << 0; // CF = 1
         machine.registers.set_flags(flags);
         machine.registers.set_ax(0x08); // Код ошибки: недостаточно памяти
+        machine.registers.set_bx(0xA000);
     }
 }
 
@@ -279,8 +280,8 @@ fn write_file(machine: &mut DosMachine) {
 
 fn seek_file(machine: &mut DosMachine) {
     let handle = machine.registers.bx();
-    let offset_low = machine.registers.cx() as u16;
-    let offset_high = machine.registers.dx() as u16;
+    let offset_high = machine.registers.cx() as i32;
+    let offset_low = machine.registers.dx() as i32;
     let origin = machine.registers.al();
     
     // Собираем 32-битное смещение (little-endian)
