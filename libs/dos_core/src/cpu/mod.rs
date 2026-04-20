@@ -3,7 +3,7 @@
 //! 
 //! Содержит компоненты для обработки флагов, префиксов и выполнения инструкций.
 
-pub mod flags;
-pub mod executor;
+pub(crate) mod flags;
+pub(crate) mod executor;
 
 

@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 1
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;

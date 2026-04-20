@@ -18,5 +18,5 @@ pub mod filesystem;
 pub mod video;
 
 pub use filesystem::DiskDriver;
-pub use cpu::flags;
-pub use cpu::executor;
+pub(crate) use cpu::flags;
+pub(crate) use cpu::executor;

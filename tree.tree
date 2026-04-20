@@ -7,56 +7,58 @@
 ├── libs
 │   └── dos_core
 │       ├── Cargo.toml
-│       └── src
-│           ├── consts.rs
-│           ├── cpu
-│           │   ├── executor.rs
-│           │   ├── flags.rs
-│           │   └── mod.rs
-│           ├── filesystem.rs
-│           ├── instructions
-│           │   ├── alu
-│           │   │   ├── arithmetic.rs
-│           │   │   ├── group.rs
-│           │   │   ├── logical.rs
-│           │   │   ├── mod.rs
-│           │   │   └── shift.rs
-│           │   ├── alu32
-│           │   │   ├── arithmetic.rs
-│           │   │   ├── group.rs
-│           │   │   ├── logical.rs
-│           │   │   ├── mod.rs
-│           │   │   └── shift.rs
-│           │   ├── bcd.rs
-│           │   ├── control.rs
-│           │   ├── control32.rs
-│           │   ├── exchange.rs
-│           │   ├── extended.rs
-│           │   ├── extended32.rs
-│           │   ├── mod.rs
-│           │   ├── mov.rs
-│           │   ├── mov32.rs
-│           │   ├── segment.rs
-│           │   ├── stack.rs
-│           │   └── system.rs
-│           ├── interrupts
-│           │   ├── bios.rs
-│           │   ├── dos.rs
-│           │   └── mod.rs
-│           ├── lib.rs
-│           ├── loader
-│           │   ├── com_loader.rs
-│           │   ├── exe_header.rs
-│           │   ├── exe_loader.rs
-│           │   └── mod.rs
-│           ├── machine.rs
-│           ├── memory.rs
-│           ├── modrm.rs
-│           ├── registers.rs
-│           ├── utils
-│           │   └── logging.rs
-│           └── video
-│               └── mod.rs
+│       ├── src
+│       │   ├── consts.rs
+│       │   ├── cpu
+│       │   │   ├── executor.rs
+│       │   │   ├── flags.rs
+│       │   │   └── mod.rs
+│       │   ├── filesystem.rs
+│       │   ├── instructions
+│       │   │   ├── alu
+│       │   │   │   ├── arithmetic.rs
+│       │   │   │   ├── group.rs
+│       │   │   │   ├── logical.rs
+│       │   │   │   ├── mod.rs
+│       │   │   │   └── shift.rs
+│       │   │   ├── alu32
+│       │   │   │   ├── arithmetic.rs
+│       │   │   │   ├── group.rs
+│       │   │   │   ├── logical.rs
+│       │   │   │   ├── mod.rs
+│       │   │   │   └── shift.rs
+│       │   │   ├── bcd.rs
+│       │   │   ├── control.rs
+│       │   │   ├── control32.rs
+│       │   │   ├── exchange.rs
+│       │   │   ├── extended.rs
+│       │   │   ├── extended32.rs
+│       │   │   ├── mod.rs
+│       │   │   ├── mov.rs
+│       │   │   ├── mov32.rs
+│       │   │   ├── segment.rs
+│       │   │   ├── stack.rs
+│       │   │   └── system.rs
+│       │   ├── interrupts
+│       │   │   ├── bios.rs
+│       │   │   ├── dos.rs
+│       │   │   ├── ems.rs
+│       │   │   └── mod.rs
+│       │   ├── lib.rs
+│       │   ├── loader
+│       │   │   ├── com_loader.rs
+│       │   │   ├── exe_header.rs
+│       │   │   ├── exe_loader.rs
+│       │   │   └── mod.rs
+│       │   ├── machine.rs
+│       │   ├── memory.rs
+│       │   ├── modrm.rs
+│       │   ├── registers.rs
+│       │   ├── utils
+│       │   │   └── logging.rs
+│       │   └── video
+│       │       └── mod.rs
+│       └── tests
 ├── shufled.py
 ├── src
 │   ├── app.rs
@@ -74,5 +76,7 @@
 │   ├── test4.asm
 │   └── working.asm
 ├── test.sh
+├── tests
 └── tree.tree
 
+17 directories, 63 files
