@@ -55,15 +55,15 @@ pub fn or_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let result = dst | src;
         machine.write_reg32(modrm.rm_field, result);
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
+        flags &= !(flags::CF | flags::PF | flags::ZF | flags::SF | flags::OF);
         if result == 0 {
-            flags |= 1 << 6;
+            flags |= flags::ZF;
         }
         if (result & 0x8000_0000) != 0 {
-            flags |= 1 << 7;
+            flags |= flags::SF;
         }
         if (result as u8).count_ones() % 2 == 0 {
-            flags |= 1 << 2;
+            flags |= flags::PF;
         }
         machine.registers.set_flags(flags);
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
@@ -80,15 +80,15 @@ pub fn or_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let result = dst_val | src_val;
         machine.write_phys_u32(addr as u32, result);
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0 | 1 << 2 | 1 << 6 | 1 << 7 | 1 << 11);
+        flags &= !(flags::CF | flags::PF | flags::ZF | flags::SF | flags::OF);
         if result == 0 {
-            flags |= 1 << 6;
+            flags |= flags::ZF;
         }
         if (result & 0x8000_0000) != 0 {
-            flags |= 1 << 7;
+            flags |= flags::SF;
         }
         if (result as u8).count_ones() % 2 == 0 {
-            flags |= 1 << 2;
+            flags |= flags::PF;
         }
         machine.registers.set_flags(flags);
     } else {

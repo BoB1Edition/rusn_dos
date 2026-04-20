@@ -2,7 +2,7 @@
 //! Обработка прерываний DOS (INT 21h, INT 2Fh)
 //! Содержит реализацию основных функций DOS API
 
-use crate::DosMachine;
+use crate::{DosMachine, flags};
 use log::error;
 use std::io::{Read, Write};
 
@@ -56,7 +56,7 @@ fn direct_console_io(machine: &mut DosMachine) {
         // Неблокирующий ввод — в неинтерактивном режиме всегда "нет ввода"
         machine.registers.set_al(0);
         let mut flags = machine.registers.flags();
-        flags |= 1 << 6; // ZF = 1
+        flags |= flags::ZF; // ZF = 1
         machine.registers.set_flags(flags);
     } else {
         // Вывод символа
@@ -69,7 +69,7 @@ fn direct_console_io(machine: &mut DosMachine) {
         
         // Сбрасываем флаг ZF
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 6); // ZF = 0
+        flags &= !(flags::ZF); // ZF = 0
         machine.registers.set_flags(flags);
     }
 }
@@ -106,12 +106,12 @@ fn adjust_memory_block(machine: &mut DosMachine) {
     if requested_paragraphs <= MAX_CONVENTIONAL_MEMORY_PARAGRAPHS {
         // Успех: сбрасываем флаг переноса (CF=0)
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0); // CF = 0
+        flags &= !(flags::CF); // CF = 0
         machine.registers.set_flags(flags);
     } else {
         // Ошибка: недостаточно памяти
         let mut flags = machine.registers.flags();
-        flags |= 1 << 0; // CF = 1
+        flags |= flags::CF; // CF = 1
         machine.registers.set_flags(flags);
         machine.registers.set_ax(0x08); // Код ошибки: недостаточно памяти
         machine.registers.set_bx(0xA000);
@@ -129,7 +129,7 @@ fn read_char_with_echo(machine: &mut DosMachine) {
     
     machine.registers.set_al(ch);
     let mut flags = machine.registers.flags();
-    flags &= !(1 << 6); // ZF = 0
+    flags &= !(flags::ZF); // ZF = 0
     machine.registers.set_flags(flags);
 }
 
@@ -152,9 +152,9 @@ fn extract_filename(machine: &DosMachine) -> String {
 fn set_carry_flag(machine: &mut DosMachine, value: bool) {
     let mut flags = machine.registers.flags();
     if value {
-        flags |= 1 << 0; // CF = 1
+        flags |= flags::CF; // CF = 1
     } else {
-        flags &= !(1 << 0); // CF = 0
+        flags &= !(flags::CF); // CF = 0
     }
     machine.registers.set_flags(flags);
 }

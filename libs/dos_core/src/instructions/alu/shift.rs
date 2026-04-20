@@ -424,9 +424,9 @@ fn rol16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     let of = count == 1 && ((value ^ result) & 0x8000) != 0; // OF для вращения на 1: изменился ли знак?
 
     let mut flags = machine.registers.flags();
-    flags = (flags & !(1 << 0)) | (cf as u16); // CF
+    flags = (flags & !(flags::CF)) | (cf as u16); // CF
     if count == 1 {
-        flags = (flags & !(1 << 11)) | ((of as u16) << 11); // OF только для count=1
+        flags = (flags & !(flags::OF)) | ((of as u16) << 11); // OF только для count=1
     }
     machine.registers.set_flags(flags);
 
@@ -442,9 +442,9 @@ fn ror16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     let of = count == 1 && ((result ^ (result >> 1)) & 0x8000) != 0; // OF для вращения на 1
 
     let mut flags = machine.registers.flags();
-    flags = (flags & !(1 << 0)) | (cf as u16); // CF
+    flags = (flags & !(flags::CF)) | (cf as u16); // CF
     if count == 1 {
-        flags = (flags & !(1 << 11)) | ((of as u16) << 11); // OF только для count=1
+        flags = (flags & !(flags::OF)) | ((of as u16) << 11); // OF только для count=1
     }
     machine.registers.set_flags(flags);
 
@@ -468,9 +468,9 @@ fn rcl16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     let of = count == 1 && (((value as i16) < 0) != ((result as i16) < 0)); // изменился ли знак?
 
     let mut flags = machine.registers.flags();
-    flags = (flags & !(1 << 0)) | (cf as u16); // CF
+    flags = (flags & !(flags::CF)) | (cf as u16); // CF
     if count == 1 {
-        flags = (flags & !(1 << 11)) | ((of as u16) << 11); // OF только для count=1
+        flags = (flags & !(flags::OF)) | ((of as u16) << 11); // OF только для count=1
     }
     machine.registers.set_flags(flags);
 
@@ -494,9 +494,9 @@ fn rcr16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     let of = count == 1 && (((value as i16) < 0) != ((result as i16) < 0));
 
     let mut flags = machine.registers.flags();
-    flags = (flags & !(1 << 0)) | (cf as u16); // CF
+    flags = (flags & !(flags::CF)) | (cf as u16); // CF
     if count == 1 {
-        flags = (flags & !(1 << 11)) | ((of as u16) << 11); // OF только для count=1
+        flags = (flags & !(flags::OF)) | ((of as u16) << 11); // OF только для count=1
     }
     machine.registers.set_flags(flags);
 

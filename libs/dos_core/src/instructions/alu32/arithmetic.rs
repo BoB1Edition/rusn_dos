@@ -25,21 +25,21 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_reg32(modrm.rm_field, result);
         // Установка флагов...
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
+        flags &= !(flags::CF | flags::AF | flags::ZF | flags::SF | flags::OF);
         if result == 0 {
-            flags |= 1 << 6;
+            flags |= flags::ZF;
         }
         if (result & 0x8000_0000) != 0 {
-            flags |= 1 << 7;
+            flags |= flags::SF;
         }
         if cf {
-            flags |= 1 << 0;
+            flags |= flags::CF;
         }
         if of {
-            flags |= 1 << 11;
+            flags |= flags::OF;
         }
         if af {
-            flags |= 1 << 4;
+            flags |= flags::AF;
         }
         machine.registers.set_flags(flags);
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b110 {
@@ -64,21 +64,21 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_phys_u32(phys_addr, result);
         // Установка флагов...
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
+        flags &= !(flags::CF | flags::AF | flags::ZF | flags::SF | flags::OF);
         if result == 0 {
-            flags |= 1 << 6;
+            flags |= flags::ZF;
         }
         if (result & 0x8000_0000) != 0 {
-            flags |= 1 << 7;
+            flags |= flags::SF;
         }
         if cf {
-            flags |= 1 << 0;
+            flags |= flags::CF;
         }
         if of {
-            flags |= 1 << 11;
+            flags |= flags::OF;
         }
         if af {
-            flags |= 1 << 4;
+            flags |= flags::AF;
         }
         machine.registers.set_flags(flags);
     } else {
@@ -112,24 +112,24 @@ pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
         machine.write_reg32(modrm.reg_field, result);
 
         let mut flags = machine.registers.flags();
-        flags &= !(1 << 0 | 1 << 2 | 1 << 4 | 1 << 6 | 1 << 7 | 1 << 11);
+        flags &= !(flags::CF | flags::PF | flags::AF | flags::ZF | flags::SF | flags::OF);
         if result == 0 {
-            flags |= 1 << 6;
+            flags |= flags::ZF;
         }
         if (result & 0x8000_0000) != 0 {
-            flags |= 1 << 7;
+            flags |= flags::SF;
         }
         if (result as u8).count_ones() % 2 == 0 {
-            flags |= 1 << 2;
+            flags |= flags::PF;
         }
         if cf {
-            flags |= 1 << 0;
+            flags |= flags::CF;
         }
         if of {
-            flags |= 1 << 11;
+            flags |= flags::OF;
         }
         if af {
-            flags |= 1 << 4;
+            flags |= flags::AF;
         }
         machine.registers.set_flags(flags);
     } else {
@@ -193,12 +193,12 @@ pub fn add_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
     let of = (((eax ^ imm32) & 0x8000_0000) == 0) && ((eax ^ result) & 0x8000_0000) != 0;
     
     let mut flags = 0u16;
-    if cf { flags |= 1 << 0; }
-    if pf { flags |= 1 << 2; }
-    if af { flags |= 1 << 4; }
-    if zf { flags |= 1 << 6; }
-    if sf { flags |= 1 << 7; }
-    if of { flags |= 1 << 11; }
+    if cf { flags |= flags::CF; }
+    if pf { flags |= flags::PF; }
+    if af { flags |= flags::AF; }
+    if zf { flags |= flags::ZF; }
+    if sf { flags |= flags::SF; }
+    if of { flags |= flags::OF; }
     machine.registers.set_flags(flags);
     
     machine.registers.set_eax(result);
@@ -348,8 +348,8 @@ pub fn imul_r32_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
     
     // Устанавливаем флаги CF и OF
     let mut flags = machine.registers.flags();
-    flags = (flags & !(1 << 0)) | (overflow as u16);
-    flags = (flags & !(1 << 11)) | ((overflow as u16) << 11);
+    flags = (flags & !(flags::CF)) | (overflow as u16);
+    flags = (flags & !(flags::OF)) | ((overflow as u16) << 11);
     machine.registers.set_flags(flags);
     
     // Сохраняем усечённый результат в регистр назначения

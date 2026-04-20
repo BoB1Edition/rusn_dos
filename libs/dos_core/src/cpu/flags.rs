@@ -120,17 +120,17 @@ pub fn test_pf(flags: u16) -> bool {
 
 #[inline]
 pub fn clear_df(flags: &mut u16) {
-    *flags &= !(1 << 10);
+    *flags &= !(DF);
 }
 
 #[inline]
 pub fn set_if(flags: &mut u16) {
-    *flags |= 1 << 9;
+    *flags |= IF;
 }
 
 #[inline]
 pub fn clear_if(flags: &mut u16) {
-    *flags &= !(1 << 9);
+    *flags &= !(IF);
 }
 
 #[cfg(test)]

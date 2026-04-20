@@ -35,8 +35,15 @@ impl ComLoader {
         }
 
         let logfile = if no_log {
-            File::create("/dev/null")? // Unix
-        // File::create("NUL")?     // Windows (раскомментировать при кроссплатформенности)
+            #[cfg(target_os = "windows")]
+            {
+                File::create("NUL")?
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                File::create("/dev/null")?
+            }
         } else {
             File::create("logopcode.txt")?
         };

@@ -1,5 +1,5 @@
 // Ver: 1
-use crate::{DosMachine, instructions::control, modrm::ModRm};
+use crate::{DosMachine, flags, instructions::control, modrm::ModRm};
 
 pub fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
@@ -93,7 +93,7 @@ pub fn jz_rel32(machine: &mut DosMachine, prev: &[u8]) {
     bytes.extend_from_slice(&rel32.to_le_bytes());
     
     // Проверяем флаг ZF (бит 6)
-    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    let zf = (machine.registers.flags() & (flags::ZF)) != 0;
     
     if zf {
         // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel32)

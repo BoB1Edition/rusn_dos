@@ -1,7 +1,7 @@
 // Ver: 1
 use log::{error, warn};
 
-use crate::{interrupts::bios, machine::DosMachine};
+use crate::{flags, interrupts::{bios, ems}, machine::DosMachine};
 
 pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
@@ -17,6 +17,7 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
         0x10 => bios::handle_int10(machine),
         0x15 => bios::handle_int15(machine),
         0x16 => bios::handle_int16(machine),
+        0x67 => ems::handle_int67(machine),
         _ => {
             error!("Unsupported interrupt: INT {:#02X}", vector);
             machine.halted = true;
@@ -361,7 +362,7 @@ pub fn std(machine: &mut DosMachine, prev: &[u8]) {
 
     // Устанавливаем флаг направления DF (бит 10) в 1
     let mut flags = machine.registers.flags();
-    flags |= 1 << 10; // DF = 1
+    flags |= flags::DF; // DF = 1
     machine.registers.set_flags(flags);
 
     machine.log_instruction(csip, &bytes).ok();
@@ -459,7 +460,7 @@ pub fn outsw(machine: &mut DosMachine, prev: &[u8]) {
     }
 
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_si(si.wrapping_sub(2));
     } else {
@@ -496,7 +497,7 @@ pub fn outsd(machine: &mut DosMachine, prev: &[u8]) {
     );
 
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_esi(esi.wrapping_sub(4));
     } else {
@@ -586,7 +587,7 @@ pub fn outsb(machine: &mut DosMachine, prev: &[u8]) {
     }
 
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_si(si.wrapping_sub(1));
     } else {
@@ -659,7 +660,7 @@ pub fn insb(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_u8(machine.registers.es(), di, value);
 
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_di(di.wrapping_sub(1));
     } else {
@@ -702,7 +703,7 @@ pub fn insw(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_u16(machine.registers.es(), di, value);
 
     // Обновляем указатель в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_di(di.wrapping_sub(2));
     } else {

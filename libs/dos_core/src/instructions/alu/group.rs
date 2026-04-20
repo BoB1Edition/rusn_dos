@@ -423,10 +423,10 @@ fn group_f6_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm8
             let cf_of = product > 0xFF;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0;  // CF = 1
-                flags |= 1 << 11; // OF = 1
+                flags |= flags::CF;  // CF = 1
+                flags |= flags::OF; // OF = 1
             } else {
-                flags &= !(1 << 0 | 1 << 11); // CF = OF = 0
+                flags &= !(flags::CF | flags::OF); // CF = OF = 0
             }
             // Остальные флаги не определены (обычно не изменяются)
             machine.registers.set_flags(flags);
@@ -440,10 +440,10 @@ fn group_f6_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm8
             let cf_of = product < -128 || product > 127;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0;  // CF = 1
-                flags |= 1 << 11; // OF = 1
+                flags |= flags::CF;  // CF = 1
+                flags |= flags::OF; // OF = 1
             } else {
-                flags &= !(1 << 0 | 1 << 11); // CF = OF = 0
+                flags &= !(flags::CF | flags::OF); // CF = OF = 0
             }
             machine.registers.set_flags(flags);
         }
@@ -532,9 +532,9 @@ fn group_f6_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm8: Opt
             let cf_of = product > 0xFF;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
@@ -547,9 +547,9 @@ fn group_f6_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm8: Opt
             let cf_of = product < -128 || product > 127;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
@@ -671,10 +671,10 @@ fn group_f7_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm1
             let cf_of = product > 0xFFFF;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0;  // CF = 1
-                flags |= 1 << 11; // OF = 1
+                flags |= flags::CF;  // CF = 1
+                flags |= flags::OF; // OF = 1
             } else {
-                flags &= !(1 << 0 | 1 << 11); // CF = OF = 0
+                flags &= !(flags::CF | flags::OF); // CF = OF = 0
             }
             machine.registers.set_flags(flags);
         }
@@ -688,10 +688,10 @@ fn group_f7_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm1
             let cf_of = product < -32768 || product > 32767;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0;  // CF = 1
-                flags |= 1 << 11; // OF = 1
+                flags |= flags::CF;  // CF = 1
+                flags |= flags::OF; // OF = 1
             } else {
-                flags &= !(1 << 0 | 1 << 11); // CF = OF = 0
+                flags &= !(flags::CF | flags::OF); // CF = OF = 0
             }
             machine.registers.set_flags(flags);
         }
@@ -781,9 +781,9 @@ fn group_f7_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm16: Op
             let cf_of = product > 0xFFFF;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
@@ -797,9 +797,9 @@ fn group_f7_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm16: Op
             let cf_of = product < -32768 || product > 32767;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }

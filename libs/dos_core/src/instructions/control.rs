@@ -1,5 +1,5 @@
 // Ver: 1
-use crate::{machine::DosMachine, modrm::ModRm};
+use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub fn call(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
@@ -35,7 +35,7 @@ pub fn jz(machine: &mut DosMachine, prev: &[u8]) {
     let _ = machine.log_instruction(csip, &bytes);
     machine.registers.step(None);
 
-    if (machine.registers.flags() & (1 << 6)) != 0 {
+    if (machine.registers.flags() & (flags::ZF)) != 0 {
         let current_ip = machine.registers.ip() as i32;
         let new_ip_32 = current_ip.wrapping_add(rel8 as i32);
         let new_ip = (new_ip_32 & 0xFFFF) as u16;
@@ -197,7 +197,7 @@ pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(rel8 as u8);
 
     // Проверяем флаг нуля ZF (бит 6) — прыжок при ZF=0
-    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    let zf = (machine.registers.flags() & (flags::ZF)) != 0;
 
     if !zf {
         // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
@@ -243,8 +243,8 @@ pub fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
     // Проверяем флаги знака (SF) и переполнения (OF)
     // SF = бит 7, OF = бит 11
     let flags = machine.registers.flags();
-    let sf = (flags & (1 << 7)) != 0; // Sign Flag (бит 7)
-    let of = (flags & (1 << 11)) != 0; // Overflow Flag (бит 11)
+    let sf = (flags & (flags::SF)) != 0; // Sign Flag (бит 7)
+    let of = (flags & (flags::OF)) != 0; // Overflow Flag (бит 11)
 
     // Прыжок выполняется если SF == OF (результат >= 0 при знаковом сравнении)
     if sf == of {
@@ -308,7 +308,7 @@ pub fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_cx(new_cx);
 
     // 2. Проверяем флаг нуля ZF (бит 6)
-    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    let zf = (machine.registers.flags() & (flags::ZF)) != 0;
 
     // 3. Выполняем прыжок если CX ≠ 0 И ZF = 0 (не равно)
     if new_cx != 0 && !zf {
@@ -335,7 +335,7 @@ pub fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_cx(new_cx);
 
     // 2. Проверяем флаг нуля ZF (бит 6)
-    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    let zf = (machine.registers.flags() & (flags::ZF)) != 0;
 
     // 3. Выполняем прыжок если CX ≠ 0 И ZF = 1 (равно)
     if new_cx != 0 && zf {
@@ -358,8 +358,8 @@ pub fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
     // Проверяем флаги знака (SF, бит 7) и переполнения (OF, бит 11)
     let flags = machine.registers.flags();
-    let sf = (flags & (1 << 7)) != 0;
-    let of = (flags & (1 << 11)) != 0;
+    let sf = (flags & (flags::SF)) != 0;
+    let of = (flags & (flags::OF)) != 0;
 
     // Условие перехода: SF ≠ OF (знаковый результат отрицательный → "меньше")
     if sf != of {
@@ -416,7 +416,7 @@ pub fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(rel8 as u8);
     
     // Проверяем флаг знака SF (бит 7)
-    let sf = (machine.registers.flags() & (1 << 7)) != 0;
+    let sf = (machine.registers.flags() & (flags::SF)) != 0;
     
     // Условие перехода: SF = 0 (результат неотрицательный)
     if !sf {
@@ -446,9 +446,9 @@ pub fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
     //   SF (бит 7) = знак результата
     //   OF (бит 11) = знаковое переполнение
     let flags = machine.registers.flags();
-    let zf = (flags & (1 << 6)) != 0;
-    let sf = (flags & (1 << 7)) != 0;
-    let of = (flags & (1 << 11)) != 0;
+    let zf = (flags & (flags::ZF)) != 0;
+    let sf = (flags & (flags::SF)) != 0;
+    let of = (flags & (flags::OF)) != 0;
     
     // Условие перехода: ZF = 0 AND SF = OF (знаковый результат положительный)
     if !zf && (sf == of) {
@@ -517,9 +517,9 @@ pub fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(rel8 as u8);
     
     let flags = machine.registers.flags();
-    let zf = (flags & (1 << 6)) != 0;
-    let sf = (flags & (1 << 7)) != 0;
-    let of = (flags & (1 << 11)) != 0;
+    let zf = (flags & (flags::ZF)) != 0;
+    let sf = (flags & (flags::SF)) != 0;
+    let of = (flags & (flags::OF)) != 0;
     
     if zf || (sf != of) {
         let current_ip = machine.registers.ip() as i32;
@@ -653,7 +653,7 @@ pub fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
     bytes.extend_from_slice(&rel16.to_le_bytes());
     
     // Проверяем флаг ZF (бит 6)
-    let zf = (machine.registers.flags() & (1 << 6)) != 0;
+    let zf = (machine.registers.flags() & (flags::ZF)) != 0;
     
     if zf {
         // Вычисляем новый IP: текущий IP + sign_extend(rel16)

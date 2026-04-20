@@ -18,8 +18,6 @@ pub(crate) struct Registers {
     fs: u16,
     gs: u16,
     flags: u16,
-    eflags: u16,
-    rflags: u32,
 }
 
 impl Registers {

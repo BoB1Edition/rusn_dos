@@ -378,7 +378,7 @@ pub fn stosw(machine: &mut DosMachine, prev: &[u8]) {
     let bytes = prev.to_vec();
 
     // Читаем флаг направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
 
     // Записываем слово AX в [ES:DI]
     let ax = machine.registers.ax();
@@ -477,7 +477,7 @@ pub fn stosb(machine: &mut DosMachine, prev: &[u8]) {
     let bytes = prev.to_vec();
 
     // Читаем флаг направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
 
     // Записываем байт AL в [ES:DI]
     let al = machine.registers.al();
@@ -532,7 +532,7 @@ pub fn lodsb(machine: &mut DosMachine, prev: &[u8]) {
     let segment = machine.override_segment.unwrap_or(machine.registers.ds());
 
     // Читаем флаг направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
 
     // Загружаем байт из [segment:SI] в AL
     let si = machine.registers.si();
@@ -727,7 +727,7 @@ pub fn cmpsb(machine: &mut DosMachine, prev: &[u8]) {
         .set_flags(flags::compute_flags_u8(result, cf, of, af));
 
     // Обновляем указатели в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_si(si.wrapping_sub(1));
         machine.registers.set_di(di.wrapping_sub(1));
@@ -775,7 +775,7 @@ pub fn cmpsw(machine: &mut DosMachine, prev: &[u8]) {
         .set_flags(flags::compute_flags_u16(result, cf, of, af));
 
     // Обновляем указатели в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_si(si.wrapping_sub(2));
         machine.registers.set_di(di.wrapping_sub(2));
@@ -805,7 +805,7 @@ pub fn movsb(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_u8(machine.registers.es(), di, byte);
 
     // Обновляем указатели в зависимости от флага направления DF (бит 10)
-    let df = (machine.registers.flags() & (1 << 10)) != 0;
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
     if df {
         machine.registers.set_si(si.wrapping_sub(1));
         machine.registers.set_di(di.wrapping_sub(1));

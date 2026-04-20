@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -37,6 +37,11 @@ pub struct DosMachine {
     pub(crate) a20_enabled: bool,
     pub(crate) a20_command_pending: bool,
     pub(crate) keyboard_status: u8,
+    pub(crate) ems_page_frame_segment: u16,
+    pub(crate) ems_total_pages: u16,
+    pub(crate) ems_free_pages: u16,
+    pub(crate) ems_next_handle: u16,
+    pub(crate) ems_handles: Vec<(u16, u16)>,
 }
 
 impl DosMachine {
@@ -339,6 +344,11 @@ impl DosMachine {
             a20_enabled: false,
             a20_command_pending: false,
             keyboard_status: 0x18,
+            ems_page_frame_segment: 0xD000, // Стандартный фрейм EMS
+            ems_total_pages: 256,           // 4 MB памяти (256 * 16KB)
+            ems_free_pages: 256,
+            ems_next_handle: 1,
+            ems_handles: Vec::new(),
         }
     }
 

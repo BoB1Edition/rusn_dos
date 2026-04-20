@@ -174,9 +174,9 @@ fn group_f7_register_32(machine: &mut DosMachine, reg_field: u8, rm_field: u8, i
             let cf_of = product > 0xFFFF_FFFF;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
@@ -190,9 +190,9 @@ fn group_f7_register_32(machine: &mut DosMachine, reg_field: u8, rm_field: u8, i
             let cf_of = product < -2_147_483_648 || product > 2_147_483_647;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
@@ -283,9 +283,9 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
             let cf_of = product > 0xFFFF_FFFF;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
@@ -299,9 +299,9 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
             let cf_of = product < -2_147_483_648 || product > 2_147_483_647;
             let mut flags = machine.registers.flags();
             if cf_of {
-                flags |= 1 << 0 | 1 << 11;
+                flags |= flags::CF | flags::OF;
             } else {
-                flags &= !(1 << 0 | 1 << 11);
+                flags &= !(flags::CF | flags::OF);
             }
             machine.registers.set_flags(flags);
         }
