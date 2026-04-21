@@ -1,7 +1,7 @@
-// Ver: 1
+// Ver: 3
 use std::fs::File;
 
-use crate::{DosMachine, memory::Memory};
+use crate::{DosMachine, init_ivt, memory::Memory};
 
 #[derive(Debug, Clone, Default)]
 pub struct ComLoader {
@@ -15,7 +15,7 @@ impl ComLoader {
     }
 
     pub fn exec(self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
-        const PSP_SEGMENT: u16 = 0x0000; // PSP всегда в сегменте 0
+        const PSP_SEGMENT: u16 = 0x1000; // PSP всегда в сегменте 0
         const CODE_OFFSET: u16 = 0x0100; // Код начинается со смещения 0x100
         const STACK_TOP: u16 = 0xFFFE; // Вершина стека (64 КБ - 2)
 
@@ -34,6 +34,8 @@ impl ComLoader {
             memory.write_u8((code_base + i) as u32, byte);
         }
 
+        memory.print_data(1);
+
         let logfile = if no_log {
             #[cfg(target_os = "windows")]
             {
@@ -50,6 +52,9 @@ impl ComLoader {
 
         // 4. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
+        machine.memory.print_data(2);
+        init_ivt(&mut machine);
+        machine.memory.print_data(3);
 
         // 5. Устанавливаем регистры согласно спецификации DOS для .COM:
         //    - Все сегменты = 0 (включая PSP)

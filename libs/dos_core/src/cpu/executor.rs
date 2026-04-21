@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 3
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -148,6 +148,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 alu::or_rm16_r16(machine, &full_bytes);
             }
         }
+        0x0A => alu::or_r8_rm8(machine, &full_bytes),
         0x0B => {
             if machine.has_operand_size_prefix {
                 alu32::or_r32_rm32(machine, &full_bytes);
@@ -980,7 +981,6 @@ mod tests {
     // Запуск: cargo test --test executor_full -- --nocapture
 
     #![cfg(test)]
-    use super::*;
     use crate::DosMachine;
     use crate::cpu::flags;
     use crate::memory::Memory;

@@ -1,28 +1,70 @@
-// Ver: 1
+// Ver: 3
 use log::{error, warn};
 
-use crate::{flags, interrupts::{bios, ems}, machine::DosMachine};
+use crate::{flags, interrupts::{bios, dos, ems}, machine::DosMachine};
 
 pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
+    
+    // Читаем номер прерывания
     let vector = machine.read_u8(machine.registers.cs(), machine.registers.ip());
     bytes.push(vector);
-    let _ = machine.log_instruction(csip, &bytes);
     machine.registers.step(None);
-    match vector {
-        0x21 => machine.handle_int21(),
-        0x2F => machine.handle_int2f(),
-        0x20 => machine.halted = true,
-        0x10 => bios::handle_int10(machine),
-        0x15 => bios::handle_int15(machine),
-        0x16 => bios::handle_int16(machine),
-        0x67 => ems::handle_int67(machine),
-        _ => {
-            error!("Unsupported interrupt: INT {:#02X}", vector);
-            machine.halted = true;
+
+    // 1. Читаем адрес обработчика из IVT (физический адрес = vector * 4)
+    let ivt_addr = (vector as u32) * 4;
+    let handler_ip = machine.read_phys_u16(ivt_addr);
+    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
+
+    // 2. Проверяем "магический" сегмент 0xF000 — внутренний обработчик эмулятора
+    if handler_cs == 0xF000 {
+        // Вызываем напрямую, БЕЗ манипуляций со стеком
+        match vector {
+            0x20 => machine.halted = true,
+            0x21 => dos::handle_int21(machine),
+            0x2F => dos::handle_int2f(machine),
+            0x10 => bios::handle_int10(machine),
+            0x15 => bios::handle_int15(machine),
+            0x16 => bios::handle_int16(machine),
+            0x67 => ems::handle_int67(machine),
+            _ => {
+                log::warn!("Unhandled internal interrupt INT {:02X}", vector);
+                // Устанавливаем ошибку для совместимости
+                let mut f = machine.registers.flags();
+                f |= flags::CF;
+                machine.registers.set_flags(f);
+            }
         }
+    } else {
+        // 3. Реальный аппаратный переход (программа перехватила прерывание)
+        
+        // Сохраняем FLAGS, CS, IP в стек (порядок: FLAGS → CS → IP)
+        let mut sp = machine.registers.sp();
+        
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
+        machine.write_u16(machine.registers.ss(), sp, machine.registers.flags());
+        
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
+        machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
+        
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
+        machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
+
+        // Очищаем IF и TF согласно спецификации x86
+        let mut f = machine.registers.flags();
+        f &= !(flags::IF | flags::TF);
+        machine.registers.set_flags(f);
+
+        // Переходим к обработчику
+        machine.registers.set_cs(handler_cs);
+        machine.registers.set_ip(handler_ip);
     }
+    
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
@@ -125,7 +167,7 @@ pub fn iret(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_flags(flags);
 
     // Логирование с указанием адреса возврата
-    log::info!(
+    log::debug!(
         "IRET: returning to {:#04x}:{:#04x}, flags={:#04x}",
         cs,
         ip,
