@@ -21,11 +21,15 @@
                 }
             },
             "args": [
-                "--graphics",
+                //"--graphics",
                 "run",
-                "./app/biing/INSTALL.EXE"
+                //"./app/biing/INSTALL.EXE"
+                "./test/test1"
             ],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG":"trace"
+            }
         },
         {
             "type": "lldb",
