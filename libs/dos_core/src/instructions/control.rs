@@ -1,10 +1,10 @@
-// Ver: 1
+// Ver: 2
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub fn call(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    let rel16 = machine.read_u16(machine.registers.cs(), machine.registers.ip()) as i16;
+    let rel16 = machine.read_instr_u16( machine.registers.ip()) as i16;
     bytes.extend_from_slice(&rel16.to_le_bytes());
     let _ = machine.log_instruction(csip, &bytes);
     let return_ip = machine.registers.ip().wrapping_add(2);
@@ -18,7 +18,7 @@ pub fn call(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn retn(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let _ = machine.log_instruction(csip, prev);
     let ip = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
@@ -28,9 +28,9 @@ pub fn retn(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jz(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     bytes.push(rel8 as u8);
     let _ = machine.log_instruction(csip, &bytes);
     machine.registers.step(None);
@@ -44,8 +44,8 @@ pub fn jz(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn ja(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -63,8 +63,8 @@ pub fn ja(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -91,8 +91,8 @@ pub fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn smsw(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -110,8 +110,8 @@ pub fn smsw(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -132,8 +132,8 @@ pub fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jb(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -149,8 +149,8 @@ pub fn jb(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (rel8)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -172,9 +172,9 @@ pub fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -189,9 +189,9 @@ pub fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -211,9 +211,9 @@ pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -233,9 +233,9 @@ pub fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -259,9 +259,9 @@ pub fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 16-битное смещение со знаком (little-endian)
-    let rel16 = machine.read_u16(machine.registers.cs(), machine.registers.ip()) as i16;
+    let rel16 = machine.read_instr_u16( machine.registers.ip()) as i16;
     machine.registers.step(Some(2)); // продвигаем на 2 байта (смещение)
     let mut bytes = prev.to_vec();
     bytes.extend_from_slice(&rel16.to_le_bytes());
@@ -275,9 +275,9 @@ pub fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jcxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -295,9 +295,9 @@ pub fn jcxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -322,9 +322,9 @@ pub fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -349,9 +349,9 @@ pub fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -374,17 +374,17 @@ pub fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn call_far(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x9A); // опкод CALL far
 
     // Читаем 32 бита из кода: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
     // Порядок байтов: [IP_lo, IP_hi, CS_lo, CS_hi] (little-endian для каждого слова)
-    let ip_offset = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    let ip_offset = machine.read_instr_u16( machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&ip_offset.to_le_bytes());
 
-    let cs_segment = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    let cs_segment = machine.read_instr_u16( machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&cs_segment.to_le_bytes());
 
@@ -408,9 +408,9 @@ pub fn call_far(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -434,9 +434,9 @@ pub fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/control.rs
 pub fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -465,16 +465,16 @@ pub fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
     // Читаем 32 бита из кода: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
     // Порядок байтов: [IP_lo, IP_hi, CS_lo, CS_hi] (little-endian для каждого слова)
-    let ip_offset = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    let ip_offset = machine.read_instr_u16( machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&ip_offset.to_le_bytes());
     
-    let cs_segment = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+    let cs_segment = machine.read_instr_u16( machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&cs_segment.to_le_bytes());
     
@@ -487,7 +487,7 @@ pub fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn retf(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
     
     // 1. Извлекаем IP из стека (первое слово)
@@ -509,9 +509,9 @@ pub fn retf(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -535,8 +535,8 @@ pub fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
 /// CALL ptr16:16 — Far call through memory (межсегментный вызов через память)
 /// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
 pub fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -585,8 +585,8 @@ pub fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
 /// JMP ptr16:16 — Far jump through memory (межсегментный переход через память)
 /// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
 pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -643,11 +643,11 @@ pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
 // В libs/dos_core/src/instructions/control.rs (НЕ control32.rs!)
 
 pub fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
     // ← Читаем 16-битное смещение (sign-extended)
-    let rel16 = machine.read_u16(machine.registers.cs(), machine.registers.ip()) as i16;
+    let rel16 = machine.read_instr_u16( machine.registers.ip()) as i16;
     machine.registers.step(Some(2));  // ← 2 байта для rel16!
     
     bytes.extend_from_slice(&rel16.to_le_bytes());
@@ -662,6 +662,27 @@ pub fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
         log::debug!("JZ rel16: TAKEN (ZF=1), new IP={:#04x}", new_ip);
     } else {
         log::debug!("JZ rel16: NOT TAKEN (ZF=0), continue");
+    }
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn jae_rel16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 16-битное смещение со знаком (little-endian)
+    let rel16 = machine.read_instr_u16( machine.registers.ip()) as i16;
+    machine.registers.step(Some(2)); // Сдвигаем IP на 2 байта (смещение)
+    bytes.extend_from_slice(&rel16.to_le_bytes());
+
+    // Условие: CF == 0
+    let cf = (machine.registers.flags() & flags::CF) == 0;
+    
+    if cf {
+        // Вычисляем новый IP: текущий IP (после смещения) + rel16
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel16 as i32) as u16;
+        machine.registers.set_ip(new_ip);
     }
     
     machine.log_instruction(csip, &bytes).ok();

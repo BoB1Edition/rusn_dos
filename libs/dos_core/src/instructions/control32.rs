@@ -2,8 +2,8 @@
 use crate::{DosMachine, flags, instructions::control, modrm::ModRm};
 
 pub fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -39,8 +39,8 @@ pub fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jmp_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -62,9 +62,9 @@ pub fn jmp_rm32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn call32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    let rel32 = machine.read_u32(machine.registers.cs(), machine.registers.ip()) as i32;
+    let rel32 = machine.read_instr_u32( machine.registers.ip()) as i32;
     bytes.extend_from_slice(&rel32.to_le_bytes());
     machine.registers.step(Some(4));
     let offset16 = (rel32 & 0xFFFF) as i16;
@@ -84,11 +84,11 @@ pub fn retn32(machine: &mut DosMachine, prev: &[u8]) {
 /// JZ/JE rel32 — условный переход при ZF=1 с 32-битным смещением
 /// В реальном режиме результат усекается до 16 бит (IP — 16-битный регистр)
 pub fn jz_rel32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
     // Читаем 32-битное смещение (sign-extended)
-    let rel32 = machine.read_u32(machine.registers.cs(), machine.registers.ip()) as i32;
+    let rel32 = machine.read_instr_u32( machine.registers.ip()) as i32;
     machine.registers.step(Some(4));
     bytes.extend_from_slice(&rel32.to_le_bytes());
     
@@ -106,9 +106,9 @@ pub fn jz_rel32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jecxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     // Читаем 8-битное смещение со знаком
-    let rel8 = machine.read_u8(machine.registers.cs(), machine.registers.ip()) as i8;
+    let rel8 = machine.read_instr_u8( machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
@@ -127,8 +127,8 @@ pub fn jecxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
 /// CALL ptr32:32 — Far call through memory (32-bit)
 /// В реальном режиме не используется, но реализована для совместимости
 pub fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -169,8 +169,8 @@ pub fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn jmp_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -193,6 +193,27 @@ pub fn jmp_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn jae_rel32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let mut bytes = prev.to_vec();
+    
+    // Читаем 32-битное смещение со знаком
+    let rel32 = machine.read_u32(machine.registers.cs(), machine.registers.ip()) as i32;
+    machine.registers.step(Some(4)); // Сдвигаем IP на 4 байта
+    bytes.extend_from_slice(&rel32.to_le_bytes());
+
+    // Условие: CF == 0
+    let cf = (machine.registers.flags() & flags::CF) == 0;
+    
+    if cf {
+        // В реальном режиме результат усекается до 16 бит
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel32) as u16;
+        machine.registers.set_ip(new_ip);
+    }
     
     machine.log_instruction(csip, &bytes).ok();
 }

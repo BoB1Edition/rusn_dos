@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 4
 
 pub const CF: u16 = 1 << 0;
 pub const PF: u16 = 1 << 2;
@@ -50,7 +50,6 @@ pub fn compute_logical_flags_u32(current_flags: u16, result: u32) -> u16 {
 
 #[inline]
 fn compute_flags_impl(current_flags: u16, value: u32, width_bits: u32, cf: bool, of: bool, af: bool) -> u16 {
-    // 🔑 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Сохраняем неизменяемые флаги (IF, DF, TF...)
     let mut flags = current_flags & !ARITHMETIC_LOGIC_MASK;
     
     // Устанавливаем новые значения только для арифметических/логических флагов

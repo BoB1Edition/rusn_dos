@@ -5,8 +5,8 @@ use crate::{DosMachine, modrm::ModRm};
 /// Читает 32-битный указатель из памяти в формате "смещение:сегмент" (little-endian)
 /// и загружает младшие 16 бит в регистр, старшие 16 бит в сегментный регистр ES
 pub fn les_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);

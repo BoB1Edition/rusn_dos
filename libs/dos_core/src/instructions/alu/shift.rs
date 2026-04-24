@@ -2,9 +2,9 @@
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub fn shift_group_c1_16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
         machine.registers.ip().wrapping_add(1),
@@ -25,7 +25,7 @@ pub fn shift_group_c1_16(machine: &mut DosMachine, prev: &[u8]) {
     };
 
     let (result, new_flags) =
-        perform_shift_16(modrm.reg_field, value, imm8, machine.registers.flags());
+        perform_shift_16(machine,modrm.reg_field, value, imm8, machine.registers.flags());
 
     if let Some(addr) = addr_opt {
         // Запись обратно в память
@@ -39,7 +39,7 @@ pub fn shift_group_c1_16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u16) {
+fn perform_shift_16(machine: &DosMachine, op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u16) {
     let count = count & 0x0F; // x86: count mod 16 для 16-битных операций
     if count == 0 {
         return (value, flags);
@@ -58,7 +58,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af);
             result
         }
         1 => {
@@ -72,7 +72,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af);
             result
         }
         2 => {
@@ -89,7 +89,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u16(result, new_cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, new_cf, of, af);
             result
         }
         3 => {
@@ -106,7 +106,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u16(result, new_cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, new_cf, of, af);
             result
         }
         4 | 6 => {
@@ -122,7 +122,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af);
             result
         }
         5 => {
@@ -135,7 +135,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af);
             result
         }
         7 => {
@@ -148,7 +148,7 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
                 (value >> (count - 1)) & 1 != 0
             };
             let of = false; // OF cleared for SAR
-            new_flags = flags::compute_flags_u16(result, cf, of, af);
+            new_flags = flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af);
             result
         }
         _ => unreachable!(),
@@ -157,9 +157,9 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
 }
 
 pub fn shift_group_d1(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None); // продвигаем только на байт ModR/M
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
@@ -168,7 +168,7 @@ pub fn shift_group_d1(machine: &mut DosMachine, prev: &[u8]) {
         // ROL/ROR/RCL/RCR/SHL/SHR/SAR reg16, 1
         let value = machine.read_reg16(modrm.rm_field);
         let (result, new_flags) =
-            perform_shift_16(modrm.reg_field, value, 1, machine.registers.flags());
+            perform_shift_16(machine, modrm.reg_field, value, 1, machine.registers.flags());
         machine.write_reg16(modrm.rm_field, result);
         machine.registers.set_flags(new_flags);
     } else {
@@ -179,7 +179,7 @@ pub fn shift_group_d1(machine: &mut DosMachine, prev: &[u8]) {
         bytes.extend_from_slice(&addr.to_le_bytes());
         let value = machine.read_phys_u16(addr);
         let (result, new_flags) =
-            perform_shift_16(modrm.reg_field, value, 1, machine.registers.flags());
+            perform_shift_16(machine,modrm.reg_field, value, 1, machine.registers.flags());
         machine.write_phys_u16(addr, result);
         machine.registers.set_flags(new_flags);
     }
@@ -188,9 +188,9 @@ pub fn shift_group_d1(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn shift_group_c0_rm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
         machine.registers.ip().wrapping_add(1),
@@ -255,7 +255,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u8(result, cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, cf, of, af);
             result
         }
         1 => {
@@ -269,7 +269,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u8(result, cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, cf, of, af);
             result
         }
         2 => {
@@ -286,7 +286,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u8(result, new_cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, new_cf, of, af);
             result
         }
         3 => {
@@ -303,7 +303,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u8(result, new_cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, new_cf, of, af);
             result
         }
         4 | 6 => {
@@ -319,7 +319,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u8(result, cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, cf, of, af);
             result
         }
         5 => {
@@ -334,7 +334,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             } else {
                 false
             };
-            new_flags = flags::compute_flags_u8(result, cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, cf, of, af);
             result
         }
         7 => {
@@ -343,7 +343,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
             let result = shifted;
             let cf = (value >> (count - 1)) & 1 != 0;
             let of = false; // OF cleared for SAR
-            new_flags = flags::compute_flags_u8(result, cf, of, af);
+            new_flags = flags::compute_flags_u8(flags, result, cf, of, af);
             result
         }
         _ => unreachable!(),
@@ -353,8 +353,8 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
 }
 
 pub fn shift_rm16_cl(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -520,7 +520,7 @@ fn shl16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     // Устанавливаем флаги как при логической операции
     machine
         .registers
-        .set_flags(flags::compute_flags_u16(result, cf, of, false));
+        .set_flags(flags::compute_flags_u16(machine.registers.flags(), result, cf, of, false));
 
     result
 }
@@ -538,7 +538,7 @@ fn shr16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     // Устанавливаем флаги как при логической операции
     machine
         .registers
-        .set_flags(flags::compute_flags_u16(result, cf, of, false));
+        .set_flags(flags::compute_flags_u16(machine.registers.flags(), result, cf, of, false));
 
     result
 }
@@ -556,14 +556,14 @@ fn sar16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     // Устанавливаем флаги (знак сохраняется)
     machine
         .registers
-        .set_flags(flags::compute_flags_u16(result, cf, of, false));
+        .set_flags(flags::compute_flags_u16(machine.registers.flags(), result, cf, of, false));
 
     result
 }
 
 pub fn shift_rm8_cl(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -612,7 +612,7 @@ pub fn shift_rm8_cl(machine: &mut DosMachine, prev: &[u8]) {
     };
     
     // Устанавливаем флаги (OF только для сдвига на 1 позицию)
-    let mut new_flags = flags::compute_flags_u8(result, cf, count == 1 && of, false);
+    let mut new_flags = flags::compute_flags_u8(machine.registers.flags(), result, cf, count == 1 && of, false);
     // Сохраняем неизменяемые флаги (если нужно)
     new_flags = (new_flags & 0x0FD5) | (machine.registers.flags() & !0x0FD5);
     machine.registers.set_flags(new_flags);

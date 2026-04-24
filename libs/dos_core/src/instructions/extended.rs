@@ -2,8 +2,8 @@
 use crate::DosMachine;
 
 pub fn movzx_r16_rm8(machine: &mut DosMachine, prev: &[u8]) { // ← ПЕРЕИМЕНОВАТЬ!
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);

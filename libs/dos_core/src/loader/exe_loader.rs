@@ -1,5 +1,5 @@
 // Ver: 2
-use crate::{DosMachine, loader::exe_header::MzHeader, memory::Memory};
+use crate::{DosMachine, init_ivt, loader::exe_header::MzHeader, memory::Memory};
 use std::fs::File;
 
 pub struct ExeLoader {
@@ -98,7 +98,7 @@ impl ExeLoader {
 
         // 5. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
-
+        init_ivt(&mut machine);
         // 6. Устанавливаем регистры СОГЛАСНО СПЕЦИФИКАЦИИ DOS ДЛЯ .EXE:
         //    - CS:IP = заголовок (смещение от LOAD_SEGMENT)
         //    - SS:SP = заголовок (смещение от LOAD_SEGMENT)
@@ -227,8 +227,8 @@ impl ExeLoader {
         memory.write_u8(psp_base + 1, 0x20);
         memory.write_u8(psp_base + 2, 0x00); // 640 КБ = 0xA000 параграфов
         memory.write_u8(psp_base + 3, 0xA0);
-        memory.write_u8(psp_base + 8, 0xCD);
-        memory.write_u8(psp_base + 9, 0x21);
-        memory.write_u8(psp_base + 10, 0xCB);
+        memory.write_u8(psp_base + 5, 0xCD);
+        memory.write_u8(psp_base + 6, 0x21);
+        memory.write_u8(psp_base + 7, 0xCB);
     }
 }

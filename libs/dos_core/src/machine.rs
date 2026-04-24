@@ -198,10 +198,6 @@ impl DosMachine {
         crate::executor::run(self)
     }
 
-    pub fn handle_int21(&mut self) {
-        interrupts::dos::handle_int21(self);
-    }
-
     #[inline(always)]
     pub fn read_u8(&self, default_segment: u16, offset: u16) -> u8 {
         let segment = self.override_segment.unwrap_or(default_segment);
@@ -265,7 +261,7 @@ impl DosMachine {
         self.write_u16(segment, offset.wrapping_add(2), (value >> 16) as u16);
     }
 
-    fn print_4byte(&self, segment: u16, offset: u16) {
+    pub(crate) fn print_4byte(&self, segment: u16, offset: u16) {
         for i in 0..10 {
             let op = self.read_u8(segment, offset + i);
             println!("op{i}: {op:#02X}")
@@ -313,10 +309,6 @@ impl DosMachine {
         let ch = self.registers.dl() as char;
         print!("{}", ch);
         std::io::stdout().flush().ok();
-    }
-
-    pub fn handle_int2f(&mut self) {
-        interrupts::dos::handle_int2f(self);
     }
 
     pub fn new_with_memory(memory: Memory, logfile: File) -> Self {
@@ -378,10 +370,25 @@ impl DosMachine {
         }
     }
     #[inline(always)]
-    pub fn read_instr_u8(&self, offset: u16) -> u8 {
+    pub(crate) fn read_instr_u8(&self, offset: u16) -> u8 {
         let addr = ((self.registers.cs() as u32) << 4).wrapping_add(offset as u32);
         let addr = self.apply_a20_mask(addr);
         self.memory.read_u8(addr)
+    }
+    #[inline(always)]
+    pub(crate) fn read_instr_u16(&self, offset: u16) -> u16 {
+        let addr = ((self.registers.cs() as u32) << 4).wrapping_add(offset as u32);
+        let masked = self.apply_a20_mask(addr);
+        let lo = self.memory.read_u8(masked) as u16;
+        let hi = self.memory.read_u8(self.apply_a20_mask(masked.wrapping_add(1))) as u16;
+        lo | (hi << 8)
+    }
+
+    #[inline(always)]
+    pub(crate) fn read_instr_u32(&self, offset: u16) -> u32 {
+        let lo = self.read_instr_u16(offset) as u32;
+        let hi = self.read_instr_u16(offset.wrapping_add(2)) as u32;
+        lo | (hi << 16)
     }
 }
 

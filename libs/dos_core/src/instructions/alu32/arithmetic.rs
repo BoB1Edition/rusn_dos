@@ -4,8 +4,8 @@ use crate::{DosMachine, flags, modrm::ModRm};
 
 
 pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -49,7 +49,7 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
             machine.halted = true;
             return;
         }
-        let disp16 = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+        let disp16 = machine.read_instr_u16( machine.registers.ip());
         machine.registers.step(Some(2));
         bytes.extend_from_slice(&disp16.to_le_bytes());
         let phys_addr = (machine.registers.ds() as u32) * 16 + (disp16 as u32);
@@ -89,8 +89,8 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -140,8 +140,8 @@ pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
 
 
 pub fn add_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
 
     let mut bytes = prev.to_vec();
@@ -168,14 +168,14 @@ pub fn add_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let of = (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
 
     machine.write_reg32(dst_reg, result);
-    machine.registers.set_flags(flags::compute_flags_u32(result, cf, of, af));
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af));
 
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn add_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let imm32 = machine.read_instr_u32( machine.registers.ip());
     machine.registers.step(Some(4));
     let mut bytes = prev.to_vec();
     bytes.extend_from_slice(&imm32.to_le_bytes());
@@ -206,8 +206,8 @@ pub fn add_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn cmp_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let imm32 = machine.read_instr_u32( machine.registers.ip());
     machine.registers.step(Some(4)); // продвигаем на 4 байта (imm32)
     let mut bytes = prev.to_vec();
     bytes.extend_from_slice(&imm32.to_le_bytes());
@@ -230,14 +230,14 @@ pub fn cmp_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
     let af = ((eax & 0x0F) as i32) < ((imm32 & 0x0F) as i32);
     
     // Установка флагов
-    machine.registers.set_flags(flags::compute_flags_u32(result, cf, of, af));
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af));
     
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn test_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -261,14 +261,14 @@ pub fn test_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     let result = dst_val & src_val;
     
     // Устанавливаем флаги (логическая операция: CF=0, OF=0)
-    machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+    machine.registers.set_flags(flags::compute_logical_flags_u32(machine.registers.flags(), result));
     
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn cmp_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -289,12 +289,12 @@ pub fn cmp_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let af = (dst_val & 0x0F) < (src_val & 0x0F);
     let of = (((dst_val ^ src_val) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
 
-    machine.registers.set_flags(flags::compute_flags_u32(result, cf, of, af));
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af));
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub fn cdq(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
     // Расширяем знак из EAX в EDX: копируем бит 31 (знак) во все биты EDX
@@ -311,8 +311,8 @@ pub fn cdq(machine: &mut DosMachine, prev: &[u8]) {
 /// Регистр ← (источник как знаковое) * (константа как знаковое)
 /// Флаги CF/OF = 1 если результат не помещается в 32 бита
 pub fn imul_r32_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -330,7 +330,7 @@ pub fn imul_r32_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
     };
     
     // Читаем 32-битную непосредственную константу (little-endian)
-    let imm32 = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+    let imm32 = machine.read_instr_u32( machine.registers.ip());
     machine.registers.step(Some(4));
     bytes.extend_from_slice(&imm32.to_le_bytes());
     
@@ -360,8 +360,8 @@ pub fn imul_r32_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
 
 /// DEC r/m32 — Decrement doubleword by 1 (32-bit)
 pub fn dec_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -378,7 +378,7 @@ pub fn dec_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let of = old_val == 0x80000000;
         let af = (old_val & 0x0F) == 0;
         
-        let mut flags = flags::compute_flags_u32(new_val, cf, of, af);
+        let mut flags = flags::compute_flags_u32(machine.registers.flags(),new_val, cf, of, af);
         flags = (flags & !1) | (old_cf);
         machine.registers.set_flags(flags as u16);
     } else {
@@ -395,7 +395,7 @@ pub fn dec_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let of = old_val == 0x80000000;
         let af = (old_val & 0x0F) == 0;
         
-        let mut flags = flags::compute_flags_u32(new_val, cf, of, af);
+        let mut flags = flags::compute_flags_u32(machine.registers.flags(),new_val, cf, of, af);
         flags = (flags & !1) | (old_cf);
         machine.registers.set_flags(flags as u16);
     }
@@ -405,8 +405,8 @@ pub fn dec_rm32(machine: &mut DosMachine, prev: &[u8]) {
 
 /// INC r/m32 — Increment doubleword by 1 (32-bit)
 pub fn inc_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -423,7 +423,7 @@ pub fn inc_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let of = old_val == 0x7FFFFFFF;
         let af = (old_val & 0x0F) == 0x0F;
         
-        let mut flags = flags::compute_flags_u32(new_val, cf, of, af);
+        let mut flags = flags::compute_flags_u32(machine.registers.flags(),new_val, cf, of, af);
         flags = (flags & !1) | (old_cf);
         machine.registers.set_flags(flags as u16);
     } else {
@@ -440,7 +440,7 @@ pub fn inc_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let of = old_val == 0x7FFFFFFF;
         let af = (old_val & 0x0F) == 0x0F;
         
-        let mut flags = flags::compute_flags_u32(new_val, cf, of, af);
+        let mut flags = flags::compute_flags_u32(machine.registers.flags(),new_val, cf, of, af);
         flags = (flags & !1) | (old_cf);
         machine.registers.set_flags(flags as u16);
     }

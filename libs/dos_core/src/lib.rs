@@ -16,7 +16,8 @@ mod interrupts;
 pub mod loader;
 pub mod filesystem;
 pub mod video;
-
+pub mod ivt;
 pub use filesystem::DiskDriver;
 pub(crate) use cpu::flags;
 pub(crate) use cpu::executor;
+pub(crate) use ivt::init_ivt;

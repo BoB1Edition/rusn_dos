@@ -3,10 +3,10 @@ use crate::{DosMachine, flags, modrm::ModRm};
 
 // libs/dos_core/src/instructions/alu.rs
 pub fn group_x80(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
         machine.registers.ip().wrapping_add(1),
@@ -45,11 +45,11 @@ fn group_x80_operation_register(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = (res >> 8) != 0;
             let af = ((src_val & 0x0F) + (imm & 0x0F)) > 0x0F;
             let of = (((src_val ^ imm) & 0x80) == 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         1 => { // OR r8, imm8
             let result = src_val | imm;
-            (result, flags::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(machine.registers.flags(), result))
         }
         2 => { // ADC r8, imm8
             let carry_in = (machine.registers.flags() & 1) != 0;
@@ -59,7 +59,7 @@ fn group_x80_operation_register(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = (res >> 8) != 0;
             let af = ((src_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
             let of = (((src_val ^ imm) & 0x80) == 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         3 => { // SBB r8, imm8
             let borrow_in = (machine.registers.flags() & 1) != 0;
@@ -69,11 +69,11 @@ fn group_x80_operation_register(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let result = res as u8;
             let af = (src_val & 0x0F) < (imm & 0x0F) + if borrow_in { 1 } else { 0 };
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         4 => { // AND r8, imm8
             let result = src_val & imm;
-            (result, flags::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(machine.registers.flags(), result))
         }
         5 => { // SUB r8, imm8
             let res = (src_val as u16).wrapping_sub(imm as u16);
@@ -81,11 +81,11 @@ fn group_x80_operation_register(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = src_val < imm;
             let af = (src_val & 0x0F) < (imm & 0x0F);
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         6 => { // XOR r8, imm8
             let result = src_val ^ imm;
-            (result, flags::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(machine.registers.flags(), result))
         }
         7 => { // CMP r8, imm8
             let res = (src_val as u16).wrapping_sub(imm as u16);
@@ -93,7 +93,7 @@ fn group_x80_operation_register(machine: &mut DosMachine, reg_field: u8, rm_fiel
             let cf = src_val < imm;
             let af = (src_val & 0x0F) < (imm & 0x0F);
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            let flags = flags::compute_flags_u8(result, cf, of, af);
+            let flags = flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af);
             (src_val, flags) // результат не сохраняем
         }
         _ => unreachable!(),
@@ -118,11 +118,11 @@ fn group_x80_operation_memory(machine: &mut DosMachine, reg_field: u8, addr: u32
             let cf = (res >> 8) != 0;
             let af = ((src_val & 0x0F) + (imm & 0x0F)) > 0x0F;
             let of = (((src_val ^ imm) & 0x80) == 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         1 => { // OR [mem], imm8
             let result = src_val | imm;
-            (result, flags::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(machine.registers.flags(), result))
         }
         2 => { // ADC [mem], imm8
             let carry_in = (machine.registers.flags() & 1) != 0;
@@ -132,7 +132,7 @@ fn group_x80_operation_memory(machine: &mut DosMachine, reg_field: u8, addr: u32
             let cf = (res >> 8) != 0;
             let af = ((src_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
             let of = (((src_val ^ imm) & 0x80) == 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         3 => { // SBB [mem], imm8
             let borrow_in = (machine.registers.flags() & 1) != 0;
@@ -142,11 +142,11 @@ fn group_x80_operation_memory(machine: &mut DosMachine, reg_field: u8, addr: u32
             let result = res as u8;
             let af = (src_val & 0x0F) < (imm & 0x0F) + if borrow_in { 1 } else { 0 };
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         4 => { // AND [mem], imm8
             let result = src_val & imm;
-            (result, flags::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(machine.registers.flags(), result))
         }
         5 => { // SUB [mem], imm8
             let res = (src_val as u16).wrapping_sub(imm as u16);
@@ -154,11 +154,11 @@ fn group_x80_operation_memory(machine: &mut DosMachine, reg_field: u8, addr: u32
             let cf = src_val < imm;
             let af = (src_val & 0x0F) < (imm & 0x0F);
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            (result, flags::compute_flags_u8(result, cf, of, af))
+            (result, flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af))
         }
         6 => { // XOR [mem], imm8
             let result = src_val ^ imm;
-            (result, flags::compute_logical_flags_u8(result))
+            (result, flags::compute_logical_flags_u8(machine.registers.flags(), result))
         }
         7 => { // CMP [mem], imm8
             let res = (src_val as u16).wrapping_sub(imm as u16);
@@ -166,7 +166,7 @@ fn group_x80_operation_memory(machine: &mut DosMachine, reg_field: u8, addr: u32
             let cf = src_val < imm;
             let af = (src_val & 0x0F) < (imm & 0x0F);
             let of = (((src_val ^ imm) & 0x80) != 0) && ((src_val ^ result) & 0x80) != 0;
-            let flags = flags::compute_flags_u8(result, cf, of, af);
+            let flags = flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af);
             (src_val, flags) // результат не сохраняем
         }
         _ => unreachable!(),
@@ -180,8 +180,8 @@ fn group_x80_operation_memory(machine: &mut DosMachine, reg_field: u8, addr: u32
 }
 
 pub fn group_x83_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
         machine.registers.ip().wrapping_add(1),
@@ -198,7 +198,7 @@ pub fn group_x83_rm16(machine: &mut DosMachine, prev: &[u8]) {
     if modrm.is_register_mode() {
         // Операция над регистром
         let dst_val = machine.read_reg16(modrm.rm_field);
-        let (result, flags) = perform_group_x83_operation_16(modrm.reg_field, dst_val, imm16, machine.registers.flags());
+        let (result, flags) = perform_group_x83_operation_16(machine,modrm.reg_field, dst_val, imm16, machine.registers.flags());
         if modrm.reg_field != 7 { // CMP (reg_field=7) не сохраняет результат
             machine.write_reg16(modrm.rm_field, result);
         }
@@ -208,7 +208,7 @@ pub fn group_x83_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         let dst_val = machine.read_phys_u16(addr);
-        let (result, flags) = perform_group_x83_operation_16(modrm.reg_field, dst_val, imm16, machine.registers.flags());
+        let (result, flags) = perform_group_x83_operation_16(machine, modrm.reg_field, dst_val, imm16, machine.registers.flags());
         if modrm.reg_field != 7 { // CMP не сохраняет результат
             machine.write_phys_u16(addr, result);
         }
@@ -218,7 +218,7 @@ pub fn group_x83_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u16) -> (u16, u16) {
+fn perform_group_x83_operation_16(machine: &DosMachine, op_field: u8, dst_val: u16, imm: u16, flags: u16) -> (u16, u16) {
     match op_field {
         0 => { // ADD r/m16, imm8 (sign-extended)
             let res = dst_val as u32 + imm as u32;
@@ -226,11 +226,11 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = res > 0xFFFF;
             let af = ((dst_val & 0x0F) + (imm & 0x0F)) > 0x0F;
             let of = (((dst_val ^ imm) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
-            (result, flags::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af))
         }
         1 => { // OR r/m16, imm8
             let result = dst_val | imm;
-            (result, flags::compute_logical_flags_u16(result))
+            (result, flags::compute_logical_flags_u16(machine.registers.flags(), result))
         }
         2 => { // ADC r/m16, imm8
             let carry_in = (flags & 1) != 0;
@@ -242,7 +242,7 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = res > 0xFFFF;
             let af = ((dst_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
             let of = (((dst_val ^ imm) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
-            (result, flags::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af))
         }
         3 => { // SBB r/m16, imm8
             let borrow_in = (flags & 1) != 0;
@@ -252,11 +252,11 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let result = res as u16;
             let af = (dst_val & 0x0F) < ((imm & 0x0F) + if borrow_in { 1 } else { 0 });
             let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-            (result, flags::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af))
         }
         4 => { // AND r/m16, imm8
             let result = dst_val & imm;
-            (result, flags::compute_logical_flags_u16(result))
+            (result, flags::compute_logical_flags_u16(machine.registers.flags(), result))
         }
         5 => { // SUB r/m16, imm8
             let res = (dst_val as u32).wrapping_sub(imm as u32);
@@ -264,11 +264,11 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = dst_val < imm;
             let af = (dst_val & 0x0F) < (imm & 0x0F);
             let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-            (result, flags::compute_flags_u16(result, cf, of, af))
+            (result, flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af))
         }
         6 => { // XOR r/m16, imm8
             let result = dst_val ^ imm;
-            (result, flags::compute_logical_flags_u16(result))
+            (result, flags::compute_logical_flags_u16(machine.registers.flags(), result))
         }
         7 => { // CMP r/m16, imm8 — как SUB, но не сохраняем результат
             let res = (dst_val as u32).wrapping_sub(imm as u32);
@@ -276,7 +276,7 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
             let cf = dst_val < imm;
             let af = (dst_val & 0x0F) < (imm & 0x0F);
             let of = (((dst_val ^ imm) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-            let flags = flags::compute_flags_u16(result, cf, of, af);
+            let flags = flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af);
             (dst_val, flags) // Возвращаем исходное значение (не сохраняем результат)
         }
         _ => unreachable!(),
@@ -284,8 +284,8 @@ fn perform_group_x83_operation_16(op_field: u8, dst_val: u16, imm: u16, flags: u
 }
 
 pub fn group_fe_rm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -302,13 +302,13 @@ pub fn group_fe_rm8(machine: &mut DosMachine, prev: &[u8]) {
                 let result = value.wrapping_add(1);
                 let af = ((value & 0x0F) + 1) > 0x0F;
                 let of = value == 0x7F; // 01111111 → 10000000 (знаковое переполнение)
-                (result, flags::compute_flags_u8(result, current_cf, of, af))
+                (result, flags::compute_flags_u8(machine.registers.flags(), result, current_cf, of, af))
             }
             1 => { // DEC r8
                 let result = value.wrapping_sub(1);
                 let af = (value & 0x0F) == 0;
                 let of = value == 0x80; // 10000000 → 01111111 (знаковое переполнение)
-                (result, flags::compute_flags_u8(result, current_cf, of, af))
+                (result, flags::compute_flags_u8(machine.registers.flags(), result, current_cf, of, af))
             }
             _ => {
                 log::error!("Unsupported reg_field {} in group FE", modrm.reg_field);
@@ -331,13 +331,13 @@ pub fn group_fe_rm8(machine: &mut DosMachine, prev: &[u8]) {
                 let result = value.wrapping_add(1);
                 let af = ((value & 0x0F) + 1) > 0x0F;
                 let of = value == 0x7F;
-                (result, flags::compute_flags_u8(result, current_cf, of, af))
+                (result, flags::compute_flags_u8(machine.registers.flags(), result, current_cf, of, af))
             }
             1 => { // DEC [mem]
                 let result = value.wrapping_sub(1);
                 let af = (value & 0x0F) == 0;
                 let of = value == 0x80;
-                (result, flags::compute_flags_u8(result, current_cf, of, af))
+                (result, flags::compute_flags_u8(machine.registers.flags(), result, current_cf, of, af))
             }
             _ => {
                 log::error!("Unsupported reg_field {} in group FE", modrm.reg_field);
@@ -354,10 +354,10 @@ pub fn group_fe_rm8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn group_f6_rm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
@@ -365,7 +365,7 @@ pub fn group_f6_rm8(machine: &mut DosMachine, prev: &[u8]) {
     
     // Для TEST (reg_field 0/1) требуется дополнительный байт imm8
     let imm8 = if reg_field == 0 || reg_field == 1 {
-        let imm = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+        let imm = machine.read_instr_u8( machine.registers.ip());
         machine.registers.step(None);
         bytes.push(imm);
         Some(imm)
@@ -397,7 +397,7 @@ fn group_f6_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm8
             // TEST r8, imm8
             let imm = imm8.unwrap();
             let result = value & imm;
-            machine.registers.set_flags(flags::compute_logical_flags_u8(result));
+            machine.registers.set_flags(flags::compute_logical_flags_u8(machine.registers.flags(), result));
         }
         2 => {
             // NOT r8
@@ -412,7 +412,7 @@ fn group_f6_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm8
             let af = (value & 0x0F) != 0;
             let of = value == 0x80; // -128 → 128 (знаковое переполнение)
             machine.write_reg8(rm_field, result);
-            machine.registers.set_flags(flags::compute_flags_u8(result, cf, of, af));
+            machine.registers.set_flags(flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af));
         }
         4 => {
             // MUL r8 (беззнаковое)
@@ -506,7 +506,7 @@ fn group_f6_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm8: Opt
             // TEST [mem], imm8
             let imm = imm8.unwrap();
             let result = value & imm;
-            machine.registers.set_flags(flags::compute_logical_flags_u8(result));
+            machine.registers.set_flags(flags::compute_logical_flags_u8(machine.registers.flags(), result));
         }
         2 => {
             // NOT [mem]
@@ -521,7 +521,7 @@ fn group_f6_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm8: Opt
             let af = (value & 0x0F) != 0;
             let of = value == 0x80;
             machine.write_phys_u8(addr, result);
-            machine.registers.set_flags(flags::compute_flags_u8(result, cf, of, af));
+            machine.registers.set_flags(flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af));
         }
         4 => {
             // MUL [mem] (беззнаковое)
@@ -601,10 +601,10 @@ fn group_f6_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm8: Opt
 }
 
 pub fn group_f7_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
@@ -612,7 +612,7 @@ pub fn group_f7_rm16(machine: &mut DosMachine, prev: &[u8]) {
     
     // Для TEST (reg_field 0/1) требуется дополнительное слово imm16
     let imm16 = if reg_field == 0 || reg_field == 1 {
-        let imm = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+        let imm = machine.read_instr_u16( machine.registers.ip());
         machine.registers.step(Some(2));
         bytes.extend_from_slice(&imm.to_le_bytes());
         Some(imm)
@@ -644,7 +644,7 @@ fn group_f7_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm1
             // TEST r16, imm16
             let imm = imm16.unwrap();
             let result = value & imm;
-            machine.registers.set_flags(flags::compute_logical_flags_u16(result));
+            machine.registers.set_flags(flags::compute_logical_flags_u16(machine.registers.flags(), result));
         }
         2 => {
             // NOT r16
@@ -659,7 +659,7 @@ fn group_f7_register(machine: &mut DosMachine, reg_field: u8, rm_field: u8, imm1
             let af = (value & 0x0F) != 0;
             let of = value == 0x8000; // -32768 → 32768 (знаковое переполнение)
             machine.write_reg16(rm_field, result);
-            machine.registers.set_flags(flags::compute_flags_u16(result, cf, of, af));
+            machine.registers.set_flags(flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af));
         }
         4 => {
             // MUL r16 (беззнаковое 16×16→32)
@@ -754,7 +754,7 @@ fn group_f7_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm16: Op
             // TEST [mem], imm16
             let imm = imm16.unwrap();
             let result = value & imm;
-            machine.registers.set_flags(flags::compute_logical_flags_u16(result));
+            machine.registers.set_flags(flags::compute_logical_flags_u16(machine.registers.flags(), result));
         }
         2 => {
             // NOT [mem]
@@ -769,7 +769,7 @@ fn group_f7_memory(machine: &mut DosMachine, reg_field: u8, addr: u32, imm16: Op
             let af = (value & 0x0F) != 0;
             let of = value == 0x8000;
             machine.write_phys_u16(addr, result);
-            machine.registers.set_flags(flags::compute_flags_u16(result, cf, of, af));
+            machine.registers.set_flags(flags::compute_flags_u16(machine.registers.flags(), result, cf, of, af));
         }
         4 => {
             // MUL [mem] (беззнаковое)

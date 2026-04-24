@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 4
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -17,6 +17,7 @@ use crate::{
 
 pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>> {
     let palette = video::load_vga_palette();
+    //let debug = DebugLog::new("debug.log");
     while !machine.halted {
         let opcode = machine.read_instr_u8(machine.registers.ip());
         machine.registers.step(None);
@@ -88,8 +89,46 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
     Ok(Some(machine.registers.al()))
 }
 
+
+/*struct DebugLog {
+    logfile: File
+}
+
+impl DebugLog {
+    pub(crate) fn new<T: ToString>(logname: T) -> Self {
+        let logfile = File::create_new(logname.to_string()).expect("not create log Debug file");
+        Self { logfile }
+    }
+    fn print(&self, machine: &DosMachine, segment: u16, offset: u16, size: u8) {
+        let csip = [machine.registers.cs(), machine.registers.ip()];
+        let read_csip = [segment, offset];
+        let mut v = Vec::with_capacity(size as usize);
+        for i in 0..size {
+            v.push(machine.read_u8(segment, offset+i as u16));
+        }
+        let hex_bytes: Vec<String> = v.iter().map(|b| format!("{:02X}", b)).collect();
+        writeln!(
+            &self.logfile,
+            "{:#04x}:{:#04x}:\t{:#04x}:{:#04x}:\t{}",
+            csip[0],
+            csip[1],
+            read_csip[0],
+            read_csip[1],
+            hex_bytes.join(" ")
+        ).ok();
+        let _ = &self.logfile.sync_all().ok();
+    }
+    fn print_text<T: ToString>(&self, msg: T) {
+        writeln!(
+            &self.logfile,
+            "{}",
+            msg.to_string()
+        ).ok();
+    }
+}*/
+
 /// Диспетчеризация базовых опкодов (без префикса 0x0F)
-fn execute(machine: &mut DosMachine, opcode: u8) {
+fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) {
     let mut full_bytes = Vec::new();
     if machine.has_operand_size_prefix {
         full_bytes.push(0x66);
@@ -101,8 +140,10 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         full_bytes.push(oos);
     }
     full_bytes.push(opcode);
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-
+    let csip = [machine.registers.cs(), machine.registers.ip()  - full_bytes.len() as u16];
+    /*if let Some(dl) = debug {
+        dl.print(machine, 0x1000, 0x3bd, 14);
+    }*/ 
     match opcode {
         0x00 => alu::add_rm8_r8(machine, &full_bytes),
         0x01 => {
@@ -435,12 +476,19 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
             } else {
                 16
             };
-
             match (addr_size, op_size) {
-                (16, 16) => mov::mov_ax_address16(machine, &full_bytes),
-                (16, 32) => mov32::mov_eax_address16(machine, &full_bytes),
-                (32, 16) => mov::mov_ax_address32(machine, &full_bytes),
-                (32, 32) => mov32::mov_eax_address32(machine, &full_bytes),
+                (16, 16) => {
+                    mov::mov_ax_address16(machine, &full_bytes)
+                },
+                (16, 32) => {
+                    mov32::mov_eax_address16(machine, &full_bytes)
+                },
+                (32, 16) => {
+                    mov::mov_ax_address32(machine, &full_bytes)
+                },
+                (32, 32) => {
+                    mov32::mov_eax_address32(machine, &full_bytes)
+                },
                 _ => {
                     log::error!(
                         "Invalid addr_size/op_size combination: {}/{} at CS:IP={:#04x}:{:#04x}",
@@ -460,7 +508,6 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 mov::mov_address_ax(machine, &full_bytes);
             }
         }
-        // libs/dos_core/src/cpu/executor.rs → fn execute()
         0xA4 => {
             if machine.has_rep_prefix {
                 // REP MOVSB: повторяем пока CX != 0
@@ -922,7 +969,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
 }
 
 /// Диспетчеризация расширенных опкодов (с префиксом 0x0F)
-fn execute_0f(machine: &mut DosMachine, opcode: u8) {
+fn execute_0f(machine: &mut DosMachine, opcode: u8/* ,debug: Option<&DebugLog>*/) {
     let mut full_bytes = Vec::new();
     if machine.has_operand_size_prefix {
         full_bytes.push(0x66);
@@ -947,11 +994,18 @@ fn execute_0f(machine: &mut DosMachine, opcode: u8) {
                 )
                 .ok();
         }
+        0x83 => {
+            if machine.has_operand_size_prefix {
+                control32::jae_rel32(machine, &full_bytes);
+            } else {
+                control::jae_rel16(machine, &full_bytes);
+            }
+        }
         0x84 => {
             if machine.has_operand_size_prefix {
-                control32::jz_rel32(machine, &full_bytes); // 32-бит (rel32)
+                control32::jz_rel32(machine, &full_bytes);
             } else {
-                control::jz_rel16(machine, &full_bytes); // 16-бит (rel16) ← НОВАЯ ФУНКЦИЯ
+                control::jz_rel16(machine, &full_bytes);
             }
         }
         0xB7 => {

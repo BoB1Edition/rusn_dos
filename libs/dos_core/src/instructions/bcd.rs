@@ -6,7 +6,7 @@ use crate::{DosMachine, flags};
 /// DAS — Decimal Adjust AL after Subtraction (опкод 0x2F)
 /// Корректирует регистр AL для получения правильного результата в упакованном BCD
 pub fn das(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x2F); // опкод DAS
     

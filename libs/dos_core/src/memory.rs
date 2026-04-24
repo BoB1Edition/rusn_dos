@@ -1,6 +1,8 @@
 // Ver: 1
 
-use std::ops::{Index, IndexMut};
+use std::{fs::File, io::Write, ops::{Index, IndexMut}};
+
+const DOS_MEMORY_SIZE: usize = 0x110000;
 
 #[derive(Debug, Clone)]
 pub struct Memory {
@@ -9,8 +11,13 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub fn new() -> Self {
-        const DOS_MEMORY_SIZE: usize = 0x110000;
+    pub(crate) fn print_data(&self, stage: u8) {
+        log::debug!("{:?}", self.data);
+        let mut file = File::create(format!("memory_stage{}", stage)).ok().unwrap();
+        file.write_all(&self.data);
+        file.flush();
+    }
+    pub fn new() -> Self {        
         Self {
             data: vec![0u8; DOS_MEMORY_SIZE].into_boxed_slice(),
             size: DOS_MEMORY_SIZE,

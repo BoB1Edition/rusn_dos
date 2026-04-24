@@ -49,7 +49,7 @@ impl ModRm {
                 5 => {
                     if self.mod_field == 0 {
                         // [disp32]
-                        let disp = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+                        let disp = machine.read_instr_u32( machine.registers.ip());
                         machine.registers.step(Some(4));
                         return Some(((segment as u32) << 4).wrapping_add(disp));
                     } else {
@@ -70,7 +70,7 @@ impl ModRm {
                     d
                 }
                 2 => {
-                    let d = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+                    let d = machine.read_instr_u32( machine.registers.ip());
                     machine.registers.step(Some(4));
                     d as i32
                 }
@@ -89,7 +89,7 @@ impl ModRm {
                 5 => (0, machine.registers.di()),
                 6 => {
                     if self.mod_field == 0 {
-                        let disp = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+                        let disp = machine.read_instr_u16( machine.registers.ip());
                         machine.registers.step(Some(2));
                         bytes.extend_from_slice(&disp.to_le_bytes());
 
@@ -116,7 +116,7 @@ impl ModRm {
                     d as i32
                 }
                 2 => {
-                    let d = machine.read_u16(machine.registers.cs(), machine.registers.ip());
+                    let d = machine.read_instr_u16( machine.registers.ip());
                     machine.registers.step(Some(2));
                     d as i32
                 }

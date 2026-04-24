@@ -3,8 +3,8 @@ use crate::{DosMachine, flags, modrm::ModRm};
 
 
 pub fn group_x83_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     let imm8 = machine.read_u8(
         machine.registers.cs(),
         machine.registers.ip().wrapping_add(1),
@@ -21,7 +21,7 @@ pub fn group_x83_rm32(machine: &mut DosMachine, prev: &[u8]) {
     if modrm.is_register_mode() {
         // Операция над регистром
         let dst_val = machine.read_reg32(modrm.rm_field);
-        let (result, flags) = perform_group_x83_operation_32(modrm.reg_field, dst_val, imm32, machine.registers.flags());
+        let (result, flags) = perform_group_x83_operation_32(machine,modrm.reg_field, dst_val, imm32, machine.registers.flags());
         if modrm.reg_field != 7 { // CMP (reg_field=7) не сохраняет результат
             machine.write_reg32(modrm.rm_field, result);
         }
@@ -31,7 +31,7 @@ pub fn group_x83_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
         let dst_val = machine.read_phys_u32(addr);
-        let (result, flags) = perform_group_x83_operation_32(modrm.reg_field, dst_val, imm32, machine.registers.flags());
+        let (result, flags) = perform_group_x83_operation_32(machine,modrm.reg_field, dst_val, imm32, machine.registers.flags());
         if modrm.reg_field != 7 { // CMP не сохраняет результат
             machine.write_phys_u32(addr, result);
         }
@@ -41,7 +41,7 @@ pub fn group_x83_rm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u16) -> (u32, u16) {
+fn perform_group_x83_operation_32(machine: &DosMachine, op_field: u8, dst_val: u32, imm: u32, flags: u16) -> (u32, u16) {
     match op_field {
         0 => { // ADD r/m32, imm8 (sign-extended)
             let res = dst_val as u64 + imm as u64;
@@ -49,11 +49,11 @@ fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u
             let cf = res > 0xFFFFFFFF;
             let af = ((dst_val & 0x0F) + (imm & 0x0F)) > 0x0F;
             let of = (((dst_val ^ imm) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
-            (result, flags::compute_flags_u32(result, cf, of, af))
+            (result, flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af))
         }
         1 => { // OR r/m32, imm8
             let result = dst_val | imm;
-            (result, flags::compute_logical_flags_u32(result))
+            (result, flags::compute_logical_flags_u32(machine.registers.flags(), result))
         }
         2 => { // ADC r/m32, imm8
             let carry_in = (flags & 1) != 0;
@@ -65,7 +65,7 @@ fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u
             let cf = res > 0xFFFFFFFF;
             let af = ((dst_val & 0x0F) + (imm & 0x0F) + if carry_in { 1 } else { 0 }) > 0x0F;
             let of = (((dst_val ^ imm) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
-            (result, flags::compute_flags_u32(result, cf, of, af))
+            (result, flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af))
         }
         3 => { // SBB r/m32, imm8
             let borrow_in = (flags & 1) != 0;
@@ -75,11 +75,11 @@ fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u
             let result = res as u32;
             let af = (dst_val & 0x0F) < ((imm & 0x0F) + if borrow_in { 1 } else { 0 });
             let of = (((dst_val ^ imm) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
-            (result, flags::compute_flags_u32(result, cf, of, af))
+            (result, flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af))
         }
         4 => { // AND r/m32, imm8
             let result = dst_val & imm;
-            (result, flags::compute_logical_flags_u32(result))
+            (result, flags::compute_logical_flags_u32(machine.registers.flags(), result))
         }
         5 => { // SUB r/m32, imm8
             let res = (dst_val as u64).wrapping_sub(imm as u64);
@@ -87,11 +87,11 @@ fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u
             let cf = dst_val < imm;
             let af = (dst_val & 0x0F) < (imm & 0x0F);
             let of = (((dst_val ^ imm) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
-            (result, flags::compute_flags_u32(result, cf, of, af))
+            (result, flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af))
         }
         6 => { // XOR r/m32, imm8
             let result = dst_val ^ imm;
-            (result, flags::compute_logical_flags_u32(result))
+            (result, flags::compute_logical_flags_u32(machine.registers.flags(), result))
         }
         7 => { // CMP r/m32, imm8 — как SUB, но не сохраняем результат
             let res = (dst_val as u64).wrapping_sub(imm as u64);
@@ -99,7 +99,7 @@ fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u
             let cf = dst_val < imm;
             let af = (dst_val & 0x0F) < (imm & 0x0F);
             let of = (((dst_val ^ imm) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
-            let flags = flags::compute_flags_u32(result, cf, of, af);
+            let flags = flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af);
             (dst_val, flags) // Возвращаем исходное значение (не сохраняем результат)
         }
         _ => unreachable!(),
@@ -107,10 +107,10 @@ fn perform_group_x83_operation_32(op_field: u8, dst_val: u32, imm: u32, flags: u
 }
 
 pub fn group_f7_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
@@ -118,7 +118,7 @@ pub fn group_f7_rm32(machine: &mut DosMachine, prev: &[u8]) {
     
     // Для TEST (reg_field 0/1) требуется дополнительное слово imm32
     let imm32 = if reg_field == 0 || reg_field == 1 {
-        let imm = machine.read_u32(machine.registers.cs(), machine.registers.ip());
+        let imm = machine.read_instr_u32( machine.registers.ip());
         machine.registers.step(Some(4));
         bytes.extend_from_slice(&imm.to_le_bytes());
         Some(imm)
@@ -147,7 +147,7 @@ fn group_f7_register_32(machine: &mut DosMachine, reg_field: u8, rm_field: u8, i
             // TEST r32, imm32
             let imm = imm32.unwrap();
             let result = value & imm;
-            machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+            machine.registers.set_flags(flags::compute_logical_flags_u32(machine.registers.flags(), result));
         }
         2 => {
             // NOT r32
@@ -162,7 +162,7 @@ fn group_f7_register_32(machine: &mut DosMachine, reg_field: u8, rm_field: u8, i
             let af = (value & 0x0F) != 0;
             let of = value == 0x8000_0000;
             machine.write_reg32(rm_field, result);
-            machine.registers.set_flags(flags::compute_flags_u32(result, cf, of, af));
+            machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af));
         }
         4 => {
             // MUL r32 (беззнаковое 32×32→64)
@@ -256,7 +256,7 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
             // TEST [mem], imm32
             let imm = imm32.unwrap();
             let result = value & imm;
-            machine.registers.set_flags(flags::compute_logical_flags_u32(result));
+            machine.registers.set_flags(flags::compute_logical_flags_u32(machine.registers.flags(), result));
         }
         2 => {
             // NOT [mem]
@@ -271,7 +271,7 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
             let af = (value & 0x0F) != 0;
             let of = value == 0x8000_0000;
             machine.write_phys_u32(addr, result);
-            machine.registers.set_flags(flags::compute_flags_u32(result, cf, of, af));
+            machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af));
         }
         4 => {
             // MUL [mem] (беззнаковое)

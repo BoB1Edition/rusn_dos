@@ -44,6 +44,7 @@
 │       │   │   ├── dos.rs
 │       │   │   ├── ems.rs
 │       │   │   └── mod.rs
+│       │   ├── ivt.rs
 │       │   ├── lib.rs
 │       │   ├── loader
 │       │   │   ├── com_loader.rs
@@ -74,9 +75,10 @@
 │   ├── test2.asm
 │   ├── test3.asm
 │   ├── test4.asm
+│   ├── ttasm.asm
 │   └── working.asm
 ├── test.sh
 ├── tests
 └── tree.tree
 
-17 directories, 63 files
+17 directories, 65 files

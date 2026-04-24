@@ -89,8 +89,8 @@ impl ComLoader {
         memory.write_u8(psp_base + 2, 0x00);
         memory.write_u8(psp_base + 3, 0xA0);
         // INT 21h / RETF — точка входа для вызовов DOS
-        memory.write_u8(psp_base + 8, 0xCD);
-        memory.write_u8(psp_base + 9, 0x21);
-        memory.write_u8(psp_base + 10, 0xCB);
+        memory.write_u8(psp_base + 5, 0xCD);
+        memory.write_u8(psp_base + 6, 0x21);
+        memory.write_u8(psp_base + 7, 0xCB);
     }
 }
