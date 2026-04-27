@@ -1,4 +1,4 @@
-// Ver: 5
+// Ver: 7
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub fn push_cs(machine: &mut DosMachine) {
@@ -103,7 +103,7 @@ pub fn pusha(machine: &mut DosMachine) {
     }
 
     // Логирование
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
     machine.log_instruction(csip, &[0x60]).ok();
 }
 
@@ -126,7 +126,7 @@ pub fn pushad(machine: &mut DosMachine) {
         let phys_addr = base.wrapping_add(new_esp); // A20 применится в write_phys_u32
         machine.write_phys_u32(phys_addr, reg);
     }
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
     machine.log_instruction(csip, &[0x66, 0x60]).ok();
 }
 
@@ -180,27 +180,34 @@ pub fn popa(machine: &mut DosMachine) {
     machine.registers.set_ax(ax);
 
     // Логирование
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
     machine.log_instruction(csip, &[0x61]).ok();
 }
 
 pub fn popad(machine: &mut DosMachine) {
     let base = (machine.registers.ss() as u32) << 4;
     let mut esp = machine.registers.esp();
-    
+
     // Читаем в порядке: EDI, ESI, EBP, [skip ESP], EBX, EDX, ECX, EAX
-    let edi = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    let esi = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    let ebp = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    
+    let edi = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+    let esi = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+    let ebp = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+
     // Пропускаем сохранённое значение ESP (стандартное поведение POPAD)
     esp = esp.wrapping_add(4);
-    
-    let ebx = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    let edx = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    let ecx = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    let eax = machine.read_phys_u32(base.wrapping_add(esp)); esp = esp.wrapping_add(4);
-    
+
+    let ebx = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+    let edx = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+    let ecx = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+    let eax = machine.read_phys_u32(base.wrapping_add(esp));
+    esp = esp.wrapping_add(4);
+
     // Восстанавливаем регистры
     machine.registers.set_edi(edi);
     machine.registers.set_esi(esi);
@@ -210,13 +217,16 @@ pub fn popad(machine: &mut DosMachine) {
     machine.registers.set_edx(edx);
     machine.registers.set_ecx(ecx);
     machine.registers.set_eax(eax);
-    
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
     machine.log_instruction(csip, &[0x66, 0x61]).ok();
 }
 
 pub fn push_di(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     // Уменьшаем SP на 2 (стек растёт вниз)
@@ -232,7 +242,7 @@ pub fn push_di(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/stack.rs
 pub fn pop_di(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
 
     // Читаем слово из стека по адресу [SS:SP]
     let sp = machine.registers.sp();
@@ -251,7 +261,7 @@ pub fn pop_di(machine: &mut DosMachine) {
 
 // libs/dos_core/src/instructions/stack.rs
 pub fn push_ds(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
 
     // Уменьшаем SP на 2 (стек растёт вниз)
     let new_sp = machine.registers.sp().wrapping_sub(2);
@@ -266,7 +276,7 @@ pub fn push_ds(machine: &mut DosMachine) {
 }
 
 pub fn pop_es(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
     let es_value = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     let new_sp = machine.registers.sp().wrapping_add(2);
     machine.registers.set_sp(new_sp);
@@ -276,10 +286,13 @@ pub fn pop_es(machine: &mut DosMachine) {
 
 // libs/dos_core/src/instructions/stack.rs
 pub fn push_imm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
 
     // Читаем 16-битное непосредственное значение (little-endian)
-    let imm16 = machine.read_instr_u16( machine.registers.ip());
+    let imm16 = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2)); // продвигаем на 2 байта (imm16)
     let mut bytes = prev.to_vec();
     bytes.push(0x68);
@@ -296,29 +309,32 @@ pub fn push_imm16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn push_imm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let imm32 = machine.read_instr_u32( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let imm32 = machine.read_instr_u32(machine.registers.ip());
     machine.registers.step(Some(4));
-    
+
     let new_esp = machine.registers.esp().wrapping_sub(4);
     machine.registers.set_esp(new_esp);
     let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_esp);
     machine.write_phys_u32(phys_addr, imm32);
-    
+
     machine.log_instruction(csip, prev).ok();
 }
 
 pub fn push_si(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - 1];
-    
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
+
     // Уменьшаем SP на 2 (стек растёт вниз)
     let new_sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(new_sp);
-    
+
     // Записываем значение SI в стек по адресу [SS:SP]
     let si = machine.registers.si();
     machine.write_u16(machine.registers.ss(), new_sp, si);
-    
+
     // Логирование
     machine.log_instruction(csip, &[0x56]).ok();
 }
@@ -326,13 +342,16 @@ pub fn push_si(machine: &mut DosMachine) {
 /// POP r/m16 — Pop word from stack into register or memory
 /// Извлекает слово из стека и сохраняет его напрямую в регистр или память
 pub fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-    
+
     // Проверяем код операции (должен быть /0 для POP)
     if modrm.reg_field != 0 {
         log::error!(
@@ -344,65 +363,63 @@ pub fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.halted = true;
         return;
     }
-    
-    // 1. Читаем слово из стека по текущему SP
+
     let sp = machine.registers.sp();
     let value = machine.read_u16(machine.registers.ss(), sp);
-    
-    // 2. Сохраняем значение в назначение (регистр или память)
+
     if modrm.is_register_mode() {
-        // POP в регистр
         machine.write_reg16(modrm.rm_field, value);
     } else {
-        // POP в память
-        let addr = modrm
+        let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
-        machine.write_phys_u16(addr, value);
+            .unwrap() as u16;
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.write_phys_u16(phys_addr, value);
     }
-    
-    // 3. Увеличиваем SP на 2 (стек растёт вверх)
+
     let new_sp = sp.wrapping_add(2);
     machine.registers.set_sp(new_sp);
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// PUSH r/m16 — Push word onto stack
 pub fn push_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-    
-    // Уменьшаем SP на 2 (стек растёт вниз)
+
     let new_sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(new_sp);
-    
-    // Читаем значение из регистра или памяти
+
     let value = if modrm.is_register_mode() {
         machine.read_reg16(modrm.rm_field)
     } else {
-        let addr = modrm
+        let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
-        machine.read_phys_u16(addr)
+            .unwrap() as u16;
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u16(phys_addr)
     };
-    
-    // Записываем значение в стек по адресу [SS:SP]
+
     machine.write_u16(machine.registers.ss(), new_sp, value);
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// PUSH r/m32 — Push doubleword onto stack (32-bit)
 pub fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -412,11 +429,12 @@ pub fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let value = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let addr = modrm
+        let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
-        machine.read_phys_u32(addr)
+            .unwrap() as u16;
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u32(phys_addr)
     };
     let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_esp);
     machine.write_phys_u32(phys_addr, value);

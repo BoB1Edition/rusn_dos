@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 3
 use crate::{DosMachine, init_ivt, loader::exe_header::MzHeader, memory::Memory};
 use std::fs::File;
 
@@ -99,20 +99,14 @@ impl ExeLoader {
         // 5. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
         init_ivt(&mut machine);
-        // 6. Устанавливаем регистры СОГЛАСНО СПЕЦИФИКАЦИИ DOS ДЛЯ .EXE:
-        //    - CS:IP = заголовок (смещение от LOAD_SEGMENT)
-        //    - SS:SP = заголовок (смещение от LOAD_SEGMENT)
-        //    - DS = ES = LOAD_SEGMENT (сегмент ДАННЫХ программы, НЕ PSP!)
-        //      Это критично: большинство программ ожидают DS указывать на их данные,
-        //      а не на PSP. Доступ к PSP осуществляется через явное указание сегмента.
         let cs = LOAD_SEGMENT.wrapping_add(self.header.cs);
         let ip = self.header.ip;
         let ss = LOAD_SEGMENT.wrapping_add(self.header.ss);
         let sp = self.header.sp;
 
         machine.registers.set_cs(cs);
-        machine.registers.set_ds(LOAD_SEGMENT);
-        machine.registers.set_es(LOAD_SEGMENT);
+        machine.registers.set_ds(PSP_SEGMENT);
+        machine.registers.set_es(PSP_SEGMENT);
         machine.registers.set_ss(ss);
         machine.registers.set_ip(ip);
         machine.registers.set_sp(sp);

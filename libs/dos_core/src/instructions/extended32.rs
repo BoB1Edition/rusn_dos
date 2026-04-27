@@ -14,10 +14,12 @@ pub fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg16(modrm.rm_field) as u32
     } else {
-        let addr = modrm
+        let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap(); 
-        machine.read_phys_u16(addr) as u32
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys_addr = ((segment as u32) << 4) + offset;
+        machine.read_phys_u16(phys_addr) as u32
     };
 
     let dst_reg = modrm.reg_field;

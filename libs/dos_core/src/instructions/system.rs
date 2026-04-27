@@ -34,6 +34,7 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
                 let mut f = machine.registers.flags();
                 f |= flags::CF;
                 machine.registers.set_flags(f);
+                panic!("interrupt");
             }
         }
     } else {

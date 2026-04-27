@@ -209,9 +209,25 @@ impl DosMachine {
     #[inline(always)]
     pub fn read_u16(&self, default_segment: u16, offset: u16) -> u16 {
         let segment = self.override_segment.unwrap_or(default_segment);
+
+        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        let masked_addr = self.apply_a20_mask(phys_addr);
+
         let lo = self.read_u8(segment, offset) as u16;
         let hi = self.read_u8(segment, offset.wrapping_add(1)) as u16;
-        lo | (hi << 8)
+
+        let value = lo | (hi << 8);
+        if offset == 0x0002 {
+            log::warn!(
+                "🔍 [MEM-READ] ES:[0x0002] -> Эффективный сегмент={:#04x}, Физ.Адрес={:#06x}, Прочитано={:#04x} (override={:?})",
+                segment,
+                masked_addr,
+                value,
+                self.override_segment
+            );
+        }
+
+        value
     }
 
     #[inline(always)]
@@ -380,7 +396,9 @@ impl DosMachine {
         let addr = ((self.registers.cs() as u32) << 4).wrapping_add(offset as u32);
         let masked = self.apply_a20_mask(addr);
         let lo = self.memory.read_u8(masked) as u16;
-        let hi = self.memory.read_u8(self.apply_a20_mask(masked.wrapping_add(1))) as u16;
+        let hi = self
+            .memory
+            .read_u8(self.apply_a20_mask(masked.wrapping_add(1))) as u16;
         lo | (hi << 8)
     }
 

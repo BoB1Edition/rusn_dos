@@ -11,12 +11,12 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub(crate) fn print_data(&self, stage: u8) {
+    /*pub(crate) fn print_data(&self, stage: u8) {
         log::debug!("{:?}", self.data);
         let mut file = File::create(format!("memory_stage{}", stage)).ok().unwrap();
         file.write_all(&self.data);
         file.flush();
-    }
+    }*/
     pub fn new() -> Self {        
         Self {
             data: vec![0u8; DOS_MEMORY_SIZE].into_boxed_slice(),

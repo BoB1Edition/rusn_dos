@@ -15,17 +15,12 @@ impl ComLoader {
     }
 
     pub fn exec(self, no_log: bool) -> Result<DosMachine, Box<dyn std::error::Error>> {
-        const PSP_SEGMENT: u16 = 0x1000; // PSP всегда в сегменте 0
-        const CODE_OFFSET: u16 = 0x0100; // Код начинается со смещения 0x100
-        const STACK_TOP: u16 = 0xFFFE; // Вершина стека (64 КБ - 2)
-
-        // 1. Создаём память и инициализируем нулями
+        const PSP_SEGMENT: u16 = 0x1000;
+        const CODE_OFFSET: u16 = 0x0100;
+        const STACK_TOP: u16 = 0xFFFE;
         let mut memory = Memory::new();
 
-        // 2. Создаём PSP (Program Segment Prefix) в сегменте 0x0000
         Self::create_psp(&mut memory, PSP_SEGMENT);
-
-        // 3. Загружаем код по физическому адресу 0x0100 (сегмент 0x0000, смещение 0x0100)
         let code_base = (PSP_SEGMENT as u32 * 16 + CODE_OFFSET as u32) as usize;
         if code_base + self.data.len() > memory.len() {
             return Err("COM file too large (>64KB)".into());
@@ -33,8 +28,6 @@ impl ComLoader {
         for (i, &byte) in self.data.iter().enumerate() {
             memory.write_u8((code_base + i) as u32, byte);
         }
-
-        memory.print_data(1);
 
         let logfile = if no_log {
             #[cfg(target_os = "windows")]
@@ -50,18 +43,10 @@ impl ComLoader {
             File::create("logopcode.txt")?
         };
 
-        // 4. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
-        machine.memory.print_data(2);
         init_ivt(&mut machine);
-        machine.memory.print_data(3);
-
-        // 5. Устанавливаем регистры согласно спецификации DOS для .COM:
-        //    - Все сегменты = 0 (включая PSP)
-        //    - IP = 0x0100 (начало кода после PSP)
-        //    - SP = 0xFFFE (стек растёт вниз от конца сегмента)
         machine.registers.set_cs(PSP_SEGMENT);
-        machine.registers.set_ds(PSP_SEGMENT); // DS указывает на PSP (для доступа к параметрам)
+        machine.registers.set_ds(PSP_SEGMENT);
         machine.registers.set_es(PSP_SEGMENT);
         machine.registers.set_ss(PSP_SEGMENT);
         machine.registers.set_ip(CODE_OFFSET);

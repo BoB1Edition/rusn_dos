@@ -36,17 +36,12 @@ pub fn handle_int10(machine: &mut DosMachine) {
                         print!("{}", ch as char);
                         std::io::stdout().flush().ok();
                     } else {
-                        // В Mode13h пишем в видеопамять 0xB8000 (текстовый буфер VGA)
-                        // Для простоты: выводим символ в лог/консоль, но помечаем dirty,
-                        // если хотим эмулировать текстовый оверлей.
-                        // Реальные игры в 13h обычно рисуют сами, но для совместимости:
                         log::debug!("INT 10h/0E in Mode13h: char {:#02x}", ch);
                     }
                 }
             }
         }
         0x0F => {
-            // AH=0Fh: запрос текущего состояния
             machine.registers.set_al(machine.video.mode as u8);
             machine.registers.set_ah(80); // ширина экрана
             machine.registers.set_bh(0); // активная страница
@@ -57,11 +52,10 @@ pub fn handle_int10(machine: &mut DosMachine) {
     }
 }
 
-// libs/dos_core/src/interrupts/bios.rs
 pub fn handle_int16(machine: &mut DosMachine) {
     match machine.registers.ah() {
         0x00 | 0x10 => {
-            machine.registers.set_ax(0x3100); // '1' + сканкод
+            machine.registers.set_ax(0x3100);
         }
         _ => {
             log::info!("Unsupported INT 16h / AH={:02X}", machine.registers.ah());
@@ -74,9 +68,7 @@ pub fn handle_int15(machine: &mut DosMachine) {
 
     match ax {
         0x2401 => {
-            // Enable A20 gate
             machine.a20_enabled = true;
-            // CF=0 (успех), AH=0
             let mut flags = machine.registers.flags();
             flags &= !(flags::CF); // CF = 0
             machine.registers.set_flags(flags);
@@ -102,11 +94,10 @@ pub fn handle_int15(machine: &mut DosMachine) {
             log::info!("INT 15h/AX=2403h: A20 status = {}", status);
         }
         _ => {
-            // Неизвестная функция — возвращаем ошибку
             let mut flags = machine.registers.flags();
-            flags |= flags::CF; // CF = 1 (ошибка)
+            flags |= flags::CF;
             machine.registers.set_flags(flags);
-            machine.registers.set_ah(0x86); // Function not supported
+            machine.registers.set_ah(0x86);
             log::warn!("INT 15h/AX={:#04x}: unsupported", ax);
         }
     }
