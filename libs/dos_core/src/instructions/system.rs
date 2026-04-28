@@ -68,7 +68,7 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0xEC); // опкод IN AL, DX
@@ -111,13 +111,13 @@ pub fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn nop(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn nop(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn hlt(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn hlt(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -131,7 +131,7 @@ pub fn hlt(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn cmc(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn cmc(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -143,7 +143,7 @@ pub fn cmc(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn iret(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn iret(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -178,7 +178,7 @@ pub fn iret(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let port = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
@@ -399,7 +399,7 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn std(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn std(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -411,7 +411,7 @@ pub fn std(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn stc(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn stc(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -424,7 +424,7 @@ pub fn stc(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/system.rs
-pub fn clc(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn clc(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -436,7 +436,7 @@ pub fn clc(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/system.rs
-pub fn sahf(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn sahf(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x9E);
@@ -457,7 +457,7 @@ pub fn sahf(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn outsw(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn outsw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x6F); // опкод OUTSW
@@ -515,7 +515,7 @@ pub fn outsw(machine: &mut DosMachine, prev: &[u8]) {
 
 /// OUTSD — Output String Doubleword (32-bit)
 /// Выводит двойное слово из [DS:ESI] в порт DX, обновляет ESI на ±4
-pub fn outsd(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn outsd(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x66); // префикс операнда
@@ -550,7 +550,7 @@ pub fn outsd(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn lahf(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn lahf(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x9F); // опкод LAHF
@@ -573,7 +573,7 @@ pub fn lahf(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn outsb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn outsb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x6E); // опкод OUTSB
@@ -640,7 +640,7 @@ pub fn outsb(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn wait(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn wait(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let bytes = prev.to_vec();
 
@@ -658,7 +658,7 @@ pub fn wait(machine: &mut DosMachine, prev: &[u8]) {
 
 /// INSB — Input String Byte
 /// Читает байт из порта DX и записывает его в [ES:DI], затем обновляет DI
-pub fn insb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn insb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x6C); // опкод INSB
@@ -715,7 +715,7 @@ pub fn insb(machine: &mut DosMachine, prev: &[u8]) {
 
 /// INSW — Input String Word
 /// Читает слово из порта DX и записывает его в [ES:DI], затем обновляет DI на ±2
-pub fn insw(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn insw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     bytes.push(0x6D); // опкод INSW

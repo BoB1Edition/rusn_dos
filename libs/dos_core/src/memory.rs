@@ -2,8 +2,8 @@
 
 use std::{fs::File, io::Write, ops::{Index, IndexMut}};
 
-const DOS_MEMORY_SIZE: usize = 0x110000;
-
+use crate::consts;
+                               //0x1000000
 #[derive(Debug, Clone)]
 pub struct Memory {
     data: Box<[u8]>,
@@ -19,8 +19,8 @@ impl Memory {
     }*/
     pub fn new() -> Self {        
         Self {
-            data: vec![0u8; DOS_MEMORY_SIZE].into_boxed_slice(),
-            size: DOS_MEMORY_SIZE,
+            data: vec![0u8; consts::DOS_MEMORY_SIZE].into_boxed_slice(),
+            size: consts::DOS_MEMORY_SIZE,
         }
     }
     pub fn from_slice(slice: Box<[u8]>) -> Self {

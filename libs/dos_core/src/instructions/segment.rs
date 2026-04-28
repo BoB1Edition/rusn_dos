@@ -4,7 +4,7 @@ use crate::{DosMachine, modrm::ModRm};
 /// LES r16, m16:16 — Load ES and register from far pointer
 /// Читает 32-битный указатель из памяти в формате "смещение:сегмент" (little-endian)
 /// и загружает младшие 16 бит в регистр, старшие 16 бит в сегментный регистр ES
-pub fn les_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn les_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);

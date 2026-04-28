@@ -1,7 +1,7 @@
 // Ver: 1
 use crate::{DosMachine, modrm::ModRm};
 
-pub fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);
@@ -27,7 +27,7 @@ pub fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn xchg_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn xchg_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
     machine.registers.step(None);

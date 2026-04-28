@@ -537,11 +537,10 @@ pub fn cmp_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg8(modrm.rm_field)
     } else {
-        let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
-        machine.read_phys_u8(addr)
+        let offset = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap() as u16;
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u8(phys_addr)
     };
     
     // Приёмник: регистр из reg_field

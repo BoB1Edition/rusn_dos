@@ -7,3 +7,5 @@ pub const MiB: usize = 1024 * KiB;
 pub const DOS_MEMORY_SIZE: usize = 1 * MiB;
 pub const SEGMENT_SIZE: usize = 16;
 */
+
+pub const DOS_MEMORY_SIZE: usize = 0xF00000;

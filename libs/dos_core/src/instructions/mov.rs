@@ -2,7 +2,7 @@
 
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
-pub fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -15,7 +15,7 @@ pub fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None);
 }
 
-pub fn mov_dl(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_dl(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -28,7 +28,7 @@ pub fn mov_dl(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None);
 }
 
-pub fn mov_ax(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_ax(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -41,7 +41,7 @@ pub fn mov_ax(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
 }
 
-pub fn mov_dx(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_dx(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -54,7 +54,7 @@ pub fn mov_dx(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
 }
 
-pub fn mov_bx(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_bx(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -67,7 +67,7 @@ pub fn mov_bx(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
 }
 
-pub fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -100,7 +100,7 @@ pub fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -126,7 +126,7 @@ pub fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -152,7 +152,7 @@ pub fn mov_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_al_address16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_al_address16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -176,7 +176,7 @@ pub fn mov_al_address16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_al_address32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_al_address32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -194,7 +194,7 @@ pub fn mov_al_address32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -245,7 +245,7 @@ pub fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -270,7 +270,7 @@ pub fn mov_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -306,7 +306,7 @@ pub fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/mov.rs
-pub fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -334,7 +334,7 @@ pub fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -350,7 +350,7 @@ pub fn mov_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_bh_imm8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_bh_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -366,7 +366,7 @@ pub fn mov_bh_imm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_bl_imm8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_bl_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -382,7 +382,7 @@ pub fn mov_bl_imm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn stosw(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn stosw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -411,7 +411,7 @@ pub fn stosw(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/mov.rs
-pub fn mov_si_imm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_si_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -427,7 +427,7 @@ pub fn mov_si_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_di_imm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_di_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -443,7 +443,7 @@ pub fn mov_di_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_cx_imm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_cx_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -459,7 +459,7 @@ pub fn mov_cx_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_ax_address16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_ax_address16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -496,7 +496,7 @@ pub fn mov_ax_address16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/mov.rs
-pub fn stosb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn stosb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -524,7 +524,7 @@ pub fn stosb(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -550,7 +550,7 @@ pub fn mov_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn lodsb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn lodsb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -570,7 +570,7 @@ pub fn lodsb(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_rm8_imm8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_rm8_imm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -609,7 +609,7 @@ pub fn mov_rm8_imm8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn lea_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn lea_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -692,7 +692,7 @@ fn compute_lea_offset_16(machine: &mut DosMachine, modrm: &ModRm, bytes: &mut Ve
     ((base + displacement) & 0xFFFF) as u16
 }
 
-pub fn cmpsb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn cmpsb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -738,7 +738,7 @@ pub fn cmpsb(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn cmpsw(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn cmpsw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -793,7 +793,7 @@ pub fn cmpsw(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/mov.rs
-pub fn movsb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn movsb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -825,7 +825,7 @@ pub fn movsb(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_bp_imm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_bp_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -843,7 +843,7 @@ pub fn mov_bp_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_ax_address32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_ax_address32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -881,7 +881,7 @@ pub fn mov_ax_address32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn mov_address_al(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn mov_address_al(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()];
     let mut bytes = prev.to_vec();
 

@@ -1,7 +1,7 @@
 // Ver: 4
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
-pub fn call(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -20,7 +20,7 @@ pub fn call(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_ip(new_ip);
 }
 
-pub fn retn(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn retn(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -33,7 +33,7 @@ pub fn retn(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_ip(ip);
 }
 
-pub fn jz(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jz(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -52,7 +52,7 @@ pub fn jz(machine: &mut DosMachine, prev: &[u8]) {
     }
 }
 
-pub fn ja(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn ja(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -108,7 +108,7 @@ pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn smsw(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn smsw(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -159,7 +159,7 @@ pub(crate) fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jb(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jb(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -179,7 +179,7 @@ pub fn jb(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -205,7 +205,7 @@ pub fn loop_cx(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -225,7 +225,7 @@ pub fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -250,7 +250,7 @@ pub fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -275,7 +275,7 @@ pub fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -304,7 +304,7 @@ pub fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -323,7 +323,7 @@ pub fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jcxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jcxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -346,7 +346,7 @@ pub fn jcxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -376,7 +376,7 @@ pub fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -406,7 +406,7 @@ pub fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -434,7 +434,7 @@ pub fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn call_far(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -471,7 +471,7 @@ pub fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -500,7 +500,7 @@ pub fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/control.rs
-pub fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -534,7 +534,7 @@ pub fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -559,7 +559,7 @@ pub fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn retf(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn retf(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -584,7 +584,7 @@ pub fn retf(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -613,7 +613,7 @@ pub fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 /// CALL ptr16:16 — Far call through memory (межсегментный вызов через память)
 /// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-pub fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -669,7 +669,7 @@ pub fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
 /// JMP ptr16:16 — Far jump through memory (межсегментный переход через память)
 /// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -733,7 +733,7 @@ pub fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
 // В libs/dos_core/src/instructions/control.rs (НЕ control32.rs!)
 
-pub fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -762,7 +762,7 @@ pub fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn jae_rel16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let mut bytes = prev.to_vec();
 
     // Читаем 16-битное смещение со знаком (little-endian)
@@ -779,5 +779,21 @@ pub(crate) fn jae_rel16(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_ip(new_ip);
     }
 
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn jb_rel16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip()- prev.len() as u16];
+    let mut bytes = prev.to_vec();
+    
+    let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
+    machine.registers.step(Some(2));
+    bytes.extend_from_slice(&rel16.to_le_bytes());
+
+    let cf = (machine.registers.flags() & flags::CF) != 0;
+    if cf {
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel16 as i32) as u16;
+        machine.registers.set_ip(new_ip);
+    }
     machine.log_instruction(csip, &bytes).ok();
 }

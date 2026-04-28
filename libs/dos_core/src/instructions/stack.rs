@@ -1,7 +1,7 @@
 // Ver: 7
 use crate::{machine::DosMachine, modrm::ModRm};
 
-pub fn push_cs(machine: &mut DosMachine) {
+pub(crate) fn push_cs(machine: &mut DosMachine) {
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
@@ -12,7 +12,7 @@ pub fn push_cs(machine: &mut DosMachine) {
     );
 }
 
-pub fn push_ax(machine: &mut DosMachine) {
+pub(crate) fn push_ax(machine: &mut DosMachine) {
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
@@ -23,7 +23,7 @@ pub fn push_ax(machine: &mut DosMachine) {
     );
 }
 
-pub fn push_bx(machine: &mut DosMachine) {
+pub(crate) fn push_bx(machine: &mut DosMachine) {
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
@@ -34,7 +34,7 @@ pub fn push_bx(machine: &mut DosMachine) {
     );
 }
 
-pub fn pushf(machine: &mut DosMachine) {
+pub(crate) fn pushf(machine: &mut DosMachine) {
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
@@ -45,7 +45,7 @@ pub fn pushf(machine: &mut DosMachine) {
     );
 }
 
-pub fn pop_ds(machine: &mut DosMachine) {
+pub(crate) fn pop_ds(machine: &mut DosMachine) {
     let ds = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
@@ -53,7 +53,7 @@ pub fn pop_ds(machine: &mut DosMachine) {
     machine.registers.set_ds(ds);
 }
 
-pub fn pop_ax(machine: &mut DosMachine) {
+pub(crate) fn pop_ax(machine: &mut DosMachine) {
     let ax = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
@@ -61,7 +61,7 @@ pub fn pop_ax(machine: &mut DosMachine) {
     machine.registers.set_ax(ax);
 }
 
-pub fn popf(machine: &mut DosMachine) {
+pub(crate) fn popf(machine: &mut DosMachine) {
     let flags = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
@@ -69,7 +69,7 @@ pub fn popf(machine: &mut DosMachine) {
     machine.registers.set_flags(flags);
 }
 
-pub fn pop_fs(machine: &mut DosMachine) {
+pub(crate) fn pop_fs(machine: &mut DosMachine) {
     let fs = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
@@ -78,7 +78,7 @@ pub fn pop_fs(machine: &mut DosMachine) {
 }
 
 // libs/dos_core/src/instructions/stack.rs
-pub fn pusha(machine: &mut DosMachine) {
+pub(crate) fn pusha(machine: &mut DosMachine) {
     // Сохраняем оригинальное значение SP ДО начала операции
     let original_sp = machine.registers.sp();
 
@@ -107,7 +107,7 @@ pub fn pusha(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x60]).ok();
 }
 
-pub fn pushad(machine: &mut DosMachine) {
+pub(crate) fn pushad(machine: &mut DosMachine) {
     let original_esp = machine.registers.esp();
     let regs = [
         machine.registers.eax(),
@@ -130,7 +130,7 @@ pub fn pushad(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x66, 0x60]).ok();
 }
 
-pub fn popa(machine: &mut DosMachine) {
+pub(crate) fn popa(machine: &mut DosMachine) {
     // Восстанавливаем в обратном порядке сохранения
     let di = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
@@ -184,7 +184,7 @@ pub fn popa(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x61]).ok();
 }
 
-pub fn popad(machine: &mut DosMachine) {
+pub(crate) fn popad(machine: &mut DosMachine) {
     let base = (machine.registers.ss() as u32) << 4;
     let mut esp = machine.registers.esp();
 
@@ -222,7 +222,7 @@ pub fn popad(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x66, 0x61]).ok();
 }
 
-pub fn push_di(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn push_di(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -241,7 +241,7 @@ pub fn push_di(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 // libs/dos_core/src/instructions/stack.rs
-pub fn pop_di(machine: &mut DosMachine) {
+pub(crate) fn pop_di(machine: &mut DosMachine) {
     let csip = [machine.registers.cs(), machine.registers.ip() - 1];
 
     // Читаем слово из стека по адресу [SS:SP]
@@ -260,7 +260,7 @@ pub fn pop_di(machine: &mut DosMachine) {
 }
 
 // libs/dos_core/src/instructions/stack.rs
-pub fn push_ds(machine: &mut DosMachine) {
+pub(crate) fn push_ds(machine: &mut DosMachine) {
     let csip = [machine.registers.cs(), machine.registers.ip() - 1];
 
     // Уменьшаем SP на 2 (стек растёт вниз)
@@ -275,7 +275,7 @@ pub fn push_ds(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x1E]).ok();
 }
 
-pub fn pop_es(machine: &mut DosMachine) {
+pub(crate) fn pop_es(machine: &mut DosMachine) {
     let csip = [machine.registers.cs(), machine.registers.ip() - 1];
     let es_value = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     let new_sp = machine.registers.sp().wrapping_add(2);
@@ -285,7 +285,7 @@ pub fn pop_es(machine: &mut DosMachine) {
 }
 
 // libs/dos_core/src/instructions/stack.rs
-pub fn push_imm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn push_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -308,7 +308,7 @@ pub fn push_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn push_imm32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn push_imm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -324,7 +324,7 @@ pub fn push_imm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, prev).ok();
 }
 
-pub fn push_si(machine: &mut DosMachine) {
+pub(crate) fn push_si(machine: &mut DosMachine) {
     let csip = [machine.registers.cs(), machine.registers.ip() - 1];
 
     // Уменьшаем SP на 2 (стек растёт вниз)
@@ -341,7 +341,7 @@ pub fn push_si(machine: &mut DosMachine) {
 
 /// POP r/m16 — Pop word from stack into register or memory
 /// Извлекает слово из стека и сохраняет его напрямую в регистр или память
-pub fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -384,7 +384,7 @@ pub fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn push_rm16(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn push_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -414,7 +414,7 @@ pub fn push_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,

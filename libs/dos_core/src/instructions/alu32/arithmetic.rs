@@ -88,54 +88,34 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-pub fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+pub(crate) fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
-
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
-    machine.log_instruction(csip, &bytes).ok();
-
     let modrm = ModRm::from_byte(modrm_byte);
-
-    if modrm.is_register_mode() {
-        // SUB reg32, reg32
-        let dst_val = machine.read_reg32(modrm.reg_field);
-        let src_val = machine.read_reg32(modrm.rm_field);
-        let res = (dst_val as i64) - (src_val as i64);
-        let result = res as u32;
-        let cf = dst_val < src_val;
-        let af = (dst_val & 0x0F) < (src_val & 0x0F);
-        let of =
-            (((dst_val ^ src_val) & 0x8000_0000) != 0) && (((dst_val ^ result) & 0x8000_0000) != 0);
-        machine.write_reg32(modrm.reg_field, result);
-
-        let mut flags = machine.registers.flags();
-        flags &= !(flags::CF | flags::PF | flags::AF | flags::ZF | flags::SF | flags::OF);
-        if result == 0 {
-            flags |= flags::ZF;
-        }
-        if (result & 0x8000_0000) != 0 {
-            flags |= flags::SF;
-        }
-        if (result as u8).count_ones() % 2 == 0 {
-            flags |= flags::PF;
-        }
-        if cf {
-            flags |= flags::CF;
-        }
-        if of {
-            flags |= flags::OF;
-        }
-        if af {
-            flags |= flags::AF;
-        }
-        machine.registers.set_flags(flags);
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field)
     } else {
-        log::error!("Memory operand in SUB r32, r/m32 not supported yet");
-        machine.halted = true;
-    }
+        let offset = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap() as u16;
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u32(phys_addr)
+    };
+    let dst_reg = modrm.reg_field;
+    let dst_val = machine.read_reg32(dst_reg);
+    let result = dst_val.wrapping_sub(src_val);
+    let cf = dst_val < src_val; // Беззнаковый заём
+    let af = ((dst_val & 0x0F) as i32) < ((src_val & 0x0F) as i32); // Вспомогательный заём
+    let of = ((dst_val ^ src_val) & (dst_val ^ result)) & 0x8000_0000 != 0;
+    
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, cf, of, af));
+    
+    machine.write_reg32(dst_reg, result);
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 

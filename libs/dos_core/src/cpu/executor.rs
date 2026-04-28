@@ -1,4 +1,4 @@
-// Ver: 4
+// Ver: 6
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -89,7 +89,6 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
     Ok(Some(machine.registers.al()))
 }
 
-
 /*struct DebugLog {
     logfile: File
 }
@@ -128,7 +127,8 @@ impl DebugLog {
 }*/
 
 /// Диспетчеризация базовых опкодов (без префикса 0x0F)
-fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) {
+fn execute(machine: &mut DosMachine, opcode: u8) {
+    //, debug: Option<&DebugLog>) {
     let mut full_bytes = Vec::new();
     if machine.has_operand_size_prefix {
         full_bytes.push(0x66);
@@ -140,10 +140,13 @@ fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) 
         full_bytes.push(oos);
     }
     full_bytes.push(opcode);
-    let csip = [machine.registers.cs(), machine.registers.ip()  - full_bytes.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - full_bytes.len() as u16,
+    ];
     /*if let Some(dl) = debug {
         dl.print(machine, 0x1000, 0x3bd, 14);
-    }*/ 
+    }*/
     match opcode {
         0x00 => alu::add_rm8_r8(machine, &full_bytes),
         0x01 => {
@@ -212,11 +215,18 @@ fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) 
             stack::pop_ds(machine);
         }
         0x20 => alu::and_rm8_r8(machine, &full_bytes),
-        0x23 => {
+        0x21 => {
             if machine.has_operand_size_prefix {
                 alu32::and_rm32_r32(machine, &full_bytes);
             } else {
                 alu::and_rm16_r16(machine, &full_bytes);
+            }
+        }
+        0x23 => {
+            if machine.has_operand_size_prefix {
+                alu32::and_r32_rm32(machine, &full_bytes);
+            } else {
+                alu::and_r16_rm16(machine, &full_bytes);
             }
         }
         0x24 => alu::and_al_imm8(machine, &full_bytes),
@@ -244,6 +254,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) 
                 alu::xor_r16_rm16(machine, &full_bytes);
             }
         }
+        0x38 => alu::cmp_rm8_r8(machine, &full_bytes),
         0x3A => alu::cmp_r8_rm8(machine, &full_bytes),
         0x3B => {
             if machine.has_operand_size_prefix {
@@ -477,18 +488,10 @@ fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) 
                 16
             };
             match (addr_size, op_size) {
-                (16, 16) => {
-                    mov::mov_ax_address16(machine, &full_bytes)
-                },
-                (16, 32) => {
-                    mov32::mov_eax_address16(machine, &full_bytes)
-                },
-                (32, 16) => {
-                    mov::mov_ax_address32(machine, &full_bytes)
-                },
-                (32, 32) => {
-                    mov32::mov_eax_address32(machine, &full_bytes)
-                },
+                (16, 16) => mov::mov_ax_address16(machine, &full_bytes),
+                (16, 32) => mov32::mov_eax_address16(machine, &full_bytes),
+                (32, 16) => mov::mov_ax_address32(machine, &full_bytes),
+                (32, 32) => mov32::mov_eax_address32(machine, &full_bytes),
                 _ => {
                     log::error!(
                         "Invalid addr_size/op_size combination: {}/{} at CS:IP={:#04x}:{:#04x}",
@@ -667,6 +670,13 @@ fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) 
             }
         }
         0xA8 => alu::test_al_imm8(machine, &full_bytes),
+        0xA9 => {
+            if machine.has_operand_size_prefix {
+                alu32::test_eax_imm32(machine, &full_bytes);
+            } else {
+                alu::test_ax_imm16(machine, &full_bytes);
+            }
+        }
         0xAA => {
             if machine.has_rep_prefix {
                 // REP STOSB: повторяем пока CX != 0
@@ -970,7 +980,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {//, debug: Option<&DebugLog>) 
 }
 
 /// Диспетчеризация расширенных опкодов (с префиксом 0x0F)
-fn execute_0f(machine: &mut DosMachine, opcode: u8/* ,debug: Option<&DebugLog>*/) {
+fn execute_0f(machine: &mut DosMachine, opcode: u8 /* ,debug: Option<&DebugLog>*/) {
     let mut full_bytes = Vec::new();
     if machine.has_operand_size_prefix {
         full_bytes.push(0x66);
@@ -985,15 +995,59 @@ fn execute_0f(machine: &mut DosMachine, opcode: u8/* ,debug: Option<&DebugLog>*/
     full_bytes.push(opcode);
 
     match opcode {
-        0x01 => control::smsw(machine, &full_bytes),
+        0x01 => {
+            let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+            let modrm = ModRm::from_byte(modrm_byte);
+
+            match modrm.reg_field {
+                1 => {
+                    if (modrm.mod_field & 0b1100_0000) == 0b0000_0000 && modrm.rm_field == 0b010 {
+                        log::warn!("LGDT stub: Ignored (Real Mode)");
+                        machine.registers.step(None);
+                        if modrm.mod_field == 0b00 && modrm.rm_field == 0b110 {
+                            machine.registers.step(Some(2)); // Пропустить disp16
+                        }
+                    } else {
+                        control::smsw(machine, &full_bytes);
+                    }
+                }
+                2 => {
+                    log::info!("LIDT/SIDT stub: Ignored (Real Mode)");
+                    machine.registers.step(None);
+                }
+                4 => {
+                    control::smsw(machine, &full_bytes);
+                }
+                _ => {
+                    log::warn!(
+                        "Unhandled 0F 01 /{} at CS:IP={:#04x}:{:#04x}",
+                        modrm.reg_field,
+                        machine.registers.cs(),
+                        machine.registers.ip()
+                    );
+                }
+            }
+        }
         0xA1 => {
             stack::pop_fs(machine);
             machine
                 .log_instruction(
-                    [machine.registers.cs(), machine.registers.ip()],
+                    [
+                        machine.registers.cs(),
+                        machine.registers.ip() - full_bytes.len() as u16,
+                    ],
                     &full_bytes,
                 )
                 .ok();
+        }
+        0x20 => extended::mov_reg32_crn(machine, &full_bytes),
+        0x22 => extended::mov_crn_reg32(machine, &full_bytes),
+        0x82 => {
+            if machine.has_operand_size_prefix {
+                control32::jb_rel32(machine, &full_bytes);
+            } else {
+                control::jb_rel16(machine, &full_bytes);
+            }
         }
         0x83 => {
             if machine.has_operand_size_prefix {

@@ -1,10 +1,11 @@
-// Ver: 1
+// Ver: 3
 use std::io::Write;
 
 use crate::video::VideoMode;
-use crate::{DosMachine, flags};
+use crate::{DosMachine, consts, flags};
 
-pub fn handle_int10(machine: &mut DosMachine) {
+
+pub(crate) fn handle_int10(machine: &mut DosMachine) {
     match machine.registers.ah() {
         0x00 => {
             // AH=00h: установка видеорежима
@@ -52,7 +53,7 @@ pub fn handle_int10(machine: &mut DosMachine) {
     }
 }
 
-pub fn handle_int16(machine: &mut DosMachine) {
+pub(crate) fn handle_int16(machine: &mut DosMachine) {
     match machine.registers.ah() {
         0x00 | 0x10 => {
             machine.registers.set_ax(0x3100);
@@ -63,14 +64,31 @@ pub fn handle_int16(machine: &mut DosMachine) {
     }
 }
 
-pub fn handle_int15(machine: &mut DosMachine) {
+pub(crate) fn handle_int15(machine: &mut DosMachine) {
     let ax = machine.registers.ax();
 
     match ax {
+        0x8800..=0x88FF => {
+            let mut flags = machine.registers.flags();
+            flags &= !flags::CF; // CF=0 (Success)
+            machine.registers.set_flags(flags);
+            let total_kb = consts::DOS_MEMORY_SIZE / 1024;
+            let ext_mem_kb = total_kb.saturating_sub(1024);
+            machine.registers.set_ax(ext_mem_kb as u16);
+            log::info!("INT 15h/AH=88h: Extended Memory = {:#04X} KB", ext_mem_kb);
+        }
+        0x2400 => {
+            let status = if machine.a20_enabled { 1 } else { 0 };
+            let mut flags = machine.registers.flags();
+            flags &= !(flags::CF); // CF = 0
+            machine.registers.set_flags(flags);
+            machine.registers.set_al(status);
+            log::info!("INT 15h/AX=2400h: A20 status query -> {}", status);
+        }
         0x2401 => {
             machine.a20_enabled = true;
             let mut flags = machine.registers.flags();
-            flags &= !(flags::CF); // CF = 0
+            flags &= !(flags::CF);
             machine.registers.set_flags(flags);
             machine.registers.set_ah(0);
             log::info!("INT 15h/AX=2401h: A20 gate ENABLED via BIOS");
@@ -90,15 +108,16 @@ pub fn handle_int15(machine: &mut DosMachine) {
             let mut flags = machine.registers.flags();
             flags &= !(flags::CF); // CF = 0
             machine.registers.set_flags(flags);
-            machine.registers.set_al(status);
+            machine.registers.set_ah(1);
             log::info!("INT 15h/AX=2403h: A20 status = {}", status);
         }
         _ => {
             let mut flags = machine.registers.flags();
             flags |= flags::CF;
             machine.registers.set_flags(flags);
-            machine.registers.set_ah(0x86);
             log::warn!("INT 15h/AX={:#04x}: unsupported", ax);
+            machine.registers.set_ah(0x86);
+            //machine.halted=true;
         }
     }
 }
