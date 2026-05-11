@@ -253,3 +253,29 @@ pub(crate) fn jb_rel32(machine: &mut DosMachine, prev: &[u8]) {
     }
     machine.log_instruction(csip, &bytes).ok();
 }
+
+pub fn bound_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    if modrm.is_register_mode() { machine.halted = true; return; }
+
+    let offset = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap() as u16;
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+
+    let low  = machine.read_phys_u32(phys_addr) as i32;
+    let high = machine.read_phys_u32(phys_addr.wrapping_add(4)) as i32;
+    let reg_val = machine.read_reg32(modrm.reg_field) as i32;
+
+    if reg_val < low || reg_val > high {
+        log::warn!("BOUND32 range exceeded");
+        crate::instructions::system::int(machine, &[0xCD, 0x05]);
+        return;
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}

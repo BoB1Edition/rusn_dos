@@ -797,3 +797,44 @@ pub(crate) fn jb_rel16(machine: &mut DosMachine, prev: &[u8]) {
     }
     machine.log_instruction(csip, &bytes).ok();
 }
+
+/// BOUND r16, r/m16 — Проверка выхода за границы (опкод 0x62)
+pub fn bound_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // BOUND не поддерживает режим регистр-регистр (mod=11)
+    if modrm.is_register_mode() {
+        log::error!("BOUND with register operand is undefined at CS:IP={:#04x}:{:#04x}", 
+                    machine.registers.cs(), machine.registers.ip());
+        machine.halted = true;
+        return;
+    }
+
+    // 🔑 Вычисляем физический адрес границ в памяти
+    let offset = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap() as u16;
+    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+
+    // Читаем нижнюю и верхнюю границы (знаковые 16-битные)
+    let low  = machine.read_phys_u16(phys_addr) as i16;
+    let high = machine.read_phys_u16(phys_addr.wrapping_add(2)) as i16;
+    let reg_val = machine.read_reg16(modrm.reg_field) as i16;
+
+    // ✅ Проверка диапазона
+    if reg_val < low || reg_val > high {
+        log::warn!("BOUND range exceeded: reg={} not in [{}, {}] at CS:IP={:#04x}:{:#04x}", 
+                   reg_val, low, high, csip[0], csip[1]);
+        
+        // Генерируем INT 5 (Bound Range Exceeded)
+        // Передаём фейковый опкод INT 5, чтобы system::int корректно распарсил номер прерывания
+        crate::instructions::system::int(machine, &[0xCD, 0x05]); 
+        return; // Поток выполнения изменится внутри INT 5, дальше не идём
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}

@@ -42,6 +42,7 @@ pub struct DosMachine {
     pub(crate) ems_free_pages: u16,
     pub(crate) ems_next_handle: u16,
     pub(crate) ems_handles: Vec<(u16, u16)>,
+    pub(crate) has_lock_prefix: bool,
 }
 
 impl DosMachine {
@@ -180,7 +181,7 @@ impl DosMachine {
         }
         .to_string();
         error!(
-            "Unsupported {bit_depth} {bit_address} {bit_extended} {:#02X} at CS:IP = {:#04x}:{:#04x}",
+            "Unsupported {bit_depth} {bit_address} {bit_extended} {:#04X} at CS:IP = {:#04x}:{:#04x}",
             opcode,
             self.registers.cs(),
             self.registers.ip()
@@ -357,6 +358,7 @@ impl DosMachine {
             ems_free_pages: 256,
             ems_next_handle: 1,
             ems_handles: Vec::new(),
+            has_lock_prefix: false
         }
     }
 

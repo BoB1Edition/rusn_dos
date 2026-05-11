@@ -23,6 +23,18 @@ pub(crate) fn push_ax(machine: &mut DosMachine) {
     );
 }
 
+pub fn push_cx(machine: &mut DosMachine) {
+    let sp = machine.registers.sp().wrapping_sub(2);
+    machine.registers.set_sp(sp);
+    machine.write_u16(machine.registers.ss(), sp, machine.registers.cx());
+}
+
+pub fn push_dx(machine: &mut DosMachine) {
+    let sp = machine.registers.sp().wrapping_sub(2);
+    machine.registers.set_sp(sp);
+    machine.write_u16(machine.registers.ss(), sp, machine.registers.dx());
+}
+
 pub(crate) fn push_bx(machine: &mut DosMachine) {
     machine
         .registers

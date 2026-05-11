@@ -809,3 +809,99 @@ pub fn dec_cx(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+/// ADC r/m8, r8 — Опкод 0x10
+/// Операция: dst = dst + src + CF
+pub fn adc_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = machine.read_reg8(modrm.reg_field);
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+
+    // Читаем приёмник (регистр или память)
+    let (dst_val, is_mem, phys_addr) = if modrm.is_register_mode() {
+        (machine.read_reg8(modrm.rm_field), false, 0)
+    } else {
+        let offset = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap() as u16;
+        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        let phys = ((segment as u32) << 4).wrapping_add(offset as u32);
+        (machine.read_phys_u8(phys), true, phys)
+    };
+
+    // Сложение с учётом переноса
+    let sum = (dst_val as u16) + (src_val as u16) + (if cf_in { 1 } else { 0 });
+    let result = sum as u8;
+
+    // 🔑 Расчёт флагов для ADC
+    let new_cf = sum > 0xFF;
+    let new_af = ((dst_val & 0x0F) as u16 + (src_val & 0x0F) as u16 + (if cf_in { 1 } else { 0 })) > 0x0F;
+    let new_of = ((dst_val ^ src_val) & 0x80) == 0 && ((dst_val ^ result) & 0x80) != 0;
+
+    let mut f = machine.registers.flags();
+    f &= !(flags::CF | flags::AF | flags::OF | flags::SF | flags::ZF | flags::PF);
+    if new_cf { f |= flags::CF; }
+    if new_af { f |= flags::AF; }
+    if new_of { f |= flags::OF; }
+    if result == 0 { f |= flags::ZF; }
+    if (result & 0x80) != 0 { f |= flags::SF; }
+    if result.count_ones() % 2 == 0 { f |= flags::PF; }
+    machine.registers.set_flags(f);
+
+    // Запись результата
+    if is_mem {
+        machine.write_phys_u8(phys_addr, result);
+    } else {
+        machine.write_reg8(modrm.rm_field, result);
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn inc_di(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let di = machine.registers.di();
+    let result = di.wrapping_add(1);
+
+    // 🔑 INC обновляет AF, OF, PF, SF, ZF. CF ОСТАЁТСЯ БЕЗ ИЗМЕНЕНИЙ!
+    let mut f = machine.registers.flags();
+    f &= !(flags::AF | flags::OF | flags::PF | flags::SF | flags::ZF);
+    
+    if (di & 0x0F) == 0x0F { f |= flags::AF; }      // Перенос из 3 в 4 бит
+    if di == 0x7FFF { f |= flags::OF; }              // Знаковое переполнение
+    if (result as u8).count_ones() % 2 == 0 { f |= flags::PF; } // Чётность младшего байта
+    if result == 0 { f |= flags::ZF; }               // Результат ноль
+    if (result & 0x8000) != 0 { f |= flags::SF; }    // Знаковый бит
+
+    machine.registers.set_flags(f);
+    machine.registers.set_di(result);
+    machine.log_instruction(csip, prev).ok();
+}
+
+pub fn inc_ax(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let ax = machine.registers.ax();
+    let result = ax.wrapping_add(1);
+
+    // 🔑 INC обновляет AF, OF, PF, SF, ZF. CF ОСТАЁТСЯ БЕЗ ИЗМЕНЕНИЙ!
+    let mut f = machine.registers.flags();
+    f &= !(flags::AF | flags::OF | flags::PF | flags::SF | flags::ZF);
+
+    // AF: перенос из 3-го в 4-й бит (при переходе через 0x0F)
+    if (ax & 0x0F) == 0x0F { f |= flags::AF; }
+    // OF: знаковое переполнение (0x7FFF → 0x8000)
+    if ax == 0x7FFF { f |= flags::OF; }
+    // PF: чётность младшего байта результата
+    if (result as u8).count_ones() % 2 == 0 { f |= flags::PF; }
+    // ZF: результат равен нулю
+    if result == 0 { f |= flags::ZF; }
+    // SF: знаковый бит результата
+    if (result & 0x8000) != 0 { f |= flags::SF; }
+
+    machine.registers.set_flags(f);
+    machine.registers.set_ax(result);
+    machine.log_instruction(csip, prev).ok();
+}

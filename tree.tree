@@ -60,12 +60,14 @@
 │       │   └── video
 │       │       └── mod.rs
 │       └── tests
+├── run.log
 ├── shufled.py
 ├── src
 │   ├── app.rs
 │   └── main.rs
 ├── test
 │   ├── game1.asm
+│   ├── game2.asm
 │   ├── hard_emuland.asm
 │   ├── tasm_test3.asm
 │   ├── tasm_test4.asm
@@ -81,4 +83,4 @@
 ├── tests
 └── tree.tree
 
-17 directories, 65 files
+17 directories, 67 files

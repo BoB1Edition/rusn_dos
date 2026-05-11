@@ -2,7 +2,7 @@
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
-use std::error::Error;
+use std::{error::Error, process::exit};
 
 use crate::{
     flags,
@@ -23,9 +23,9 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
         machine.registers.step(None);
 
         match opcode {
+            0x0F => machine.has_extended_prefix = true,
             0x67 => machine.has_address_size_prefix = true,
             0x66 => machine.has_operand_size_prefix = true,
-            0x0F => machine.has_extended_prefix = true,
             0x26 => {
                 machine.override_segment = Some(machine.registers.es());
                 machine.opcode_override_segment = Some(opcode);
@@ -50,6 +50,10 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
                 machine.override_segment = Some(machine.registers.gs());
                 machine.opcode_override_segment = Some(opcode);
             } // GS:
+            0xF0 => {
+                machine.has_lock_prefix = true; // REPNE
+                //machine.rep_prefix_type = Some(0xF0)
+            }
             0xF2 => {
                 machine.has_rep_prefix = true; // REPNE
                 machine.rep_prefix_type = Some(0xF2)
@@ -69,6 +73,7 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
                 machine.has_operand_size_prefix = false;
                 machine.has_extended_prefix = false;
                 machine.has_rep_prefix = false;
+                machine.has_lock_prefix = false;
                 machine.override_segment = None;
                 machine.rep_prefix_type = None;
                 machine.opcode_override_segment = None;
@@ -205,6 +210,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
             machine.log_instruction(csip, &full_bytes).ok();
             stack::push_cs(machine);
         }
+        0x10 => alu::adc_rm8_r8(machine, &full_bytes),
         0x18 => alu::sbb_rm8_r8(machine, &full_bytes),
         0x1E => {
             machine.log_instruction(csip, &full_bytes).ok();
@@ -271,7 +277,9 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 alu::cmp_ax_imm16(machine, &full_bytes);
             }
         }
+        0x40 => alu::inc_ax(machine, &full_bytes),
         0x45 => alu::inc_bp(machine, &full_bytes),
+        0x47 => alu::inc_di(machine, &full_bytes),
         0x48 => alu::dec_ax(machine, &full_bytes),
         0x49 => alu::dec_cx(machine, &full_bytes),
         0x4D => alu::dec_bp(machine, &full_bytes),
@@ -279,6 +287,14 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
         0x50 => {
             machine.log_instruction(csip, &full_bytes).ok();
             stack::push_ax(machine);
+        }
+        0x51 => {
+            machine.log_instruction(csip, &full_bytes).ok();
+            stack::push_cx(machine);
+        }
+        0x52 => {
+            machine.log_instruction(csip, &full_bytes).ok();
+            stack::push_dx(machine);
         }
         0x53 => {
             machine.log_instruction(csip, &full_bytes).ok();
@@ -309,6 +325,13 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 stack::popad(machine);
             } else {
                 stack::popa(machine);
+            }
+        }
+        0x62 => {
+            if machine.has_operand_size_prefix {
+                control32::bound_r32_rm32(machine, &full_bytes);
+            } else {
+                control::bound_r16_rm16(machine, &full_bytes);
             }
         }
         0x68 => {
@@ -386,6 +409,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 }
             }
         }
+        0x70 => control::jb(machine, &full_bytes),
         0x72 => control::jb(machine, &full_bytes),
         0x73 => control::jae_rel8(machine, &full_bytes),
         0x74 => control::jz(machine, &full_bytes),
@@ -976,6 +1000,13 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
             }
         }
         _ => machine.print_error_exit(opcode),
+    }
+    if machine.has_lock_prefix {
+        log::debug!(
+            "LOCK prefix consumed at CS:IP={:#04x}:{:#04x}",
+            csip[0],
+            csip[1]
+        );
     }
 }
 
