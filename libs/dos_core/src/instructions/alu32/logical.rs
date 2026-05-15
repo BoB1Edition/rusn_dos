@@ -1,4 +1,4 @@
-// Ver: 5
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn xor_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
@@ -63,18 +63,14 @@ pub(crate) fn or_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let dst = machine.read_reg32(modrm.rm_field);
         let result = dst | src;
         machine.write_reg32(modrm.rm_field, result);
-        let mut flags = machine.registers.flags();
-        flags &= !(flags::CF | flags::PF | flags::ZF | flags::SF | flags::OF);
-        if result == 0 {
-            flags |= flags::ZF;
-        }
-        if (result & 0x8000_0000) != 0 {
-            flags |= flags::SF;
-        }
-        if (result as u8).count_ones() % 2 == 0 {
-            flags |= flags::PF;
-        }
-        machine.registers.set_flags(flags);
+        let result = dst | src;
+        //machine.write_phys_u32(phys_addr, result);
+        machine
+            .registers
+            .set_flags(flags::compute_logical_flags_u32(
+                machine.registers.flags(),
+                result,
+            ));
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b101 {
         if !machine.has_address_size_prefix {
             log::error!("Invalid memory mode for OR without address-size prefix");
@@ -93,18 +89,12 @@ pub(crate) fn or_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let dst_val = machine.read_phys_u32(phys_addr);
         let result = dst_val | src_val;
         machine.write_phys_u32(phys_addr, result);
-        let mut flags = machine.registers.flags();
-        flags &= !(flags::CF | flags::PF | flags::ZF | flags::SF | flags::OF);
-        if result == 0 {
-            flags |= flags::ZF;
-        }
-        if (result & 0x8000_0000) != 0 {
-            flags |= flags::SF;
-        }
-        if (result as u8).count_ones() % 2 == 0 {
-            flags |= flags::PF;
-        }
-        machine.registers.set_flags(flags);
+        machine
+            .registers
+            .set_flags(flags::compute_logical_flags_u32(
+                machine.registers.flags(),
+                result,
+            ));
     } else {
         log::error!("Unsupported memory mode in OR r/m32, r32");
         machine.halted = true;
@@ -278,15 +268,23 @@ pub(crate) fn and_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn test_eax_imm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let imm32 = machine.read_instr_u32(machine.registers.ip());
     machine.registers.step(Some(4));
     let mut bytes = prev.to_vec();
     bytes.extend_from_slice(&imm32.to_le_bytes());
-    
+
     let eax = machine.registers.eax();
     let result = eax & imm32;
-    
-    machine.registers.set_flags(flags::compute_logical_flags_u32(machine.registers.flags(), result));
+
+    machine
+        .registers
+        .set_flags(flags::compute_logical_flags_u32(
+            machine.registers.flags(),
+            result,
+        ));
     machine.log_instruction(csip, &bytes).ok();
 }

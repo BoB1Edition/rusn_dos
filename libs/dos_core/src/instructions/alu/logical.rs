@@ -1,4 +1,4 @@
-// Ver: 5
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 /// OR r8, r/m8
@@ -382,7 +382,7 @@ pub(crate) fn test_ax_imm16(machine: &mut DosMachine, prev: &[u8]) {
 
 /// CMP r/m8, r8 — Опкод 0x38
 /// Операция: dst (r/m8) - src (r8). Результат не сохраняется, только флаги.
-pub fn cmp_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn cmp_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
@@ -403,7 +403,7 @@ pub fn cmp_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
 
     let result = dst_val.wrapping_sub(src_val);
     let cf = dst_val < src_val;
-    let af = ((dst_val & 0x0F) as i8) < ((src_val & 0x0F) as i8);
+    let af = (dst_val & 0x0F) < (src_val & 0x0F);
     let of = ((dst_val ^ src_val) & (dst_val ^ result)) & 0x80 != 0;
 
     machine.registers.set_flags(flags::compute_flags_u8(machine.registers.flags(), result, cf, of, af));

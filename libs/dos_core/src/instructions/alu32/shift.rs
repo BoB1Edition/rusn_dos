@@ -1,4 +1,4 @@
-// Ver: 2
+// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) {
@@ -11,7 +11,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
     let result = match op_field {
         0 => {
             let result = value.rotate_left(count as u32);
-            let cf = (result >> 31) != 0;
+            let cf = (value >> (32 - count)) & 1 != 0;
             let msb_before = (value >> 31) != 0;
             let msb_after = (result >> 31) != 0;
             let of = if count == 1 {
@@ -24,7 +24,7 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
         }
         1 => {
             let result = value.rotate_right(count as u32);
-            let cf = (result & 1) != 0;
+            let cf = (value >> (count - 1)) & 1 != 0;
             let lsb_before = (value & 1) != 0;
             let msb_after = (result >> 31) != 0;
             let of = if count == 1 {
@@ -112,11 +112,11 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
     (result, new_flags)
 }
 
-pub fn shift_group_d1_32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn shift_group_d1_32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
-    machine.registers.step(None); // продвигаем только на байт ModR/M
+    machine.registers.step(None);
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
@@ -231,7 +231,7 @@ pub fn shift_rm32_cl(machine: &mut DosMachine, prev: &[u8]) {
 fn rol32(value: u32, count: u8) -> (u32, bool, bool) {
     let count = count as usize % 32;
     let result = (value << count) | (value >> (32 - count));
-    let cf = (result & 1) != 0;
+    let cf = (value >> (32 - count)) & 1 != 0;
     let of = ((value ^ result) & 0x80000000) != 0;
     (result, cf, of)
 }
@@ -239,7 +239,7 @@ fn rol32(value: u32, count: u8) -> (u32, bool, bool) {
 fn ror32(value: u32, count: u8) -> (u32, bool, bool) {
     let count = count as usize % 32;
     let result = (value >> count) | (value << (32 - count));
-    let cf = (result & 0x80000000) != 0;
+    let cf = (value >> (count - 1)) & 1 != 0;
     let of = ((result ^ (result >> 1)) & 0x80000000) != 0;
     (result, cf, of)
 }

@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 1
 use crate::DosMachine;
 
 /// Базовый адрес IVT в физической памяти

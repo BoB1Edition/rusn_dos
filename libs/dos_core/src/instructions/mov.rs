@@ -1,4 +1,4 @@
-// Ver: 5
+// Ver: 1
 
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
@@ -716,7 +716,7 @@ pub(crate) fn cmpsb(machine: &mut DosMachine, prev: &[u8]) {
     let result_sign = (result as i8) < 0;
     let of = (src_sign != dst_sign) && (src_sign != result_sign);
 
-    let af = ((src_byte & 0x0F) as i8) < ((dst_byte & 0x0F) as i8);
+    let af = (src_byte & 0x0F) < (dst_byte & 0x0F);
 
     machine.registers.set_flags(flags::compute_flags_u8(
         machine.registers.flags(),
@@ -757,18 +757,13 @@ pub(crate) fn cmpsw(machine: &mut DosMachine, prev: &[u8]) {
 
     // Вычисляем флаги как при вычитании (беззнаковое и знаковое)
     let result = src_word.wrapping_sub(dst_word);
-
-    // Флаг переноса (CF): 1 если беззнаковое переполнение (src < dst)
     let cf = src_word < dst_word;
 
-    // Флаг переполнения (OF): знаковое переполнение при вычитании
     let src_sign = (src_word as i16) < 0;
     let dst_sign = (dst_word as i16) < 0;
     let result_sign = (result as i16) < 0;
     let of = (src_sign != dst_sign) && (src_sign != result_sign);
-
-    // Флаг вспомогательного переноса (AF): перенос из бита 3 в бит 4
-    let af = ((src_word & 0x0F) as i16) < ((dst_word & 0x0F) as i16);
+    let af = (src_word & 0x0F) < (dst_word & 0x0F);
 
     // Устанавливаем флаги
     machine.registers.set_flags(flags::compute_flags_u16(

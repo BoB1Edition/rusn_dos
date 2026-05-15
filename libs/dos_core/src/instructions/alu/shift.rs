@@ -50,7 +50,7 @@ fn perform_shift_16(machine: &DosMachine, op_field: u8, value: u16, count: u8, f
         0 => {
             // ROL
             let result = value.rotate_left(count as u32);
-            let cf = (result & 1) != 0;
+            let cf = (value >> (16 - count)) & 1 != 0;
             let msb_before = (value >> 15) != 0;
             let msb_after = (result >> 15) != 0;
             let of = if count == 1 {
@@ -64,7 +64,7 @@ fn perform_shift_16(machine: &DosMachine, op_field: u8, value: u16, count: u8, f
         1 => {
             // ROR
             let result = value.rotate_right(count as u32);
-            let cf = (result >> 15) != 0;
+            let cf = (value >> (count - 1)) & 1 != 0;
             let lsb_before = (value & 1) != 0;
             let msb_after = (result >> 15) != 0;
             let of = if count == 1 {
@@ -247,7 +247,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
         0 => {
             // ROL — Rotate Left
             let result = value.rotate_left(count as u32);
-            let cf = (result & 1) != 0;
+            let cf = (value >> (8 - count)) & 1 != 0;
             let of = if count == 1 {
                 let msb_before = (value >> 7) != 0;
                 let msb_after = (result >> 7) != 0;
@@ -261,7 +261,7 @@ fn perform_shift_8(op_field: u8, value: u8, count: u8, flags: u16) -> (u8, u16) 
         1 => {
             // ROR — Rotate Right
             let result = value.rotate_right(count as u32);
-            let cf = (result >> 7) != 0;
+            let cf = (value >> (count - 1)) & 1 != 0;
             let of = if count == 1 {
                 let lsb_before = (value & 1) != 0;
                 let msb_after = (result >> 7) != 0;
@@ -419,8 +419,7 @@ fn rol16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     let count = count as usize;
     let result = (value << count) | (value >> (16 - count));
 
-    // Устанавливаем флаги
-    let cf = (result & 1) != 0; // младший бит результата = последний вышедший бит
+    let cf = (value >> (16 - count)) & 1 != 0;
     let of = count == 1 && ((value ^ result) & 0x8000) != 0; // OF для вращения на 1: изменился ли знак?
 
     let mut flags = machine.registers.flags();
@@ -438,7 +437,7 @@ fn ror16(value: u16, count: u8, machine: &mut DosMachine) -> u16 {
     let result = (value >> count) | (value << (16 - count));
 
     // Устанавливаем флаги
-    let cf = (result & 0x8000) != 0; // старший бит результата = последний вышедший бит
+    let cf = (value >> (count - 1)) & 1 != 0;
     let of = count == 1 && ((result ^ (result >> 1)) & 0x8000) != 0; // OF для вращения на 1
 
     let mut flags = machine.registers.flags();
@@ -631,7 +630,7 @@ pub fn shift_rm8_cl(machine: &mut DosMachine, prev: &[u8]) {
 fn rol8(value: u8, count: u8) -> (u8, bool, bool) {
     let count = count as usize;
     let result = (value << count) | (value >> (8 - count));
-    let cf = (result & 1) != 0; // младший бит результата = последний вышедший бит
+    let cf = (value >> (8 - count)) & 1 != 0;
     let of = ((value ^ result) & 0x80) != 0; // изменился ли знак (бит 7)?
     (result, cf, of)
 }
@@ -639,7 +638,7 @@ fn rol8(value: u8, count: u8) -> (u8, bool, bool) {
 fn ror8(value: u8, count: u8) -> (u8, bool, bool) {
     let count = count as usize;
     let result = (value >> count) | (value << (8 - count));
-    let cf = (result & 0x80) != 0; // старший бит результата = последний вышедший бит
+    let cf = (value >> (count - 1)) & 1 != 0;
     let of = ((result ^ (result >> 1)) & 0x80) != 0; // SF XOR новый бит 6
     (result, cf, of)
 }

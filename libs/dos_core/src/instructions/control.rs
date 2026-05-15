@@ -1,4 +1,4 @@
-// Ver: 4
+// Ver: 1
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
@@ -89,12 +89,12 @@ pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
         // CALL reg16 — читаем значение из регистра
         machine.read_reg16(modrm.rm_field)
     } else {
-        let offset = modrm
+        let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .expect("Failed to resolve memory address in CALL r/m16") as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.read_phys_u16(phys_addr)
+            .expect("Failed to resolve memory address in CALL r/m16");
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u16(addr)
     };
 
     let current_ip = machine.registers.ip();
@@ -122,12 +122,10 @@ pub(crate) fn smsw(machine: &mut DosMachine, prev: &[u8]) {
     if modrm.is_register_mode() {
         machine.write_reg16(modrm.rm_field, 0x0000);
     } else {
-        let offset = modrm
+        let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.write_phys_u16(phys_addr, 0x0000);
+            .unwrap();
+        machine.write_phys_u16(addr, 0x0000);
     }
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -147,12 +145,12 @@ pub(crate) fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let target_ip = if modrm.is_register_mode() {
         machine.read_reg16(modrm.rm_field)
     } else {
-        let offset = modrm
+        let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.read_phys_u16(phys_addr)
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u16(addr)
     };
 
     machine.registers.set_ip(target_ip);
@@ -624,9 +622,6 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
-    // Определяем сегмент источника с учётом префикса
-    let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-
     // Читаем адрес источника (только для памяти)
     let addr = if modrm.is_register_mode() {
         // CALL far через регистр недопустим — вызывает #UD
@@ -642,11 +637,8 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap()
     };
-    // Читаем 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-    // Порядок байтов: [IP_lo, IP_hi, CS_lo, CS_hi] (little-endian для каждого слова)
-    let addr_u16 = addr as u16; // ← ПРИВЕДЕНИЕ к u16 для 16-битного режима
-    let ip_offset = machine.read_u16(src_segment, addr_u16);
-    let cs_segment = machine.read_u16(src_segment, addr_u16 + 2);
+    let ip_offset = machine.read_phys_u16( addr);
+    let cs_segment = machine.read_phys_u16(addr + 2);
 
     // Сохраняем текущий CS:IP в стек в порядке: сначала CS, затем IP
     // 1. Сохраняем текущий CS
@@ -681,7 +673,7 @@ pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let modrm = ModRm::from_byte(modrm_byte);
 
     // Определяем сегмент источника с учётом префикса
-    let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    //let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
 
     // ВАЖНО: для mod=00, r/m=110 адрес операнда = disp16 (абсолютное смещение в сегменте)
     // resolve_address возвращает ТОЛЬКО смещение, НЕ физический адрес!
@@ -702,12 +694,12 @@ pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
     // КРИТИЧЕСКИ ВАЖНО: addr_offset — это СМЕЩЕНИЕ в сегменте src_segment
     // Для чтения из памяти НЕ нужно приводить к u16 — resolve_address уже вернул u32/u16
-    let addr_u16 = addr_offset as u16;
+    //let addr_u16 = addr_offset as u16;
 
     // Читаем 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
     // ВАЖНО: читаем из СЕГМЕНТА src_segment (обычно DS), а не из CS!
-    let ip_offset = machine.read_u16(src_segment, addr_u16);
-    let cs_segment = machine.read_u16(src_segment, addr_u16.wrapping_add(2));
+    let ip_offset = machine.read_phys_u16(addr_offset);
+    let cs_segment = machine.read_phys_u16(addr_offset.wrapping_add(2));
 
     // Загружаем новый сегмент и смещение (без сохранения старого состояния!)
     machine.registers.set_cs(cs_segment);
@@ -715,23 +707,7 @@ pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
     // Флаги НЕ изменяются
     machine.log_instruction(csip, &bytes).ok();
-
-    // Отладочное логирование для диагностики
-    #[cfg(debug_assertions)]
-    {
-        log::info!(
-            "JMP far: reading from [DS={:#04x}:{:#04x}] → IP={:#04x}, CS={:#04x} → jumping to {:#04x}:{:#04x}",
-            src_segment,
-            addr_u16,
-            ip_offset,
-            cs_segment,
-            cs_segment,
-            ip_offset
-        );
-    }
 }
-
-// В libs/dos_core/src/instructions/control.rs (НЕ control32.rs!)
 
 pub(crate) fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
@@ -816,13 +792,13 @@ pub fn bound_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     }
 
     // 🔑 Вычисляем физический адрес границ в памяти
-    let offset = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap() as u16;
-    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+    let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+    //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
 
     // Читаем нижнюю и верхнюю границы (знаковые 16-битные)
-    let low  = machine.read_phys_u16(phys_addr) as i16;
-    let high = machine.read_phys_u16(phys_addr.wrapping_add(2)) as i16;
+    let low  = machine.read_phys_u16(addr) as i16;
+    let high = machine.read_phys_u16(addr.wrapping_add(2)) as i16;
     let reg_val = machine.read_reg16(modrm.reg_field) as i16;
 
     // ✅ Проверка диапазона

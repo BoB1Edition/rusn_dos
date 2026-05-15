@@ -1,4 +1,4 @@
-// Ver: 3
+// Ver: 1
 use crate::{DosMachine, flags, instructions::control, modrm::ModRm};
 
 pub(crate) fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
@@ -17,12 +17,10 @@ pub(crate) fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let target_addr = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let offset = modrm
+        let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.read_phys_u32(phys_addr)
+            .unwrap();
+        machine.read_phys_u32(addr)
     };
 
     let target_ip = target_addr as u16;
@@ -55,12 +53,10 @@ pub(crate) fn jmp_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let target_addr = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let offset = modrm
+        let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.read_phys_u32(phys_addr)
+            .unwrap();
+        machine.read_phys_u32(addr)
     };
     let target_ip = target_addr as u16;
     machine.registers.set_ip(target_ip);
@@ -77,13 +73,12 @@ pub(crate) fn call32(machine: &mut DosMachine, prev: &[u8]) {
     let rel32 = machine.read_instr_u32(machine.registers.ip()) as i32;
     bytes.extend_from_slice(&rel32.to_le_bytes());
     machine.registers.step(Some(4));
-    let offset16 = (rel32 & 0xFFFF) as i16;
     let return_ip = machine.registers.ip();
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
     machine.write_u16(machine.registers.ss(), machine.registers.sp(), return_ip);
-    let new_ip = (return_ip as i32 + offset16 as i32) as u16;
+    let new_ip = (return_ip as i32).wrapping_add(rel32) as u16;
     machine.registers.set_ip(new_ip);
 
     machine.log_instruction(csip, &bytes).ok();
@@ -146,8 +141,6 @@ pub(crate) fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
-    let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-
     let addr = if modrm.is_register_mode() {
         log::error!(
             "CALL far through register is undefined behavior at {:#04x}:{:#04x}",
@@ -163,9 +156,8 @@ pub(crate) fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
     };
     // В реальном режиме нет EIP, только IP (16 бит)
     // Для 32-битной версии в реальном режиме используем 16-битное смещение
-    let addr_u16 = addr as u16;
-    let ip_offset = machine.read_u16(src_segment, addr_u16);
-    let cs_segment = machine.read_u16(src_segment, addr_u16.wrapping_add(2));
+    let ip_offset = machine.read_phys_u16(addr);
+    let cs_segment = machine.read_phys_u16(addr.wrapping_add(2));
 
     // Сохраняем текущий CS:IP в стек
     let sp = machine.registers.sp().wrapping_sub(2);
@@ -194,8 +186,6 @@ pub(crate) fn jmp_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
-    let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-
     let addr = if modrm.is_register_mode() {
         log::error!(
             "JMP far through register is undefined behavior at {:#04x}:{:#04x}",
@@ -210,9 +200,8 @@ pub(crate) fn jmp_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
             .unwrap()
     };
 
-    let addr_u16 = addr as u16;
-    let ip_offset = machine.read_u16(src_segment, addr_u16); // ← 16 бит смещения
-    let cs_segment = machine.read_u16(src_segment, addr_u16.wrapping_add(2)); // ← +2, НЕ +4!
+    let ip_offset = machine.read_phys_u16(addr);
+    let cs_segment = machine.read_phys_u16(addr.wrapping_add(2));
 
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
@@ -264,12 +253,9 @@ pub fn bound_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
 
     if modrm.is_register_mode() { machine.halted = true; return; }
 
-    let offset = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap() as u16;
-    let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-
-    let low  = machine.read_phys_u32(phys_addr) as i32;
-    let high = machine.read_phys_u32(phys_addr.wrapping_add(4)) as i32;
+    let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+    let low  = machine.read_phys_u32(addr) as i32;
+    let high = machine.read_phys_u32(addr.wrapping_add(4)) as i32;
     let reg_val = machine.read_reg32(modrm.reg_field) as i32;
 
     if reg_val < low || reg_val > high {

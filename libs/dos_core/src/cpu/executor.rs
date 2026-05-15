@@ -1,4 +1,4 @@
-// Ver: 6
+// Ver: 1
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -243,6 +243,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
                 alu::sub_r16_rm16(machine, &full_bytes);
             }
         }
+        0x2C => alu::sub_al_imm8(machine, &full_bytes),
         0x2F => bcd::das(machine, &full_bytes),
         0x30 => alu::xor_rm8_r8(machine, &full_bytes),
         0x31 => {
@@ -844,6 +845,7 @@ fn execute(machine: &mut DosMachine, opcode: u8) {
             }
         }
         0xC4 => segment::les_r16_m16(machine, &full_bytes),
+        0xC5 => segment::lds_r16_m16(machine, &full_bytes),
         0xC6 => mov::mov_rm8_imm8(machine, &full_bytes),
         0xC7 => {
             if machine.has_operand_size_prefix {
