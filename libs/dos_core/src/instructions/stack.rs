@@ -384,10 +384,10 @@ pub(crate) fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.write_phys_u16(phys_addr, value);
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.write_phys_u16(offset, value);
     }
 
     let new_sp = sp.wrapping_add(2);
@@ -415,10 +415,10 @@ pub(crate) fn push_rm16(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.read_phys_u16(phys_addr)
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u16(offset)
     };
 
     machine.write_u16(machine.registers.ss(), new_sp, value);
@@ -443,10 +443,10 @@ pub(crate) fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        machine.read_phys_u32(phys_addr)
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        machine.read_phys_u32(offset)
     };
     let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_esp);
     machine.write_phys_u32(phys_addr, value);
