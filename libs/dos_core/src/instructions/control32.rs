@@ -1,4 +1,3 @@
-// Ver: 1
 use crate::{DosMachine, flags, instructions::control, modrm::ModRm};
 
 pub(crate) fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
@@ -96,13 +95,9 @@ pub(crate) fn jz_rel32(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.ip() - prev.len() as u16,
     ];
     let mut bytes = prev.to_vec();
-
-    // Читаем 32-битное смещение (sign-extended)
     let rel32 = machine.read_instr_u32(machine.registers.ip()) as i32;
     machine.registers.step(Some(4));
     bytes.extend_from_slice(&rel32.to_le_bytes());
-
-    // Проверяем флаг ZF (бит 6)
     let zf = (machine.registers.flags() & (flags::ZF)) != 0;
 
     if zf {
@@ -154,12 +149,8 @@ pub(crate) fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap()
     };
-    // В реальном режиме нет EIP, только IP (16 бит)
-    // Для 32-битной версии в реальном режиме используем 16-битное смещение
     let ip_offset = machine.read_phys_u16(addr);
     let cs_segment = machine.read_phys_u16(addr.wrapping_add(2));
-
-    // Сохраняем текущий CS:IP в стек
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
     machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
@@ -167,11 +158,8 @@ pub(crate) fn call_far_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
     machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
-
-    // Загружаем новый сегмент и смещение (в реальном режиме только 16 бит)
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
-
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -250,9 +238,7 @@ pub fn bound_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
     if modrm.is_register_mode() { machine.halted = true; return; }
-
     let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
     let low  = machine.read_phys_u32(addr) as i32;
     let high = machine.read_phys_u32(addr.wrapping_add(4)) as i32;

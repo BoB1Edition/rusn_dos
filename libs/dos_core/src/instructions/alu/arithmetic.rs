@@ -1,4 +1,3 @@
-// Ver: 1
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
@@ -57,8 +56,6 @@ pub(crate) fn add_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
-    // ✅ ИСТОЧНИК — reg_field
     let src_val = if modrm.is_register_mode() {
         machine.read_reg16(modrm.reg_field)
     } else {
@@ -68,8 +65,6 @@ pub(crate) fn add_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u16(addr)
     };
-
-    // ✅ ПРИЁМНИК — rm_field
     do_add_16(machine, modrm.rm_field, src_val);
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -201,8 +196,6 @@ pub(crate) fn cmp_ax_imm16(machine: &mut DosMachine, prev: &[u8]) {
     let of = (ax_sign != imm_sign) && (ax_sign != result_sign);
 
     let af = (ax & 0x0F) < (imm16 & 0x0F);
-
-    // Установка флагов
     machine.registers.set_flags(flags::compute_flags_u16(
         machine.registers.flags(),
         result,
@@ -224,37 +217,22 @@ pub(crate) fn sbb_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
     let src_val = machine.read_reg8(modrm.reg_field);
-
     let cf = (machine.registers.flags() & 1) != 0;
     let borrow = if cf { 1u16 } else { 0u16 };
-
-    // Приёмник: r/m8 (регистр или память)
     if modrm.is_register_mode() {
-        // SBB reg8, reg8
         let dst_val = machine.read_reg8(modrm.rm_field) as u16;
         let src_extended = src_val as u16 + borrow;
-
-        // Вычисление результата и флагов
         let (result_u16, did_overflow) = dst_val.overflowing_sub(src_extended);
         let result = result_u16 as u8;
-
-        // Флаг переноса (CF): 1 если было беззнаковое переполнение
         let new_cf = did_overflow;
-
-        // Флаг переполнения (OF): знаковое переполнение при вычитании
         let dst_sign = (dst_val as i8) < 0;
         let src_sign = ((src_extended & 0xFF) as i8) < 0;
         let result_sign = (result as i8) < 0;
         let new_of = (dst_sign != src_sign) && (dst_sign != result_sign);
-
-        // Флаг вспомогательного переноса (AF): заём из бита 3 в бит 4
         let dst_low = dst_val & 0x0F;
         let src_low = src_extended & 0x0F;
         let new_af = dst_low < src_low;
-
-        // Установка результата и флагов
         machine.write_reg8(modrm.rm_field, result);
         machine.registers.set_flags(flags::compute_flags_u8(
             machine.registers.flags(),
@@ -264,7 +242,6 @@ pub(crate) fn sbb_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
             new_af,
         ));
     } else {
-        // SBB [mem], reg8
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
@@ -274,7 +251,6 @@ pub(crate) fn sbb_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
 
         let (result_u16, did_overflow) = dst_val.overflowing_sub(src_extended);
         let result = result_u16 as u8;
-
         let new_cf = did_overflow;
         let dst_sign = (dst_val as i8) < 0;
         let src_sign = ((src_extended & 0xFF) as i8) < 0;
@@ -283,7 +259,6 @@ pub(crate) fn sbb_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
         let dst_low = dst_val & 0x0F;
         let src_low = src_extended & 0x0F;
         let new_af = dst_low < src_low;
-
         machine.write_phys_u8(addr, result);
         machine.registers.set_flags(flags::compute_flags_u8(
             machine.registers.flags(),
@@ -378,24 +353,18 @@ pub fn cmp_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.ip() - prev.len() as u16,
     ];
     let imm8 = machine.read_instr_u8(machine.registers.ip());
-    machine.registers.step(None); // продвигаем на 1 байт (imm8)
+    machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(imm8);
 
     let al = machine.registers.al();
-
-    // Вычисление флагов как при вычитании (беззнаковое и знаковое)
     let result = al.wrapping_sub(imm8);
     let cf = al < imm8;
     let al_sign = (al as i8) < 0;
     let imm_sign = (imm8 as i8) < 0;
     let result_sign = (result as i8) < 0;
     let of = (al_sign != imm_sign) && (al_sign != result_sign);
-
-    // Флаг вспомогательного переноса (AF): перенос из бита 3 в бит 4
     let af = (al & 0x0F) < (imm8 & 0x0F);
-
-    // Установка флагов
     machine.registers.set_flags(flags::compute_flags_u8(
         machine.registers.flags(),
         result,
@@ -416,18 +385,9 @@ pub fn inc_bp(machine: &mut DosMachine, prev: &[u8]) {
 
     let bp = machine.registers.bp();
     let result = bp.wrapping_add(1);
-
-    // Флаг вспомогательного переноса (AF): перенос из бита 3 в бит 4
     let af = ((bp & 0x0F) + 1) > 0x0F;
-
-    // Флаг переполнения (OF): знаковое переполнение при инкременте
-    // Возникает при переходе 0x7FFF → 0x8000 (32767 → -32768)
     let of = bp == 0x7FFF;
-
-    // Сохраняем текущий флаг переноса (CF) — он НЕ изменяется
     let current_cf = (machine.registers.flags() & 1) != 0;
-
-    // Установка результата и флагов
     machine.registers.set_bp(result);
     machine.registers.set_flags(flags::compute_flags_u16(
         machine.registers.flags(),
@@ -450,18 +410,9 @@ pub fn dec_ax(machine: &mut DosMachine, prev: &[u8]) {
 
     let ax = machine.registers.ax();
     let result = ax.wrapping_sub(1);
-
-    // Флаг вспомогательного переноса (AF): заём из бита 3 в бит 4
     let af = (ax & 0x0F) == 0;
-
-    // Флаг переполнения (OF): знаковое переполнение при декременте
-    // Возникает при переходе 0x8000 → 0x7FFF (-32768 → 32767)
     let of = ax == 0x8000;
-
-    // Сохраняем текущий флаг переноса (CF) — он НЕ изменяется
     let current_cf = (machine.registers.flags() & 1) != 0;
-
-    // Установка результата и флагов
     machine.registers.set_ax(result);
     machine.registers.set_flags(flags::compute_flags_u16(
         machine.registers.flags(),
@@ -473,8 +424,6 @@ pub fn dec_ax(machine: &mut DosMachine, prev: &[u8]) {
 
     machine.log_instruction(csip, &bytes).ok();
 }
-
-// libs/dos_core/src/instructions/alu.rs
 pub fn test_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -485,11 +434,7 @@ pub fn test_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
-    // Источник: регистр из reg_field
     let src_val = machine.read_reg8(modrm.reg_field);
-
-    // Приёмник: r/m8 (регистр или память) — читаем, но НЕ записываем результат
     let dst_val = if modrm.is_register_mode() {
         machine.read_reg8(modrm.rm_field)
     } else {
@@ -499,11 +444,7 @@ pub fn test_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u8(addr)
     };
-
-    // Вычисляем логическое И (результат НЕ сохраняем!)
     let result = dst_val & src_val;
-
-    // Устанавливаем флаги (логическая операция: CF=0, OF=0)
     machine.registers.set_flags(flags::compute_logical_flags_u8(
         machine.registers.flags(),
         result,
@@ -841,8 +782,6 @@ pub fn inc_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let old_val = machine.read_phys_u16(addr);
         let new_val = old_val.wrapping_add(1);
         machine.write_phys_u16(addr, new_val);
-
-        // Устанавливаем флаги (кроме CF)
         let cf = old_val == 0xFFFF;
         let of = old_val == 0x7FFF;
         let af = (old_val & 0x0F) == 0x0F;
@@ -855,7 +794,6 @@ pub fn inc_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// DEC r/m16 — Decrement word by 1
 pub fn dec_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -903,7 +841,6 @@ pub fn dec_rm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/alu/arithmetic.rs
 pub fn dec_cx(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -911,32 +848,14 @@ pub fn dec_cx(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
     bytes.push(0x49); // опкод DEC CX
-
-    // Сохраняем текущее значение флага переноса (CF не изменяется!)
     let old_cf = machine.registers.flags() & 1;
-
-    // Читаем текущее значение CX
     let old_cx = machine.registers.cx();
-
-    // Выполняем декремент с переполнением (wrapping)
     let new_cx = old_cx.wrapping_sub(1);
     machine.registers.set_cx(new_cx);
-
-    // Вычисляем флаги как при вычитании 1 (но CF будет восстановлен)
-    // Флаг переноса (CF): 1 если беззнаковое заём (старое значение < 1)
     let cf = old_cx < 1;
-
-    // Флаг переполнения (OF): знаковое переполнение при вычитании 1
-    // Возникает только при переходе 0x8000 → 0x7FFF
     let of = old_cx == 0x8000;
-
-    // Флаг вспомогательного переноса (AF): заём из бита 3 в бит 4
     let af = (old_cx & 0x0F) == 0;
-
-    // Вычисляем все флаги (включая временный CF)
     let mut flags = flags::compute_flags_u16(machine.registers.flags(), new_cx, cf, of, af);
-
-    // Восстанавливаем оригинальный флаг переноса (CF не изменяется для DEC!)
     flags = (flags & !1) | old_cf;
 
     machine.registers.set_flags(flags);
@@ -944,8 +863,6 @@ pub fn dec_cx(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// ADC r/m8, r8 — Опкод 0x10
-/// Операция: dst = dst + src + CF
 pub fn adc_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -959,8 +876,6 @@ pub fn adc_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
 
     let src_val = machine.read_reg8(modrm.reg_field);
     let cf_in = (machine.registers.flags() & flags::CF) != 0;
-
-    // Читаем приёмник (регистр или память)
     let (dst_val, is_mem, phys_addr) = if modrm.is_register_mode() {
         (machine.read_reg8(modrm.rm_field), false, 0)
     } else {
@@ -972,11 +887,8 @@ pub fn adc_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
         (machine.read_phys_u8(phys), true, phys)
     };
 
-    // Сложение с учётом переноса
     let sum = (dst_val as u16) + (src_val as u16) + (if cf_in { 1 } else { 0 });
     let result = sum as u8;
-
-    // 🔑 Расчёт флагов для ADC
     let new_cf = sum > 0xFF;
     let new_af =
         ((dst_val & 0x0F) as u16 + (src_val & 0x0F) as u16 + (if cf_in { 1 } else { 0 })) > 0x0F;
@@ -1084,61 +996,28 @@ pub fn inc_ax(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, prev).ok();
 }
 
-pub fn sub_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
-    
-    // Читаем немедленное значение
-    let imm8 = machine.read_u8(machine.registers.cs(), machine.registers.ip());
-    machine.registers.step(None); // продвигаем IP на 1 байт
-    
-    // Формируем байты для логирования
+pub(crate) fn sub_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let imm8 = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(imm8);
-    
-    // Читаем текущее значение AL
+
     let al = machine.registers.al();
-    
-    // Вычисляем результат вычитания
     let result = al.wrapping_sub(imm8);
-    
-    // === Вычисляем флаги ===
-    
-    // CF (Carry Flag): 1 если был заём (AL < imm8)
     let cf = al < imm8;
-    
-    // PF (Parity Flag): чётность младшего байта результата
-    let pf = result.count_ones() % 2 == 0;
-    
-    // AF (Auxiliary Flag): заём из бита 3 в бит 4
-    let af = ((al & 0x0F) as i8) < ((imm8 & 0x0F) as i8);
-    
-    // ZF (Zero Flag): результат равен нулю
-    let zf = result == 0;
-    
-    // SF (Sign Flag): старший бит результата
-    let sf = (result & 0x80) != 0;
-    
-    // OF (Overflow Flag): знаковое переполнение
-    // Возникает когда: (AL >= 0 и imm8 < 0) → результат < 0
-    //                   ИЛИ (AL < 0 и imm8 >= 0) → результат >= 0
-    let al_sign = (al as i8) < 0;
-    let imm_sign = (imm8 as i8) < 0;
-    let result_sign = (result as i8) < 0;
-    let of = (al_sign != imm_sign) && (al_sign != result_sign);
-    
-    // Собираем флаги в регистр
-    let mut flags = 0u16;
-    if cf { flags |= 1 << 0; }   // CF
-    if pf { flags |= 1 << 2; }   // PF
-    if af { flags |= 1 << 4; }   // AF
-    if zf { flags |= 1 << 6; }   // ZF
-    if sf { flags |= 1 << 7; }   // SF
-    if of { flags |= 1 << 11; }  // OF
-    
-    // Устанавливаем флаги и результат
-    machine.registers.set_flags(flags);
+    let af = (al & 0x0F) < (imm8 & 0x0F);
+    let of = ((al ^ imm8) & 0x80) != 0 && ((al ^ result) & 0x80) != 0;
+    machine.registers.set_flags(flags::compute_flags_u8(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
     machine.registers.set_al(result);
-    
-    // Логируем инструкцию
     machine.log_instruction(csip, &bytes).ok();
 }

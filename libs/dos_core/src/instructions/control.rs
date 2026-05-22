@@ -1,4 +1,3 @@
-// Ver: 1
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
@@ -439,9 +438,6 @@ pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
     bytes.push(0x9A); // опкод CALL far
-
-    // Читаем 32 бита из кода: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-    // Порядок байтов: [IP_lo, IP_hi, CS_lo, CS_hi] (little-endian для каждого слова)
     let ip_offset = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&ip_offset.to_le_bytes());
@@ -449,23 +445,14 @@ pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     let cs_segment = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&cs_segment.to_le_bytes());
-
-    // Сохраняем текущий CS:IP в стек в порядке: сначала CS, затем IP
-    // 1. Сохраняем текущий CS
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
     machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
-
-    // 2. Сохраняем текущий IP
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
     machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
-
-    // 3. Загружаем новый сегмент и смещение
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
-
-    // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -485,7 +472,6 @@ pub(crate) fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
     // Условие перехода: SF = 0 (результат неотрицательный)
     if !sf {
-        // БЕЗОПАСНОЕ сложение с усечением до 16 бит (предотвращение паники при переполнении)
         let current_ip = machine.registers.ip() as i32;
         let new_ip_32 = current_ip.wrapping_add(rel8 as i32);
         let new_ip = (new_ip_32 & 0xFFFF) as u16;
@@ -508,27 +494,17 @@ pub(crate) fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
-
-    // Проверяем флаги:
-    //   ZF (бит 6) = 0 — результат не нулевой
-    //   SF (бит 7) = знак результата
-    //   OF (бит 11) = знаковое переполнение
     let flags = machine.registers.flags();
     let zf = (flags & (flags::ZF)) != 0;
     let sf = (flags & (flags::SF)) != 0;
     let of = (flags & (flags::OF)) != 0;
-
-    // Условие перехода: ZF = 0 AND SF = OF (знаковый результат положительный)
     if !zf && (sf == of) {
-        // БЕЗОПАСНОЕ сложение с усечением до 16 бит (предотвращение паники при переполнении)
         let current_ip = machine.registers.ip() as i32;
         let new_ip_32 = current_ip.wrapping_add(rel8 as i32);
         let new_ip = (new_ip_32 & 0xFFFF) as u16;
 
         machine.registers.set_ip(new_ip);
     }
-
-    // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -621,10 +597,7 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
-    // Читаем адрес источника (только для памяти)
     let addr = if modrm.is_register_mode() {
-        // CALL far через регистр недопустим — вызывает #UD
         log::error!(
             "CALL far through register is undefined behavior at {:#04x}:{:#04x}",
             machine.registers.cs(),
@@ -658,9 +631,6 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     // Флаги НЕ изменяются
     machine.log_instruction(csip, &bytes).ok();
 }
-
-/// JMP ptr16:16 — Far jump through memory (межсегментный переход через память)
-/// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
 pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -671,12 +641,6 @@ pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
-    // Определяем сегмент источника с учётом префикса
-    //let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
-
-    // ВАЖНО: для mod=00, r/m=110 адрес операнда = disp16 (абсолютное смещение в сегменте)
-    // resolve_address возвращает ТОЛЬКО смещение, НЕ физический адрес!
     let addr_offset = if modrm.is_register_mode() {
         log::error!(
             "JMP far through register is undefined behavior at {:#04x}:{:#04x}",
@@ -690,22 +654,10 @@ pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap()
     };
-    // bytes.extend_from_slice(&addr_offset.to_le_bytes()); // ← УДАЛИТЬ! Это вычисленное смещение, не часть инструкции
-
-    // КРИТИЧЕСКИ ВАЖНО: addr_offset — это СМЕЩЕНИЕ в сегменте src_segment
-    // Для чтения из памяти НЕ нужно приводить к u16 — resolve_address уже вернул u32/u16
-    //let addr_u16 = addr_offset as u16;
-
-    // Читаем 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-    // ВАЖНО: читаем из СЕГМЕНТА src_segment (обычно DS), а не из CS!
     let ip_offset = machine.read_phys_u16(addr_offset);
     let cs_segment = machine.read_phys_u16(addr_offset.wrapping_add(2));
-
-    // Загружаем новый сегмент и смещение (без сохранения старого состояния!)
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
-
-    // Флаги НЕ изменяются
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -715,8 +667,6 @@ pub(crate) fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.ip() - prev.len() as u16,
     ];
     let mut bytes = prev.to_vec();
-
-    // ← Читаем 16-битное смещение (sign-extended)
     let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
     machine.registers.step(Some(2)); // ← 2 байта для rel16!
 
@@ -740,10 +690,8 @@ pub(crate) fn jz_rel16(machine: &mut DosMachine, prev: &[u8]) {
 pub(crate) fn jae_rel16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let mut bytes = prev.to_vec();
-
-    // Читаем 16-битное смещение со знаком (little-endian)
     let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
-    machine.registers.step(Some(2)); // Сдвигаем IP на 2 байта (смещение)
+    machine.registers.step(Some(2));
     bytes.extend_from_slice(&rel16.to_le_bytes());
 
     // Условие: CF == 0
@@ -774,7 +722,6 @@ pub(crate) fn jb_rel16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// BOUND r16, r/m16 — Проверка выхода за границы (опкод 0x62)
 pub fn bound_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8(machine.registers.ip());
@@ -782,34 +729,21 @@ pub fn bound_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
-    // BOUND не поддерживает режим регистр-регистр (mod=11)
     if modrm.is_register_mode() {
         log::error!("BOUND with register operand is undefined at CS:IP={:#04x}:{:#04x}", 
                     machine.registers.cs(), machine.registers.ip());
         machine.halted = true;
         return;
     }
-
-    // 🔑 Вычисляем физический адрес границ в памяти
     let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-    //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-
-    // Читаем нижнюю и верхнюю границы (знаковые 16-битные)
-    let low  = machine.read_phys_u16(addr) as i16;
+   let low  = machine.read_phys_u16(addr) as i16;
     let high = machine.read_phys_u16(addr.wrapping_add(2)) as i16;
     let reg_val = machine.read_reg16(modrm.reg_field) as i16;
-
-    // ✅ Проверка диапазона
     if reg_val < low || reg_val > high {
         log::warn!("BOUND range exceeded: reg={} not in [{}, {}] at CS:IP={:#04x}:{:#04x}", 
                    reg_val, low, high, csip[0], csip[1]);
-        
-        // Генерируем INT 5 (Bound Range Exceeded)
-        // Передаём фейковый опкод INT 5, чтобы system::int корректно распарсил номер прерывания
         crate::instructions::system::int(machine, &[0xCD, 0x05]); 
-        return; // Поток выполнения изменится внутри INT 5, дальше не идём
+        return;
     }
 
     machine.log_instruction(csip, &bytes).ok();

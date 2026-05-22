@@ -1,4 +1,3 @@
-// Ver: 1
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
@@ -98,11 +97,11 @@ pub(crate) fn mov_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     if modrm.is_register_mode() {
         machine.write_reg32(modrm.rm_field, src_val);
     } else {
-        let offset = modrm
+        let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u32(phys_addr, src_val);
     }
 
@@ -123,11 +122,11 @@ pub(crate) fn mov_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let offset = modrm
+        let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u32(phys_addr)
     };
 
@@ -159,11 +158,11 @@ pub(crate) fn mov_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
     if modrm.is_register_mode() {
         machine.write_reg32(modrm.rm_field, imm32);
     } else {
-        let offset = modrm
+        let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+            .unwrap();
+        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
+        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u32(phys_addr, imm32);
     }
 
@@ -373,8 +372,6 @@ pub(crate) fn mov_ebp_imm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(4));
     let mut bytes = prev.to_vec();
     bytes.extend_from_slice(&imm32.to_le_bytes());
-
     machine.registers.set_ebp(imm32);
-
     machine.log_instruction(csip, &bytes).ok();
 }
