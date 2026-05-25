@@ -1,4 +1,4 @@
-// Ver: 5 File: ./libs/dos_core/src/instructions/alu/shift.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu/shift.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub fn shift_group_c1_16(machine: &mut DosMachine, prev: &[u8]) {

@@ -86,6 +86,43 @@ impl ExeLoader {
             memory.write_u8(code_base + i as u32, byte);
         }
 
+        let loaded_len = code_data.len();
+let bss_paragraphs = self.header.e_minep as usize; // или e_maxep
+if bss_paragraphs > 0 {
+    let bss_start = code_base + loaded_len as u32;
+    let bss_size = bss_paragraphs * 16;
+    for i in 0..bss_size {
+        if (bss_start as usize + i) < memory.len() {
+            memory.write_u8(bss_start + i as u32, 0);
+        }
+    }
+}
+log::info!(
+    "EXE load: file_size={}, header_size={}, code_data_len={}, expected_offset=0x274C",
+    self.data.len(),
+    header_size,
+    code_data.len(),
+);
+if code_data.len() <= 0x274C {
+    log::warn!("File does not contain data at header-relative offset 0x274C!");
+}
+let check_addr = 0x1274C;
+let expected_offset_in_file = 0x27AC;
+let file_byte_0 = self.data[expected_offset_in_file as usize];
+let file_byte_1 = self.data[(expected_offset_in_file + 1) as usize];
+let mem_byte_0 = memory.read_u8(check_addr);
+let mem_byte_1 = memory.read_u8(check_addr + 1);
+
+log::debug!(
+    "COPY VERIFY: file[{:#04X}]={:02X}{:02X} → mem[{:#05X}]={:02X}{:02X}",
+    expected_offset_in_file,
+    file_byte_1, file_byte_0,  // little-endian display
+    check_addr,
+    mem_byte_1, mem_byte_0
+);
+if file_byte_0 != mem_byte_0 || file_byte_1 != mem_byte_1 {
+    log::error!("COPY MISMATCH at {:#05X}!", check_addr);
+}
         // 4. Применяем релокации
         self.apply_relocations(&mut memory, LOAD_SEGMENT);
 
@@ -123,48 +160,6 @@ impl ExeLoader {
         Ok(machine)
     }
 
-    /*fn apply_relocations(&self, memory: &mut Memory, load_segment: u16) {
-        let reloc_table_offset = self.header.e_lfarlc as usize; // Смещение в БАЙТАХ (не параграфах!)
-        let reloc_count = self.header.e_relc as usize;
-
-        for i in 0..reloc_count {
-            let entry_offset = reloc_table_offset + i * 4;
-            if entry_offset + 4 > self.data.len() {
-                break;
-            }
-
-            // Читаем смещение и сегмент из таблицы релокаций
-            let offset = u16::from_le_bytes([self.data[entry_offset], self.data[entry_offset + 1]]);
-            let segment =
-                u16::from_le_bytes([self.data[entry_offset + 2], self.data[entry_offset + 3]]);
-
-            // Вычисляем физический адрес для релокации
-            let fixup_addr = ((load_segment as u32 + segment as u32) << 4) + offset as u32;
-            if fixup_addr as usize + 2 > memory.len() {
-                log::warn!(
-                    "Relocation #{i}: fixup_addr {:#x} out of bounds (memory size: {})",
-                    fixup_addr,
-                    memory.len()
-                );
-                continue; // Пропускаем опасную релокацию
-            }
-            let current = memory.read_u16(fixup_addr);
-            let corrected = current.wrapping_add(load_segment);
-
-            // Записываем скорректированное значение
-            log::debug!(
-                "Reloc #{:03}: seg={:#04x}:off={:#04x} → phys={:#06x}, val: {:#04x} → {:#04x}",
-                i,
-                segment,
-                offset,
-                fixup_addr,
-                current,
-                corrected
-            );
-            memory.write_u16(fixup_addr, corrected);
-        }
-    }*/
-
     fn apply_relocations(&self, memory: &mut Memory, load_segment: u16) {
         let reloc_table_offset = self.header.e_lfarlc as usize;
         let reloc_count = self.header.e_relc as usize;
@@ -178,7 +173,6 @@ impl ExeLoader {
         for i in 0..reloc_count {
             let entry_offset = reloc_table_offset + i * 4;
 
-            // Проверка: хватает ли байт в файле на эту запись
             if entry_offset + 4 > self.data.len() {
                 log::warn!("Relocation table truncated at entry {}", i);
                 break;

@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/memory.rs
+// Ver: 1 File: ./libs/dos_core/src/const.rs
 /*
 #[allow(non_upper_case_globals)]
 pub const KiB: usize = 1024;

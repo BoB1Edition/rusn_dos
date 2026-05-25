@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/group.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/group.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 

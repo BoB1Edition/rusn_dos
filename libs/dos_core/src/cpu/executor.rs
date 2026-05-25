@@ -1,4 +1,4 @@
-// Ver: 15 File: ./libs/dos_core/src/cpu/executor.rs
+// Ver: 1 File: ./libs/dos_core/src/cpu/executor.rs
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
@@ -52,7 +52,6 @@ impl DebugLog {
 
 /// Диспетчеризация базовых опкодов (без префикса 0x0F)
 pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
-    //, debug: Option<&DebugLog>) {
     let mut full_bytes = Vec::new();
     if machine.has_operand_size_prefix {
         full_bytes.push(0x66);
@@ -73,9 +72,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         machine.registers.cs(),
         machine.registers.ip() - full_bytes.len() as u16,
     ];
-    /*if let Some(dl) = debug {
-        dl.print(machine, 0x1000, 0x3bd, 14);
-    }*/
     match opcode {
         0x00 => alu::add_rm8_r8(machine, &full_bytes),
         0x01 => dispatch_op32!(
@@ -470,7 +466,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                     let df = (machine.registers.flags() & (flags::DF)) != 0;
                     let video_size = 320 * 200;
 
-                    // Проверка выхода за границы видеопамяти
                     let out_of_bounds = if df {
                         si < cx - 1 || di < cx - 1
                     } else {
@@ -535,13 +530,10 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         }
         0xA5 => {
             if machine.has_rep_prefix {
-                // REP MOVSW: повторяем пока CX != 0
-                // Оптимизация для видеопамяти Mode 13h (копирование слов)
                 if machine.video.mode == video::VideoMode::Mode13h
                     && machine.registers.es() == 0xA000
                     && machine.registers.ds() == 0xA000
                     && machine.registers.cx() > 500
-                // порог для слов (половина от 1000)
                 {
                     let si = machine.registers.si() as usize;
                     let di = machine.registers.di() as usize;
@@ -573,9 +565,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                                     .set_cx(machine.registers.cx().wrapping_sub(1));
                             }
                         } else {
-                            // DF=0: оптимизированное копирование слов
                             if di > si && di < si + cx * 2 {
-                                // Перекрытие (приёмник внутри источника) — копируем хвост вперёд
                                 for i in (0..cx).rev() {
                                     let src_idx = si / 2 + i;
                                     let dst_idx = di / 2 + i;
@@ -587,7 +577,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                                     fb.data[dst_idx * 2 + 1] = (word >> 8) as u8;
                                 }
                             } else {
-                                // Без перекрытия — прямое копирование
                                 for i in 0..cx {
                                     let src_idx = si / 2 + i;
                                     let dst_idx = di / 2 + i;
@@ -613,7 +602,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                         }
                     }
                 } else {
-                    // Стандартный REP MOVSW
                     while machine.registers.cx() != 0 {
                         mov::movsw(machine, &full_bytes);
                         machine
@@ -622,7 +610,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                     }
                 }
             } else {
-                // Однократное выполнение MOVSW
                 mov::movsw(machine, &full_bytes);
             }
         }
@@ -642,7 +629,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                             .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else if prefix_type == 0xF2 {
-                    // REPNE/REPNZ — повторять пока не совпадают (ZF=0)
                     while machine.registers.cx() != 0 {
                         mov::cmpsb(machine, &full_bytes);
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
@@ -654,7 +640,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                             .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else {
-                    // Обычный REP (редкий случай) — повторять просто по CX
                     while machine.registers.cx() != 0 {
                         mov::cmpsb(machine, &full_bytes);
                         machine
@@ -663,15 +648,12 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                     }
                 }
             } else {
-                // Однократное выполнение CMPSB
                 mov::cmpsb(machine, &full_bytes);
             }
         }
 
         0xA7 => {
             if machine.has_rep_prefix {
-                // Определяем тип префикса: 0xF3 = REPE/REPZ, 0xF2 = REPNE/REPNZ
-                //let rep_prefix = machine.opcode_override_segment.unwrap_or(0);
                 let rep_prefix = machine.rep_prefix_type.unwrap_or(0);
                 if rep_prefix == 0xF3 {
                     // REPE/REPZ — повторять пока совпадают (ZF=1)

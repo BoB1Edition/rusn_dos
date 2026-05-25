@@ -1,4 +1,4 @@
-// Ver: 3 File: ./libs/dos_core/src/machine.rs
+// Ver: 1 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -42,6 +42,10 @@ pub struct DosMachine {
     pub(crate) ems_next_handle: u16,
     pub(crate) ems_handles: Vec<(u16, u16)>,
     pub(crate) has_lock_prefix: bool,
+    pub(crate) gdtr_limit: u16,
+    pub(crate) gdtr_base: u32,
+    pub(crate) idtr_limit: u16,
+    pub(crate) idtr_base: u32,
 }
 
 impl DosMachine {
@@ -280,6 +284,16 @@ impl DosMachine {
     #[inline(always)]
     pub fn write_phys_u8(&mut self, addr: u32, value: u8) {
         let masked = self.apply_a20_mask(addr);
+        if (0x12740..=0x12750).contains(&masked) {
+            log::warn!(
+                "WRITE PHYS U8: addr={:#05X}, val={:#02X}, at CS:IP={:#04X}:{:#04X}, DS={:#04X}",
+                masked,
+                value,
+                self.registers.cs(),
+                self.registers.ip(),
+                self.registers.ds()
+            );
+        }
         if masked >= 0xA0000 && masked < 0xC0000 {
             if self.video.mode == VideoMode::Mode13h && masked < 0xA0000 + 320 * 200 {
                 if let Some(fb) = self.video.framebuffer.as_mut() {
@@ -356,6 +370,10 @@ impl DosMachine {
             ems_next_handle: 1,
             ems_handles: Vec::new(),
             has_lock_prefix: false,
+            gdtr_limit: 0xFFFF,
+            gdtr_base: 0,
+            idtr_limit: 0xFFFF,
+            idtr_base: 0,
         }
     }
 

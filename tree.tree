@@ -65,7 +65,6 @@
 │       │   └── video
 │       │       └── mod.rs
 │       └── tests
-├── log
 ├── README.md
 ├── shufled.py
 ├── src
@@ -89,4 +88,4 @@
 ├── tests
 └── tree.tree
 
-18 directories, 72 files
+18 directories, 71 files

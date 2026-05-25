@@ -1,4 +1,4 @@
-// Ver: 3 File: ./libs/dos_core/src/interrupts/dos.rs
+// Ver: 1 File: ./libs/dos_core/src/interrupts/dos.rs
 //! Обработка прерываний DOS (INT 21h, INT 2Fh)
 //! Содержит реализацию основных функций DOS API
 

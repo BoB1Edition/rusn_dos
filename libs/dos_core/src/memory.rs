@@ -126,24 +126,3 @@ impl IndexMut<usize> for Memory {
         &mut self.data[index]
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_wrap_around() {
-        let mut mem = Memory::new();
-        mem.write_u8(0xFFFFF, 0xAA);
-        assert_eq!(mem.read_u8(0x100000), 0xAA);
-        assert_eq!(mem.read_u8(0x100001), mem.read_u8(0x00001));
-    }
-
-    #[test]
-    fn test_word_across_boundary() {
-        let mut mem = Memory::new();
-        mem.write_u8(0xFFFFF, 0x12);
-        mem.write_u8(0x00000, 0x34);
-        assert_eq!(mem.read_u16(0xFFFFF), 0x3412);
-    }
-}

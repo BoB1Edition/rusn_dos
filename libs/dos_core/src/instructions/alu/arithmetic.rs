@@ -1,4 +1,4 @@
-// Ver: 5 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
@@ -448,23 +448,13 @@ pub fn add_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
 
     // Выполняем сложение с установкой флагов
     let result = dst_val.wrapping_add(src_val);
-
-    // Флаг переноса (CF): 1 если беззнаковое переполнение (результат > 0xFF)
     let cf = dst_val as u16 + src_val as u16 > 0xFF;
-
-    // Флаг переполнения (OF): знаковое переполнение
     let dst_sign = (dst_val as i8) < 0;
     let src_sign = (src_val as i8) < 0;
     let result_sign = (result as i8) < 0;
     let of = (dst_sign == src_sign) && (dst_sign != result_sign);
-
-    // Флаг вспомогательного переноса (AF): перенос из бита 3 в бит 4
     let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
-
-    // Сохраняем результат в регистр-приёмник
     machine.write_reg8(modrm.reg_field, result);
-
-    // Устанавливаем флаги
     machine.registers.set_flags(flags::compute_flags_u8(
         machine.registers.flags(),
         result,
@@ -514,26 +504,14 @@ pub fn cmp_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
         bytes.extend_from_slice(&addr.to_le_bytes());
         machine.read_phys_u8(addr)
     };
-
-    // Приёмник: регистр из reg_field
     let dst_val = machine.read_reg8(modrm.reg_field);
-
-    // Вычисляем разность для установки флагов (результат НЕ сохраняем!)
     let result = dst_val.wrapping_sub(src_val);
-
-    // Флаг переноса (CF): 1 если беззнаковое заём (dst < src)
     let cf = dst_val < src_val;
-
-    // Флаг переполнения (OF): знаковое переполнение при вычитании
     let dst_sign = (dst_val as i8) < 0;
     let src_sign = (src_val as i8) < 0;
     let result_sign = (result as i8) < 0;
     let of = (dst_sign != src_sign) && (dst_sign != result_sign);
-
-    // Флаг вспомогательного переноса (AF): заём из бита 3 в бит 4
     let af = (dst_val & 0x0F) < (src_val & 0x0F);
-
-    // Устанавливаем флаги (результат НЕ сохраняем в регистр!)
     machine.registers.set_flags(flags::compute_flags_u8(
         machine.registers.flags(),
         result,
@@ -552,14 +530,10 @@ pub fn cwd(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
     bytes.push(0x99); // опкод CWD
-
-    // Расширяем знак из AX в DX: копируем бит 15 (знак) во все биты DX
     let ax = machine.registers.ax() as i16;
     let dx = if ax < 0 { 0xFFFF } else { 0x0000 };
 
     machine.registers.set_dx(dx);
-
-    // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -570,16 +544,10 @@ pub fn cbw(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
     bytes.push(0x98); // опкод CBW
-
-    // Расширяем знак из AL в AH:
-    // Если AL < 0 (бит 7 = 1) → AH = 0xFF
-    // Если AL >= 0 (бит 7 = 0) → AH = 0x00
     let al = machine.registers.al() as i8;
     let ah = if al < 0 { 0xFF } else { 0x00 };
 
     machine.registers.set_ah(ah);
-
-    // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -608,31 +576,20 @@ pub fn imul_r16_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_phys_u16(addr)
     };
 
-    // Читаем 16-битную непосредственную константу (little-endian)
     let imm16 = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&imm16.to_le_bytes());
-
-    // Выполняем знаковое умножение (32-битный промежуточный результат)
     let src_i16 = src_val as i16;
     let imm_i16 = imm16 as i16;
     let result_i32 = src_i16 as i32 * imm_i16 as i32;
-
-    // Усекаем до 16 бит для сохранения в регистр
     let result_u16 = result_i32 as u16;
-
-    // Проверяем переполнение: результат не помещается в 16 бит?
-    // Переполнение = старшие 16 бит результата ≠ знаковому расширению младших 16 бит
     let result_sign_extended = (result_i32 << 16 >> 16) as i32; // знаковое расширение младших 16 бит
     let overflow = result_i32 != result_sign_extended;
-
-    // Устанавливаем флаги CF и OF (другие флаги не определены — обычно сохраняются)
     let mut flags = machine.registers.flags();
     flags = (flags & !(flags::CF)) | (overflow as u16); // CF = overflow
     flags = (flags & !(flags::OF)) | ((overflow as u16) << 11); // OF = overflow
     machine.registers.set_flags(flags);
 
-    // Сохраняем усечённый результат в регистр назначения
     machine.write_reg16(modrm.reg_field, result_u16);
 
     machine.log_instruction(csip, &bytes).ok();

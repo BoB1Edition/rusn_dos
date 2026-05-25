@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/instructions/alu/logical.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu/logical.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 /// OR r8, r/m8
@@ -14,8 +14,6 @@ pub(crate) fn or_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg8(modrm.rm_field)
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u8(addr)
     };
 
@@ -70,9 +68,6 @@ pub(crate) fn or_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_flags(flags::compute_logical_flags_u8(machine.registers.flags(), result));
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        
         let dst_val = machine.read_phys_u8(addr);
         let result = dst_val | src_val;
         machine.write_phys_u8(addr, result);
@@ -99,9 +94,6 @@ pub(crate) fn or_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_flags(flags::compute_logical_flags_u16(machine.registers.flags(), result));
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        
         let dst_val = machine.read_phys_u16(addr);
         let result = dst_val | src_val;
         machine.write_phys_u16(addr, result);
@@ -123,8 +115,6 @@ pub(crate) fn or_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
         machine.read_reg16(modrm.rm_field)
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u16(addr)
     };
 
@@ -327,21 +317,15 @@ pub(crate) fn and_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-
-    // Источник: r/m16 (регистр или память)
     let src_val = if modrm.is_register_mode() {
         machine.read_reg16(modrm.rm_field)
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         machine.read_phys_u16(addr)
     };
-
-    // Приёмник: регистр из reg_field
     let dst_reg = modrm.reg_field;
     let dst_val = machine.read_reg16(dst_reg);
     let result = dst_val & src_val;
-
-    // ✅ ЗАПИСЫВАЕМ В РЕГИСТР, а не в память!
     machine.write_reg16(dst_reg, result);
     
     machine.registers.set_flags(flags::compute_logical_flags_u16(machine.registers.flags(), result));

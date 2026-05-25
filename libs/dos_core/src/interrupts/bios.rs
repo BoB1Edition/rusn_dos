@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/interrupts/bios.rs
+// Ver: 1 File: ./libs/dos_core/src/interrupts/bios.rs
 use std::io::Write;
 
 use crate::video::VideoMode;

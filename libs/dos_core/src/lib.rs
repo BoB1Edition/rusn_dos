@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/lib.rc
+// Ver: 1 File: ./libs/dos_core/src/lib.rs
 pub use machine::DosMachine;
 pub mod cpu;
 

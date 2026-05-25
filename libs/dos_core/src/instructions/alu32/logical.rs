@@ -1,4 +1,4 @@
-// Ver: 3 File: ./libs/dos_core/src/instructions/alu32/logical.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/logical.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn xor_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {

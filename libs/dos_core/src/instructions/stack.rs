@@ -12,17 +12,6 @@ pub(crate) fn push_cs(machine: &mut DosMachine) {
     );
 }
 
-/*pub(crate) fn push_ax(machine: &mut DosMachine) {
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_sub(2));
-    machine.write_u16(
-        machine.registers.ss(),
-        machine.registers.sp(),
-        machine.registers.ax(),
-    );
-}*/
-
 pub(crate) fn push_es(machine: &mut DosMachine) {
     let es = machine.registers.es();
     machine
@@ -301,8 +290,6 @@ pub(crate) fn pop_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u16(offset, value);
     }
 
@@ -332,8 +319,6 @@ pub(crate) fn push_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u16(offset)
     };
 
@@ -360,8 +345,6 @@ pub(crate) fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let offset = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u32(offset)
     };
     let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_esp);

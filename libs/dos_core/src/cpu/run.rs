@@ -1,4 +1,4 @@
-// Ver: 1 // Ver: 1 File: ./libs/dos_core/src/cpu/run.rs
+// Ver: 1 File: ./libs/dos_core/src/cpu/run.rs
 
 use crate::{DosMachine, cpu::execute_0f::execute_0f, executor::execute, video};
 use std::error::Error;
@@ -7,7 +7,7 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
     let palette = video::load_vga_palette();
     //let debug = DebugLog::new("debug.log");
 
-    let mut tick_counter: u64 = 0;
+    let mut tick_counter: u64 = 65535;
 
     while !machine.halted {
         let opcode = machine.read_instr_u8(machine.registers.ip());
