@@ -1,5 +1,5 @@
-// Ver: 1
-use crate::{DosMachine, modrm::ModRm};
+// Ver: 1 File: ./libs/dos_core/src/instructions/exchange.rs
+use crate::{DosMachine, modrm::ModRm, xchg_ax_reg16, xchg_eax_reg32};
 
 pub(crate) fn xchg_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
@@ -50,3 +50,19 @@ pub(crate) fn xchg_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+xchg_ax_reg16!(xchg_ax_cx, cx, set_cx);
+xchg_ax_reg16!(xchg_ax_dx, dx, set_dx);
+xchg_ax_reg16!(xchg_ax_bx, bx, set_bx);
+xchg_ax_reg16!(xchg_ax_sp, sp, set_sp);
+xchg_ax_reg16!(xchg_ax_bp, bp, set_bp);
+xchg_ax_reg16!(xchg_ax_si, si, set_si);
+xchg_ax_reg16!(xchg_ax_di, di, set_di);
+
+xchg_eax_reg32!(xchg_eax_ecx, ecx, set_ecx);
+xchg_eax_reg32!(xchg_eax_edx, edx, set_edx);
+xchg_eax_reg32!(xchg_eax_ebx, ebx, set_ebx);
+xchg_eax_reg32!(xchg_eax_esp, esp, set_esp);
+xchg_eax_reg32!(xchg_eax_ebp, ebp, set_ebp);
+xchg_eax_reg32!(xchg_eax_esi, esi, set_esi);
+xchg_eax_reg32!(xchg_eax_edi, edi, set_edi);

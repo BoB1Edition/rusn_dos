@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2 File: ./libs/dos_core/src/interrupts/bios.rs
 use std::io::Write;
 
 use crate::video::VideoMode;
@@ -120,4 +120,46 @@ pub(crate) fn handle_int15(machine: &mut DosMachine) {
             //machine.halted=true;
         }
     }
+}
+
+pub(crate) fn handle_int1a(machine: &mut DosMachine) {
+    match machine.registers.ah() {
+        0x00 => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let ticks = (now.as_millis() * 18 / 1000) as u32; // ~18.2 Гц
+            machine.registers.set_cx((ticks >> 16) as u16);
+            machine.registers.set_dx(ticks as u16);
+            machine.registers.set_al(0); // Флаг перехода через полночь = 0
+            let mut flags = machine.registers.flags();
+            flags &= !(flags::CF); // CF = 0
+            machine.registers.set_flags(flags);
+            log::info!("INT 1Ah / AH=00h: Read system clock -> {:08X} ticks", ticks);
+        }
+        0x01 => {
+            let mut flags = machine.registers.flags();
+            flags &= !(flags::CF);
+            machine.registers.set_flags(flags);
+            log::info!("INT 1Ah / AH=01h: Set system clock (ignored)");
+        }
+        _ => {
+            log::warn!("Unsupported INT 1Ah / AH={:02X}", machine.registers.ah());
+            let mut flags = machine.registers.flags();
+            flags |= flags::CF; // CF=1 (ошибка)
+            machine.registers.set_flags(flags);
+        }
+    }
+}
+
+pub(crate) fn handle_int08(machine: &mut DosMachine) {
+    let vector_1c = 0x1C;
+    let ivt_addr = (vector_1c as u32) * 4;
+    let handler_ip = machine.read_phys_u16(ivt_addr);
+    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
+    if handler_cs != 0xF000 && (handler_ip != 0 || handler_cs != 0) {
+        crate::instructions::system::call_interrupt(machine, vector_1c);
+    }
+    machine.out_imm8_al(0x20, 0x20);
+    log::info!("INT 8h (IRQ0) handled");
 }

@@ -1,3 +1,4 @@
+// Ver: 1 File: ./libs/dos_core/src/instructions/mov32.rs
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
@@ -125,8 +126,6 @@ pub(crate) fn mov_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u32(phys_addr)
     };
 
@@ -373,5 +372,15 @@ pub(crate) fn mov_ebp_imm32(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.extend_from_slice(&imm32.to_le_bytes());
     machine.registers.set_ebp(imm32);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn mov_esp_imm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let imm32 = machine.read_instr_u32(machine.registers.ip());
+    machine.registers.step(Some(4));
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm32.to_le_bytes());
+    machine.registers.set_esp(imm32);
     machine.log_instruction(csip, &bytes).ok();
 }

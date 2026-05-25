@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 1 File: ./libs/dos_core/src/filesystem.rs
 use std::{
     collections::HashMap,
     fs::{self, File as StdFile, OpenOptions},
@@ -263,4 +263,10 @@ impl FileSystem {
 
         Ok(new_pos as u32)
     }
+    pub(crate) fn get_current_directory(&self, drive_letter: char) -> Option<&str> {
+    self.current_directories
+        .get(&drive_letter.to_ascii_uppercase())
+        .map(|s| s.as_str())
 }
+}
+

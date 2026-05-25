@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 1 File: ./libs/dos_core/src/lib.rc
 pub use machine::DosMachine;
 pub mod cpu;
 
@@ -17,6 +17,7 @@ pub mod loader;
 pub mod filesystem;
 pub mod video;
 pub mod ivt;
+pub(crate) mod macros;
 pub use filesystem::DiskDriver;
 pub(crate) use cpu::flags;
 pub(crate) use cpu::executor;

@@ -1,5 +1,5 @@
-// Ver: 1
-use crate::{DosMachine, modrm::ModRm};
+// Ver: 1 File: ./libs/dos_core/src/instructions/extended32.rs
+use crate::{DosMachine, modrm::ModRm, xchg_eax_reg32};
 
 pub(crate) fn movzx_r32_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];

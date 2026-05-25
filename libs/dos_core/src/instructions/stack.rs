@@ -1,5 +1,5 @@
-// Ver: 1
-use crate::{machine::DosMachine, modrm::ModRm};
+// Ver: 1 File: ./libs/dos_core/src/instructions/stack.rs
+use crate::{machine::DosMachine, modrm::ModRm, pop_reg16, push_reg16};
 
 pub(crate) fn push_cs(machine: &mut DosMachine) {
     machine
@@ -12,7 +12,7 @@ pub(crate) fn push_cs(machine: &mut DosMachine) {
     );
 }
 
-pub(crate) fn push_ax(machine: &mut DosMachine) {
+/*pub(crate) fn push_ax(machine: &mut DosMachine) {
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
@@ -21,29 +21,14 @@ pub(crate) fn push_ax(machine: &mut DosMachine) {
         machine.registers.sp(),
         machine.registers.ax(),
     );
-}
+}*/
 
-pub fn push_cx(machine: &mut DosMachine) {
-    let sp = machine.registers.sp().wrapping_sub(2);
-    machine.registers.set_sp(sp);
-    machine.write_u16(machine.registers.ss(), sp, machine.registers.cx());
-}
-
-pub fn push_dx(machine: &mut DosMachine) {
-    let sp = machine.registers.sp().wrapping_sub(2);
-    machine.registers.set_sp(sp);
-    machine.write_u16(machine.registers.ss(), sp, machine.registers.dx());
-}
-
-pub(crate) fn push_bx(machine: &mut DosMachine) {
+pub(crate) fn push_es(machine: &mut DosMachine) {
+    let es = machine.registers.es();
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
-    machine.write_u16(
-        machine.registers.ss(),
-        machine.registers.sp(),
-        machine.registers.bx(),
-    );
+    machine.write_u16(machine.registers.ss(), machine.registers.sp(), es);
 }
 
 pub(crate) fn pushf(machine: &mut DosMachine) {
@@ -57,22 +42,14 @@ pub(crate) fn pushf(machine: &mut DosMachine) {
     );
 }
 
-pub(crate) fn pop_ds(machine: &mut DosMachine) {
+/*pub(crate) fn pop_ds(machine: &mut DosMachine) {
     let ds = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_add(2));
     machine.registers.set_ds(ds);
 }
-
-pub(crate) fn pop_ax(machine: &mut DosMachine) {
-    let ax = machine.read_u16(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_ax(ax);
-}
-
+*/
 pub(crate) fn popf(machine: &mut DosMachine) {
     let flags = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
@@ -234,58 +211,12 @@ pub(crate) fn popad(machine: &mut DosMachine) {
     machine.log_instruction(csip, &[0x66, 0x61]).ok();
 }
 
-pub(crate) fn push_di(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let bytes = prev.to_vec();
-
-    // Уменьшаем SP на 2 (стек растёт вниз)
+/*pub(crate) fn push_ds(machine: &mut DosMachine) {
     let new_sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(new_sp);
-
-    // Записываем значение DI в стек по адресу [SS:SP]
-    let di = machine.registers.di();
-    machine.write_u16(machine.registers.ss(), new_sp, di);
-
-    machine.log_instruction(csip, &bytes).ok();
-}
-
-// libs/dos_core/src/instructions/stack.rs
-pub(crate) fn pop_di(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-
-    // Читаем слово из стека по адресу [SS:SP]
-    let sp = machine.registers.sp();
-    let di = machine.read_u16(machine.registers.ss(), sp);
-
-    // Увеличиваем SP на 2 (стек растёт вверх при извлечении)
-    let new_sp = sp.wrapping_add(2);
-    machine.registers.set_sp(new_sp);
-
-    // Сохраняем значение в DI
-    machine.registers.set_di(di);
-
-    // Логирование
-    machine.log_instruction(csip, &[0x5F]).ok();
-}
-
-// libs/dos_core/src/instructions/stack.rs
-pub(crate) fn push_ds(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-
-    // Уменьшаем SP на 2 (стек растёт вниз)
-    let new_sp = machine.registers.sp().wrapping_sub(2);
-    machine.registers.set_sp(new_sp);
-
-    // Записываем значение DS в стек по адресу [SS:SP]
     let ds = machine.registers.ds();
     machine.write_u16(machine.registers.ss(), new_sp, ds);
-
-    // Логирование
-    machine.log_instruction(csip, &[0x1E]).ok();
-}
+}*/
 
 pub(crate) fn pop_es(machine: &mut DosMachine) {
     let csip = [machine.registers.cs(), machine.registers.ip() - 1];
@@ -334,21 +265,6 @@ pub(crate) fn push_imm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_phys_u32(phys_addr, imm32);
 
     machine.log_instruction(csip, prev).ok();
-}
-
-pub(crate) fn push_si(machine: &mut DosMachine) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-
-    // Уменьшаем SP на 2 (стек растёт вниз)
-    let new_sp = machine.registers.sp().wrapping_sub(2);
-    machine.registers.set_sp(new_sp);
-
-    // Записываем значение SI в стек по адресу [SS:SP]
-    let si = machine.registers.si();
-    machine.write_u16(machine.registers.ss(), new_sp, si);
-
-    // Логирование
-    machine.log_instruction(csip, &[0x56]).ok();
 }
 
 /// POP r/m16 — Pop word from stack into register or memory
@@ -452,4 +368,40 @@ pub(crate) fn push_rm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_phys_u32(phys_addr, value);
 
     machine.log_instruction(csip, &bytes).ok();
+}
+
+push_reg16!(push_ax, ax);
+push_reg16!(push_cx, cx);
+push_reg16!(push_dx, dx);
+push_reg16!(push_bx, bx);
+push_reg16!(push_si, si);
+push_reg16!(push_di, di);
+push_reg16!(push_sp, sp);
+push_reg16!(push_bp, bp);
+
+pop_reg16!(pop_ax, set_ax);
+pop_reg16!(pop_cx, set_cx);
+pop_reg16!(pop_dx, set_dx);
+pop_reg16!(pop_bx, set_bx);
+pop_reg16!(pop_si, set_si);
+pop_reg16!(pop_di, set_di);
+pop_reg16!(pop_sp, set_sp);
+pop_reg16!(pop_bp, set_bp);
+
+pub(crate) fn push_ds(machine: &mut DosMachine) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
+    let new_sp = machine.registers.sp().wrapping_sub(2);
+    machine.registers.set_sp(new_sp);
+    let ds = machine.registers.ds();
+    machine.write_u16(machine.registers.ss(), new_sp, ds);
+    machine.log_instruction(csip, &[0x1E]).ok();
+}
+
+pub(crate) fn pop_ds(machine: &mut DosMachine) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
+    let sp = machine.registers.sp();
+    let ds = machine.read_u16(machine.registers.ss(), sp);
+    machine.registers.set_sp(sp.wrapping_add(2));
+    machine.registers.set_ds(ds);
+    machine.log_instruction(csip, &[0x1F]).ok();
 }

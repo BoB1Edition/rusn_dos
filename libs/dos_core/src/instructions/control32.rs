@@ -1,3 +1,4 @@
+// Ver: 1 File: ./libs/dos_core/src/instructions/control32.rs
 use crate::{DosMachine, flags, instructions::control, modrm::ModRm};
 
 pub(crate) fn call_rm32(machine: &mut DosMachine, prev: &[u8]) {
@@ -249,5 +250,20 @@ pub fn bound_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
         crate::instructions::system::int(machine, &[0xCD, 0x05]);
         return;
     }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn retn_imm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let mut bytes = prev.to_vec();
+    let imm16 = machine.read_instr_u16(machine.registers.ip()); // в 32-битном режиме imm16 тоже 2 байта
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    machine.registers.step(Some(2));
+
+    let ip = machine.read_u16(machine.registers.ss(), machine.registers.sp());
+    let new_sp = machine.registers.sp().wrapping_add(2 + imm16);
+    machine.registers.set_sp(new_sp);
+    machine.registers.set_ip(ip);
+
     machine.log_instruction(csip, &bytes).ok();
 }

@@ -1,13 +1,12 @@
-// Ver: 1
+// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/group.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 
 pub fn group_x83_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
-    let imm8 = machine.read_u8(
-        machine.registers.cs(),
-        machine.registers.ip().wrapping_add(1),
+    let imm8 = machine.read_instr_u8(
+        machine.registers.ip().wrapping_add(1)
     );
     machine.registers.step(Some(2));
     let mut bytes = prev.to_vec();
@@ -354,4 +353,35 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
         }
         _ => unreachable!(),
     }
+}
+
+pub fn group_x81_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    let imm32 = machine.read_instr_u32(machine.registers.ip().wrapping_add(1));
+    machine.registers.step(Some(5)); // ModR/M + 4 байта imm32
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    bytes.extend_from_slice(&imm32.to_le_bytes());
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    if modrm.is_register_mode() {
+        let dst_val = machine.read_reg32(modrm.rm_field);
+        let (result, flags) = perform_group_x83_operation_32(machine, modrm.reg_field, dst_val, imm32, machine.registers.flags());
+        if modrm.reg_field != 7 {
+            machine.write_reg32(modrm.rm_field, result);
+        }
+        machine.registers.set_flags(flags);
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u32(addr);
+        let (result, flags) = perform_group_x83_operation_32(machine, modrm.reg_field, dst_val, imm32, machine.registers.flags());
+        if modrm.reg_field != 7 {
+            machine.write_phys_u32(addr, result);
+        }
+        machine.registers.set_flags(flags);
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
 }

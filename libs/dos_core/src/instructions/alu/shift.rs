@@ -1,14 +1,11 @@
-// Ver: 1
+// Ver: 5 File: ./libs/dos_core/src/instructions/alu/shift.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub fn shift_group_c1_16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
-    let imm8 = machine.read_u8(
-        machine.registers.cs(),
-        machine.registers.ip().wrapping_add(1),
-    );
+    let imm8 = machine.read_instr_u8(machine.registers.ip().wrapping_add(1));
     machine.registers.step(Some(2));
     bytes.push(modrm_byte);
     bytes.push(imm8);
@@ -191,10 +188,7 @@ pub fn shift_group_c0_rm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let mut bytes = prev.to_vec();
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
-    let imm8 = machine.read_u8(
-        machine.registers.cs(),
-        machine.registers.ip().wrapping_add(1),
-    );
+    let imm8 = machine.read_instr_u8(machine.registers.ip().wrapping_add(1));
     machine.registers.step(Some(2));
     bytes.push(modrm_byte);
     bytes.push(imm8);
@@ -613,7 +607,7 @@ pub fn shift_rm8_cl(machine: &mut DosMachine, prev: &[u8]) {
     // Устанавливаем флаги (OF только для сдвига на 1 позицию)
     let mut new_flags = flags::compute_flags_u8(machine.registers.flags(), result, cf, count == 1 && of, false);
     // Сохраняем неизменяемые флаги (если нужно)
-    new_flags = (new_flags & 0x0FD5) | (machine.registers.flags() & !0x0FD5);
+    //new_flags = (new_flags & 0x0FD5) | (machine.registers.flags() & !0x0FD5);
     machine.registers.set_flags(new_flags);
     
     // Сохраняем результат
@@ -695,4 +689,32 @@ fn sar8(value: u8, count: u8) -> (u8, bool, bool) {
     let cf = if count > 0 { (value >> (count - 1)) & 1 != 0 } else { false }; // последний вышедший бит
     let of = false; // OF всегда 0 для SAR
     (result, cf, of)
+}
+
+pub fn shift_group_d0_rm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None); // продвигаем на байт ModR/M
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+    let count = 1u8;
+
+    if modrm.is_register_mode() {
+        let value = machine.read_reg8(modrm.rm_field);
+        let (result, new_flags) = perform_shift_8(modrm.reg_field, value, count, machine.registers.flags());
+        machine.write_reg8(modrm.rm_field, result);
+        machine.registers.set_flags(new_flags);
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let value = machine.read_phys_u8(addr);
+        let (result, new_flags) = perform_shift_8(modrm.reg_field, value, count, machine.registers.flags());
+        machine.write_phys_u8(addr, result);
+        machine.registers.set_flags(new_flags);
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
 }

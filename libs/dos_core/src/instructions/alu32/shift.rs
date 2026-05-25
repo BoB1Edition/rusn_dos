@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/shift.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) {
@@ -113,9 +113,12 @@ fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) 
 }
 
 pub(crate) fn shift_group_d1_32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
@@ -143,13 +146,13 @@ pub(crate) fn shift_group_d1_32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn shift_group_c1_32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let mut bytes = prev.to_vec();
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
-    let imm8 = machine.read_u8(
+    let csip = [
         machine.registers.cs(),
-        machine.registers.ip().wrapping_add(1),
-    );
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    let imm8 = machine.read_instr_u8(machine.registers.ip().wrapping_add(1));
     machine.registers.step(Some(2));
     bytes.push(modrm_byte);
     bytes.push(imm8);
@@ -179,8 +182,11 @@ pub fn shift_group_c1_32(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn shift_rm32_cl(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
@@ -217,7 +223,13 @@ pub fn shift_rm32_cl(machine: &mut DosMachine, prev: &[u8]) {
         7 => sar32(value, count),
         _ => unreachable!(),
     };
-    let mut new_flags = flags::compute_flags_u32(machine.registers.flags(), result, cf, count == 1 && of, false);
+    let mut new_flags = flags::compute_flags_u32(
+        machine.registers.flags(),
+        result,
+        cf,
+        count == 1 && of,
+        false,
+    );
     new_flags = (new_flags & 0x0FD5) | (machine.registers.flags() & !0x0FD5);
     machine.registers.set_flags(new_flags as u16);
     if is_register {

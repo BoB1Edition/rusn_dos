@@ -5,7 +5,7 @@ height = 768
 
 [[drivers]]
 letter = "C"
-path = "./test"      # Локальный путь для диска C:
+path = "./app"      # Локальный путь для диска C:
 read_only = false
 
 [[drivers]]

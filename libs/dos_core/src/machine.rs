@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 3 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -6,7 +6,6 @@ use minifb::Window;
 
 use crate::{
     filesystem::FileSystem,
-    interrupts,
     memory::Memory,
     registers::Registers,
     video::{VideoMode, VideoSystem},
@@ -196,7 +195,7 @@ impl DosMachine {
 
     pub fn run(&mut self, window: Option<&mut Window>) -> Result<Option<u8>, Box<dyn Error>> {
         self.window = window.map(|w| w as *mut Window);
-        crate::executor::run(self)
+        crate::cpu::run::run(self)
     }
 
     #[inline(always)]
@@ -210,34 +209,20 @@ impl DosMachine {
     #[inline(always)]
     pub fn read_u16(&self, default_segment: u16, offset: u16) -> u16 {
         let segment = self.override_segment.unwrap_or(default_segment);
-
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        let masked_addr = self.apply_a20_mask(phys_addr);
-
-        let lo = self.read_u8(segment, offset) as u16;
-        let hi = self.read_u8(segment, offset.wrapping_add(1)) as u16;
-
-        let value = lo | (hi << 8);
-        if offset == 0x0002 {
-            log::warn!(
-                "🔍 [MEM-READ] ES:[0x0002] -> Эффективный сегмент={:#04x}, Физ.Адрес={:#06x}, Прочитано={:#04x} (override={:?})",
-                segment,
-                masked_addr,
-                value,
-                self.override_segment
-            );
-        }
-
-        value
+        let base_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        let lo = self.read_phys_u8(base_addr) as u16;
+        let hi = self.read_phys_u8(base_addr.wrapping_add(1)) as u16;
+        lo | (hi << 8)
     }
 
     #[inline(always)]
     pub fn read_u32(&self, default_segment: u16, offset: u16) -> u32 {
         let segment = self.override_segment.unwrap_or(default_segment);
-        let b0 = self.read_u8(segment, offset) as u32;
-        let b1 = self.read_u8(segment, offset.wrapping_add(1)) as u32;
-        let b2 = self.read_u8(segment, offset.wrapping_add(2)) as u32;
-        let b3 = self.read_u8(segment, offset.wrapping_add(3)) as u32;
+        let base_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        let b0 = self.read_phys_u8(base_addr) as u32;
+        let b1 = self.read_phys_u8(base_addr.wrapping_add(1)) as u32;
+        let b2 = self.read_phys_u8(base_addr.wrapping_add(2)) as u32;
+        let b3 = self.read_phys_u8(base_addr.wrapping_add(3)) as u32;
         b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
     }
 
@@ -245,37 +230,25 @@ impl DosMachine {
     pub(crate) fn write_u8(&mut self, default_segment: u16, offset: u16, value: u8) {
         let segment = self.override_segment.unwrap_or(default_segment);
         let raw_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
-        let addr = self.apply_a20_mask(raw_addr);
-        if addr >= 0xA0000 && addr < 0xC0000 {
-            if self.video.mode == VideoMode::Mode13h && addr < 0xA0000 + 320 * 200 {
-                if let Some(fb) = self.video.framebuffer.as_mut() {
-                    let video_offset = (addr - 0xA0000) as usize;
-                    fb.data[video_offset] = value;
-                    self.video.dirty = true;
-                }
-            }
-            return;
-        }
-
-        if addr < self.memory.len() as u32 {
-            self.memory.write_u8(addr, value);
-        } else {
-            log::error!("Memory write out of bounds: {:#x}", addr);
-        }
+        self.write_phys_u8(raw_addr, value); // [FIX] Больше не делает return, пишем в память
     }
 
     #[inline(always)]
     pub fn write_u16(&mut self, default_segment: u16, offset: u16, value: u16) {
         let segment = self.override_segment.unwrap_or(default_segment);
-        self.write_u8(segment, offset, value as u8);
-        self.write_u8(segment, offset.wrapping_add(1), (value >> 8) as u8);
+        let base_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        self.write_phys_u8(base_addr, value as u8);
+        self.write_phys_u8(base_addr.wrapping_add(1), (value >> 8) as u8);
     }
 
     #[inline(always)]
     pub fn write_u32(&mut self, default_segment: u16, offset: u16, value: u32) {
         let segment = self.override_segment.unwrap_or(default_segment);
-        self.write_u16(segment, offset, value as u16);
-        self.write_u16(segment, offset.wrapping_add(2), (value >> 16) as u16);
+        let base_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+        self.write_phys_u8(base_addr, value as u8);
+        self.write_phys_u8(base_addr.wrapping_add(1), (value >> 8) as u8);
+        self.write_phys_u8(base_addr.wrapping_add(2), (value >> 16) as u8);
+        self.write_phys_u8(base_addr.wrapping_add(3), (value >> 24) as u8);
     }
 
     pub(crate) fn print_4byte(&self, segment: u16, offset: u16) {
@@ -307,11 +280,35 @@ impl DosMachine {
     #[inline(always)]
     pub fn write_phys_u8(&mut self, addr: u32, value: u8) {
         let masked = self.apply_a20_mask(addr);
-        self.memory.write_u8(masked, value);
+        if masked >= 0xA0000 && masked < 0xC0000 {
+            if self.video.mode == VideoMode::Mode13h && masked < 0xA0000 + 320 * 200 {
+                if let Some(fb) = self.video.framebuffer.as_mut() {
+                    let video_offset = (masked - 0xA0000) as usize;
+                    if video_offset < fb.data.len() {
+                        fb.data[video_offset] = value;
+                        self.video.dirty = true;
+                    }
+                }
+            }
+        }
+
+        if masked < self.memory.len() as u32 {
+            self.memory.write_u8(masked, value);
+        } else {
+            log::error!("Memory write out of bounds: {:#x}", masked);
+        }
     }
 
     #[inline(always)]
     pub fn write_phys_u16(&mut self, addr: u32, value: u16) {
+        if addr == 0x1274C {
+            log::warn!(
+                "WRITE to [1274C] = {:04X} at CS:IP={:04X}:{:04X}",
+                value,
+                self.registers.cs(),
+                self.registers.ip()
+            );
+        }
         self.write_phys_u8(addr, value as u8);
         self.write_phys_u8(addr.wrapping_add(1), (value >> 8) as u8);
     }
@@ -358,7 +355,7 @@ impl DosMachine {
             ems_free_pages: 256,
             ems_next_handle: 1,
             ems_handles: Vec::new(),
-            has_lock_prefix: false
+            has_lock_prefix: false,
         }
     }
 
@@ -368,7 +365,7 @@ impl DosMachine {
 
     #[inline(always)]
     pub(crate) fn apply_a20_mask(&self, addr: u32) -> u32 {
-        if addr >= 0x0FFFF0 {
+        /*if addr >= 0x0FFFF0 {
             log::debug!(
                 "A20 MASK: raw={:#x}, enabled={}, result={:#x}",
                 addr,
@@ -385,7 +382,11 @@ impl DosMachine {
             addr.min(0x10FFFF)
         } else {
             addr & 0xFFFFF
+        }*/
+        if !self.a20_enabled {
+            return addr & 0xFFFFF; // A20 OFF: сбрасываем 20-й бит (wrap-around на 1MB)
         }
+        addr
     }
     #[inline(always)]
     pub(crate) fn read_instr_u8(&self, offset: u16) -> u8 {
@@ -409,6 +410,21 @@ impl DosMachine {
         let lo = self.read_instr_u16(offset) as u32;
         let hi = self.read_instr_u16(offset.wrapping_add(2)) as u32;
         lo | (hi << 16)
+    }
+
+    pub(crate) fn out_imm8_al(&mut self, port: u8, value: u8) {
+        match port {
+            0x20 | 0xA0 => {
+                if value == 0x20 {
+                    log::info!("OUT AL, 20h to PIC port {:#02x} (End of Interrupt)", port);
+                } else {
+                    log::info!("OUT AL, {:#02x} to PIC port {:#02x}", value, port);
+                }
+            }
+            _ => {
+                log::warn!("OUT AL, {:#02x} to unimplemented port {:#02x}", value, port);
+            }
+        }
     }
 }
 

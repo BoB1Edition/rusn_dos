@@ -1,30 +1,5 @@
-use crate::{flags, machine::DosMachine, modrm::ModRm};
-
-pub(crate) fn mov_ah(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let mut bytes = prev.to_vec();
-    let imm = machine.read_instr_u8(machine.registers.ip());
-    bytes.push(imm);
-    let _ = machine.log_instruction(csip, &bytes);
-    machine.registers.set_ah(imm);
-    machine.registers.step(None);
-}
-
-pub(crate) fn mov_dl(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let mut bytes = prev.to_vec();
-    let imm = machine.read_instr_u8(machine.registers.ip());
-    bytes.push(imm);
-    machine.log_instruction(csip, &bytes).ok();
-    machine.registers.set_dl(imm);
-    machine.registers.step(None);
-}
+// Ver: 2 File: ./libs/dos_core/src/instructions/mov.rs
+use crate::{flags, machine::DosMachine, modrm::ModRm, mov_reg8_imm8};
 
 pub(crate) fn mov_ax(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
@@ -201,8 +176,6 @@ pub(crate) fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u16(phys_addr)
     };
     match modrm.reg_field {
@@ -230,6 +203,7 @@ pub(crate) fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
     machine.log_instruction(csip, &bytes).ok();
 }
+
 
 pub(crate) fn mov_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
@@ -291,7 +265,6 @@ pub(crate) fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/mov.rs
 pub(crate) fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -299,69 +272,30 @@ pub(crate) fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
 
-    // Читаем 16-битное смещение из [CS:IP]
-    let addr16 = machine.read_instr_u16(machine.registers.ip());
-    machine.registers.step(Some(2));
-    bytes.extend_from_slice(&addr16.to_le_bytes());
-
-    // Определяем сегмент с учётом префикса
     let segment = machine.override_segment.unwrap_or(machine.registers.ds());
 
-    // Записываем значение AX в память по абсолютному адресу [segment:addr16]
-    machine.write_u16(segment, addr16, machine.registers.ax());
-    let phys = ((segment as u32) << 4).wrapping_add(addr16 as u32);
+    let offset = if machine.has_address_size_prefix {
+        let addr32 = machine.read_instr_u32(machine.registers.ip());
+        machine.registers.step(Some(4));
+        bytes.extend_from_slice(&addr32.to_le_bytes());
+        (addr32 & 0xFFFF) as u16
+    } else {
+        let addr16 = machine.read_instr_u16(machine.registers.ip());
+        machine.registers.step(Some(2));
+        bytes.extend_from_slice(&addr16.to_le_bytes());
+        addr16
+    };
+
+    machine.write_u16(segment, offset, machine.registers.ax());
+
+    let phys = ((segment as u32) << 4).wrapping_add(offset as u32);
     log::debug!(
         "MOV [addr], AX: seg={:#04x}, offset={:#04x}, phys={:#06x}, a20={}",
         segment,
-        addr16,
+        offset,
         phys,
-        machine.a20_enabled // ← УЛУЧШЕННОЕ ЛОГИРОВАНИЕ
+        machine.a20_enabled
     );
-    machine.log_instruction(csip, &bytes).ok();
-}
-
-pub(crate) fn mov_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let imm8 = machine.read_instr_u8(machine.registers.ip());
-    machine.registers.step(None); // продвигаем на 1 байт (imm8)
-    let mut bytes = prev.to_vec();
-    bytes.push(imm8);
-
-    // Устанавливаем значение в AL (не изменяя остальные биты EAX)
-    machine.registers.set_al(imm8);
-
-    machine.log_instruction(csip, &bytes).ok();
-}
-
-pub(crate) fn mov_bh_imm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let imm8 = machine.read_instr_u8(machine.registers.ip());
-    machine.registers.step(None); // продвигаем на 1 байт (imm8)
-    let mut bytes = prev.to_vec();
-    bytes.push(imm8);
-
-    // Устанавливаем значение в BH (не изменяя остальные биты EBX)
-    machine.registers.set_bh(imm8);
-
-    machine.log_instruction(csip, &bytes).ok();
-}
-
-pub(crate) fn mov_bl_imm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let imm8 = machine.read_instr_u8(machine.registers.ip());
-    machine.registers.step(None);
-    let mut bytes = prev.to_vec();
-    bytes.push(imm8);
-    machine.registers.set_bl(imm8);
 
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -805,5 +739,117 @@ pub(crate) fn mov_address_al(machine: &mut DosMachine, prev: &[u8]) {
     let al = machine.registers.al();
     machine.write_u8(segment, addr, al);
 
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// SCASB — Compare AL with byte at [ES:DI], then update DI and flags
+pub(crate) fn scasb(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let bytes = prev.to_vec();
+    let al = machine.registers.al();
+    let di = machine.registers.di();
+    let src_byte = machine.read_u8(machine.registers.es(), di);
+
+    let result = al.wrapping_sub(src_byte);
+    let cf = al < src_byte;
+    let al_sign = (al as i8) < 0;
+    let src_sign = (src_byte as i8) < 0;
+    let result_sign = (result as i8) < 0;
+    let of = (al_sign != src_sign) && (al_sign != result_sign);
+    let af = (al & 0x0F) < (src_byte & 0x0F);
+
+    machine.registers.set_flags(flags::compute_flags_u8(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
+    if df {
+        machine.registers.set_di(di.wrapping_sub(1));
+    } else {
+        machine.registers.set_di(di.wrapping_add(1));
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// SCASW — Compare AX with word at [ES:DI], then update DI and flags
+pub(crate) fn scasw(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let bytes = prev.to_vec();
+    let ax = machine.registers.ax();
+    let di = machine.registers.di();
+    let src_word = machine.read_u16(machine.registers.es(), di);
+
+    let result = ax.wrapping_sub(src_word);
+    let cf = ax < src_word;
+    let ax_sign = (ax as i16) < 0;
+    let src_sign = (src_word as i16) < 0;
+    let result_sign = (result as i16) < 0;
+    let of = (ax_sign != src_sign) && (ax_sign != result_sign);
+    let af = (ax & 0x0F) < (src_word & 0x0F);
+
+    machine.registers.set_flags(flags::compute_flags_u16(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
+    if df {
+        machine.registers.set_di(di.wrapping_sub(2));
+    } else {
+        machine.registers.set_di(di.wrapping_add(2));
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+
+mov_reg8_imm8!(mov_al_imm8, set_al, 0xB0);
+mov_reg8_imm8!(mov_cl_imm8, set_cl, 0xB1);
+mov_reg8_imm8!(mov_dl_imm8, set_dl, 0xB2);
+mov_reg8_imm8!(mov_bl_imm8, set_bl, 0xB3);
+mov_reg8_imm8!(mov_ah_imm8, set_ah, 0xB4);
+mov_reg8_imm8!(mov_ch_imm8, set_ch, 0xB5);
+mov_reg8_imm8!(mov_dh_imm8, set_dh, 0xB6);
+mov_reg8_imm8!(mov_bh_imm8, set_bh, 0xB7);
+
+/// MOVSW — Move String Word (DS:SI -> ES:DI, ±2)
+pub(crate) fn movsw(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec(); // байты не пополняем, т.к. опкод уже в full_bytes
+    let src_segment = machine.override_segment.unwrap_or(machine.registers.ds());
+    let si = machine.registers.si();
+    let word = machine.read_u16(src_segment, si);
+    let di = machine.registers.di();
+    machine.write_u16(machine.registers.es(), di, word);
+    let df = (machine.registers.flags() & (flags::DF)) != 0;
+    if df {
+        machine.registers.set_si(si.wrapping_sub(2));
+        machine.registers.set_di(di.wrapping_sub(2));
+    } else {
+        machine.registers.set_si(si.wrapping_add(2));
+        machine.registers.set_di(di.wrapping_add(2));
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn mov_sp_imm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let imm16 = machine.read_instr_u16(machine.registers.ip());
+    machine.registers.step(Some(2));
+    let mut bytes = prev.to_vec();
+    bytes.extend_from_slice(&imm16.to_le_bytes());
+    machine.registers.set_sp(imm16);
     machine.log_instruction(csip, &bytes).ok();
 }

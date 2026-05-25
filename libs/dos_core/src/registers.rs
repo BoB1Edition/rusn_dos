@@ -1,6 +1,6 @@
-// Ver: 1
+// Ver: 2 File: ./libs/dos_core/src/registers.rs
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct Registers {
     eax: u32,
     ebx: u32,
@@ -26,6 +26,29 @@ impl Registers {
             self.ip = self.ip.wrapping_add(step);
         } else {
             self.ip = self.ip.wrapping_add(1);
+        }
+    }
+}
+
+impl Default for Registers {
+    fn default() -> Self {
+        Self {
+            eax: 0,
+            ebx: 0,
+            ecx: 0,
+            edx: 0,
+            esi: 0,
+            edi: 0,
+            ebp: 0,
+            esp: 0,
+            ip: 0,
+            cs: 0,
+            ds: 0,
+            es: 0,
+            ss: 0,
+            fs: 0,
+            gs: 0,
+            flags: 0x0002, // Бит 1 всегда 1 на 8086
         }
     }
 }
@@ -292,7 +315,8 @@ impl Registers {
     }
 
     pub(crate) fn set_flags(&mut self, flags: u16) {
-        self.flags = flags;
+        //self.flags = flags;
+        self.flags = flags | 0x0002;
     }
 
     pub(crate) fn fs(&self) -> u16 {

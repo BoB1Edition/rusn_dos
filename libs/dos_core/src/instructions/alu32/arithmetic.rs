@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
 
 use crate::{DosMachine, flags, modrm::ModRm};
 
@@ -389,8 +389,7 @@ pub fn imul_r32_rm32_imm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// DEC r/m32 — Decrement doubleword by 1 (32-bit)
-pub fn dec_rm32(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn sbb_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -401,86 +400,123 @@ pub fn dec_rm32(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
-    let old_cf = machine.registers.flags() & 1;
+    let src_val = machine.read_reg32(modrm.reg_field);
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+    let borrow = if cf_in { 1u64 } else { 0u64 };
 
     if modrm.is_register_mode() {
-        let old_val = machine.read_reg32(modrm.rm_field);
-        let new_val = old_val.wrapping_sub(1);
-        machine.write_reg32(modrm.rm_field, new_val);
+        let dst_val = machine.read_reg32(modrm.rm_field) as u64;
+        let src_extended = src_val as u64 + borrow;
+        let (result_u64, did_overflow) = dst_val.overflowing_sub(src_extended);
+        let result = result_u64 as u32;
+        let new_cf = did_overflow;
+        let dst_sign = (dst_val as i32) < 0;
+        let src_sign = ((src_extended & 0xFFFF_FFFF) as i32) < 0;
+        let result_sign = (result as i32) < 0;
+        let new_of = (dst_sign != src_sign) && (dst_sign != result_sign);
+        let dst_low = dst_val & 0x0F;
+        let src_low = src_extended & 0x0F;
+        let new_af = dst_low < src_low;
 
-        let cf = old_val == 0;
-        let of = old_val == 0x80000000;
-        let af = (old_val & 0x0F) == 0;
-
-        let mut flags = flags::compute_flags_u32(machine.registers.flags(), new_val, cf, of, af);
-        flags = (flags & !1) | (old_cf);
-        machine.registers.set_flags(flags as u16);
+        machine.write_reg32(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            new_cf,
+            new_of,
+            new_af,
+        ));
     } else {
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u32(addr) as u64;
+        let src_extended = src_val as u64 + borrow;
+        let (result_u64, did_overflow) = dst_val.overflowing_sub(src_extended);
+        let result = result_u64 as u32;
+        let new_cf = did_overflow;
+        let dst_sign = (dst_val as i32) < 0;
+        let src_sign = ((src_extended & 0xFFFF_FFFF) as i32) < 0;
+        let result_sign = (result as i32) < 0;
+        let new_of = (dst_sign != src_sign) && (dst_sign != result_sign);
+        let dst_low = dst_val & 0x0F;
+        let src_low = src_extended & 0x0F;
+        let new_af = dst_low < src_low;
 
-        let old_val = machine.read_phys_u32(addr);
-        let new_val = old_val.wrapping_sub(1);
-        machine.write_phys_u32(addr, new_val);
-
-        let cf = old_val == 0;
-        let of = old_val == 0x80000000;
-        let af = (old_val & 0x0F) == 0;
-
-        let mut flags = flags::compute_flags_u32(machine.registers.flags(), new_val, cf, of, af);
-        flags = (flags & !1) | (old_cf);
-        machine.registers.set_flags(flags as u16);
+        machine.write_phys_u32(addr, result);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            new_cf,
+            new_of,
+            new_af,
+        ));
     }
 
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// INC r/m32 — Increment doubleword by 1 (32-bit)
-pub fn inc_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
+pub fn adc_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
-    let old_cf = machine.registers.flags() & 1;
-
-    if modrm.is_register_mode() {
-        let old_val = machine.read_reg32(modrm.rm_field);
-        let new_val = old_val.wrapping_add(1);
-        machine.write_reg32(modrm.rm_field, new_val);
-
-        let cf = old_val == 0xFFFFFFFF;
-        let of = old_val == 0x7FFFFFFF;
-        let af = (old_val & 0x0F) == 0x0F;
-
-        let mut flags = flags::compute_flags_u32(machine.registers.flags(), new_val, cf, of, af);
-        flags = (flags & !1) | (old_cf);
-        machine.registers.set_flags(flags as u16);
+    let src_val = machine.read_reg32(modrm.reg_field);
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+    let (dst_val, is_mem, phys_addr) = if modrm.is_register_mode() {
+        (machine.read_reg32(modrm.rm_field), false, 0)
     } else {
-        let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap();
-        bytes.extend_from_slice(&addr.to_le_bytes());
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        (machine.read_phys_u32(addr), true, addr)
+    };
 
-        let old_val = machine.read_phys_u32(addr);
-        let new_val = old_val.wrapping_add(1);
-        machine.write_phys_u32(addr, new_val);
+    let sum = (dst_val as u64) + (src_val as u64) + (if cf_in { 1 } else { 0 });
+    let result = sum as u32;
+    let new_cf = sum > 0xFFFF_FFFF;
+    let new_af = ((dst_val & 0x0F) + (src_val & 0x0F) + (if cf_in { 1 } else { 0 })) > 0x0F;
+    let new_of = ((dst_val ^ src_val) & 0x8000_0000) == 0 && ((dst_val ^ result) & 0x8000_0000) != 0;
 
-        let cf = old_val == 0xFFFFFFFF;
-        let of = old_val == 0x7FFFFFFF;
-        let af = (old_val & 0x0F) == 0x0F;
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, new_cf, new_of, new_af));
 
-        let mut flags = flags::compute_flags_u32(machine.registers.flags(), new_val, cf, of, af);
-        flags = (flags & !1) | (old_cf);
-        machine.registers.set_flags(flags as u16);
+    if is_mem {
+        machine.write_phys_u32(phys_addr, result);
+    } else {
+        machine.write_reg32(modrm.rm_field, result);
     }
+    machine.log_instruction(csip, &bytes).ok();
+}
 
+/// ADC r32, r/m32
+pub fn adc_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field)
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u32(addr)
+    };
+
+    let dst_reg = modrm.reg_field;
+    let dst_val = machine.read_reg32(dst_reg);
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+    let sum = (dst_val as u64) + (src_val as u64) + (if cf_in { 1 } else { 0 });
+    let result = sum as u32;
+    let new_cf = sum > 0xFFFF_FFFF;
+    let new_af = ((dst_val & 0x0F) as u64 + (src_val & 0x0F) as u64 + (if cf_in { 1 } else { 0 })) > 0x0F;
+    let new_of = ((dst_val ^ src_val) & 0x8000_0000) == 0 && ((dst_val ^ result) & 0x8000_0000) != 0;
+
+    machine.write_reg32(dst_reg, result);
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, new_cf, new_of, new_af));
     machine.log_instruction(csip, &bytes).ok();
 }

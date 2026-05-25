@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 1 File: ./libs/dos_core/src/video/mod.rs
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoMode {

@@ -10,9 +10,11 @@
 │       ├── src
 │       │   ├── consts.rs
 │       │   ├── cpu
+│       │   │   ├── execute_0f.rs
 │       │   │   ├── executor.rs
 │       │   │   ├── flags.rs
-│       │   │   └── mod.rs
+│       │   │   ├── mod.rs
+│       │   │   └── run.rs
 │       │   ├── filesystem.rs
 │       │   ├── instructions
 │       │   │   ├── alu
@@ -33,6 +35,7 @@
 │       │   │   ├── exchange.rs
 │       │   │   ├── extended.rs
 │       │   │   ├── extended32.rs
+│       │   │   ├── incs.rs
 │       │   │   ├── mod.rs
 │       │   │   ├── mov.rs
 │       │   │   ├── mov32.rs
@@ -52,6 +55,8 @@
 │       │   │   ├── exe_loader.rs
 │       │   │   └── mod.rs
 │       │   ├── machine.rs
+│       │   ├── macros
+│       │   │   └── mod.rs
 │       │   ├── memory.rs
 │       │   ├── modrm.rs
 │       │   ├── registers.rs
@@ -60,7 +65,8 @@
 │       │   └── video
 │       │       └── mod.rs
 │       └── tests
-├── run.log
+├── log
+├── README.md
 ├── shufled.py
 ├── src
 │   ├── app.rs
@@ -83,4 +89,4 @@
 ├── tests
 └── tree.tree
 
-17 directories, 67 files
+18 directories, 72 files

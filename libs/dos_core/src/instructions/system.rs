@@ -1,4 +1,4 @@
-// Ver: 1
+// Ver: 6 File: ./libs/dos_core/src/instructions/system.rs
 use log::{error, warn};
 
 use crate::{flags, interrupts::{bios, dos, ems}, machine::DosMachine};
@@ -19,28 +19,8 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
 
     // 2. Проверяем "магический" сегмент 0xF000 — внутренний обработчик эмулятора
     if handler_cs == 0xF000 {
-        // Вызываем напрямую, БЕЗ манипуляций со стеком
-        match vector {
-            0x20 => machine.halted = true,
-            0x21 => dos::handle_int21(machine),
-            0x2F => dos::handle_int2f(machine),
-            0x10 => bios::handle_int10(machine),
-            0x15 => bios::handle_int15(machine),
-            0x16 => bios::handle_int16(machine),
-            0x67 => ems::handle_int67(machine),
-            _ => {
-                log::warn!("Unhandled internal interrupt INT {:02X}", vector);
-                // Устанавливаем ошибку для совместимости
-                let mut f = machine.registers.flags();
-                f |= flags::CF;
-                machine.registers.set_flags(f);
-                panic!("interrupt");
-            }
-        }
+        dispatch_internal_interrupt(machine, vector);
     } else {
-        // 3. Реальный аппаратный переход (программа перехватила прерывание)
-        
-        // Сохраняем FLAGS, CS, IP в стек (порядок: FLAGS → CS → IP)
         let mut sp = machine.registers.sp();
         
         sp = sp.wrapping_sub(2);
@@ -54,13 +34,9 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
         sp = sp.wrapping_sub(2);
         machine.registers.set_sp(sp);
         machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
-
-        // Очищаем IF и TF согласно спецификации x86
         let mut f = machine.registers.flags();
         f &= !(flags::IF | flags::TF);
         machine.registers.set_flags(f);
-
-        // Переходим к обработчику
         machine.registers.set_cs(handler_cs);
         machine.registers.set_ip(handler_ip);
     }
@@ -754,4 +730,90 @@ pub(crate) fn insw(machine: &mut DosMachine, prev: &[u8]) {
     }
 
     machine.log_instruction(csip, &bytes).ok();
+}
+
+/// INT 3 — прерывание 3 (точка останова)
+pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec();
+    let vector: u8 = 3; // фиксированный вектор
+
+    let ivt_addr = (vector as u32) * 4;
+    let handler_ip = machine.read_phys_u16(ivt_addr);
+    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
+
+    if handler_cs == 0xF000 {
+        dispatch_internal_interrupt(machine, vector);
+    } else {
+        // Переход к обработчику в программе
+        let mut sp = machine.registers.sp();
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
+        machine.write_u16(machine.registers.ss(), sp, machine.registers.flags());
+
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
+        machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
+
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
+        machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
+
+        let mut f = machine.registers.flags();
+        f &= !(flags::IF | flags::TF);
+        machine.registers.set_flags(f);
+
+        machine.registers.set_cs(handler_cs);
+        machine.registers.set_ip(handler_ip);
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+fn dispatch_internal_interrupt(machine: &mut DosMachine, vector: u8) {
+    match vector {
+        0x08 => bios::handle_int08(machine),
+        0x10 => bios::handle_int10(machine),
+        0x15 => bios::handle_int15(machine),
+        0x16 => bios::handle_int16(machine),
+        0x1A => bios::handle_int1a(machine),
+        0x1C => log::info!("INT 1Ch (User Timer) called"),
+        0x20 => machine.halted = true,
+        0x21 => dos::handle_int21(machine),
+        0x2F => dos::handle_int2f(machine),
+        0x67 => ems::handle_int67(machine),
+        _ => {
+            log::error!(
+                "Unhandled internal interrupt INT {:02X} at CS:IP={:04X}:{:04X}",
+                vector,
+                machine.registers.cs(),
+                machine.registers.ip()
+            );
+            machine.halted = true;
+        }
+    }
+}
+
+pub(crate) fn call_interrupt(machine: &mut DosMachine, vector: u8) {
+    let ivt_addr = (vector as u32) * 4;
+    let handler_ip = machine.read_phys_u16(ivt_addr);
+    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
+
+    if handler_cs == 0xF000 {
+        crate::instructions::system::dispatch_internal_interrupt(machine, vector);
+    } else {
+        let sp = machine.registers.sp() as u32;
+        let base = (machine.registers.ss() as u32) << 4;
+        machine.registers.set_sp((sp.wrapping_sub(6) & 0xFFFF) as u16);
+        let new_sp = machine.registers.sp() as u32;
+        machine.write_phys_u16(base.wrapping_add(new_sp), machine.registers.flags());
+        machine.write_phys_u16(base.wrapping_add(new_sp.wrapping_add(2)), machine.registers.cs());
+        machine.write_phys_u16(base.wrapping_add(new_sp.wrapping_add(4)), machine.registers.ip());
+
+        let mut f = machine.registers.flags();
+        f &= !(flags::IF | flags::TF);
+        machine.registers.set_flags(f);
+        machine.registers.set_cs(handler_cs);
+        machine.registers.set_ip(handler_ip);
+    }
 }
