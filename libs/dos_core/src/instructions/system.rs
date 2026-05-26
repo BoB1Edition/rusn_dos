@@ -741,7 +741,6 @@ pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
     let ivt_addr = (vector as u32) * 4;
     let handler_ip = machine.read_phys_u16(ivt_addr);
     let handler_cs = machine.read_phys_u16(ivt_addr + 2);
-
     if handler_cs == 0xF000 {
         dispatch_internal_interrupt(machine, vector);
     } else {
@@ -774,6 +773,7 @@ fn dispatch_internal_interrupt(machine: &mut DosMachine, vector: u8) {
     match vector {
         0x08 => bios::handle_int08(machine),
         0x10 => bios::handle_int10(machine),
+        0x12 => bios::handle_int12(machine),
         0x15 => bios::handle_int15(machine),
         0x16 => bios::handle_int16(machine),
         0x1A => bios::handle_int1a(machine),

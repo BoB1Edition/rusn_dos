@@ -90,7 +90,7 @@ pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .expect("Failed to resolve memory address in CALL r/m16");
-        log::debug!(
+        log::trace!(
     "CALL [0x{:04X}] DS={:04X} (phys=0x{:05X})",
     0x01EC, // или динамически из disp
     machine.registers.ds(),
@@ -99,10 +99,10 @@ pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
 // Вставьте в call_rm16 перед let val = machine.read_phys_u16(addr);
 let dump_start = addr.saturating_sub(16);
 let dump_end = addr.saturating_add(16);
-log::debug!("MEMORY DUMP [{:#05X}-{:#05X}]:", dump_start, dump_end);
+log::trace!("MEMORY DUMP [{:#05X}-{:#05X}]:", dump_start, dump_end);
 for a in dump_start..=dump_end {
     let byte = machine.read_phys_u8(a);
-    log::debug!("  [{:#05X}] = {:#02X} ({})", a, byte, if byte >= 32 && byte < 127 { byte as char } else { '.' });
+    log::trace!("  [{:#05X}] = {:#02X} ({})", a, byte, if byte >= 32 && byte < 127 { byte as char } else { '.' });
 }
         let val = machine.read_phys_u16(addr);
         log::trace!(
@@ -170,8 +170,6 @@ pub(crate) fn jmp_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.read_phys_u16(addr)
     };
     if target_ip == 0 {
@@ -843,5 +841,24 @@ pub(crate) fn retn_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_sp(new_sp);
     machine.registers.set_ip(ip);
 
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// JNO rel8 — Jump if Not Overflow (OF=0)
+pub(crate) fn jno_rel8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+
+    let of = (machine.registers.flags() & (crate::flags::OF)) != 0;
+    if !of {
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel8 as i32) as u16;
+        machine.registers.set_ip(new_ip);
+    }
     machine.log_instruction(csip, &bytes).ok();
 }

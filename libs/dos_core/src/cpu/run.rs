@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/cpu/run.rs
+// Ver: 2 File: ./libs/dos_core/src/cpu/run.rs
 
 use crate::{DosMachine, cpu::execute_0f::execute_0f, executor::execute, video};
 use std::error::Error;
@@ -12,6 +12,21 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
     while !machine.halted {
         let opcode = machine.read_instr_u8(machine.registers.ip());
         machine.registers.step(None);
+
+        if machine.registers.cs() == 0x1000
+            && machine.registers.ip() >= 0x3F0
+            && machine.registers.ip() <= 0x410
+        {
+            log::trace!(
+                "CODE DUMP @1000:{:04X}: {:02X} {:02X} {:02X} {:02X} | DI={:04X}",
+                machine.registers.ip(),
+                machine.read_instr_u8(machine.registers.ip()),
+                machine.read_instr_u8(machine.registers.ip().wrapping_add(1)),
+                machine.read_instr_u8(machine.registers.ip().wrapping_add(2)),
+                machine.read_instr_u8(machine.registers.ip().wrapping_add(3)),
+                machine.registers.di()
+            );
+        }
 
         match opcode {
             0x0F => machine.has_extended_prefix = true,
@@ -83,7 +98,9 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
         }
         tick_counter += 1;
         if tick_counter >= 65536 {
-            crate::instructions::system::call_interrupt(machine, 0x08);
+            if crate::flags::test_if(machine.registers.flags()) {
+                crate::instructions::system::call_interrupt(machine, 0x08);
+            }
             tick_counter = 0;
         }
     }

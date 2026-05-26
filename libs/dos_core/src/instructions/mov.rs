@@ -289,7 +289,7 @@ pub(crate) fn mov_address_ax(machine: &mut DosMachine, prev: &[u8]) {
     machine.write_u16(segment, offset, machine.registers.ax());
 
     let phys = ((segment as u32) << 4).wrapping_add(offset as u32);
-    log::debug!(
+    log::trace!(
         "MOV [addr], AX: seg={:#04x}, offset={:#04x}, phys={:#06x}, a20={}",
         segment,
         offset,

@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/machine.rs
+// Ver: 3 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -46,6 +46,7 @@ pub struct DosMachine {
     pub(crate) gdtr_base: u32,
     pub(crate) idtr_limit: u16,
     pub(crate) idtr_base: u32,
+    pub(crate) first_mcb_segment: u16,
 }
 
 impl DosMachine {
@@ -264,6 +265,17 @@ impl DosMachine {
     #[inline(always)]
     pub fn read_phys_u8(&self, addr: u32) -> u8 {
         let masked = self.apply_a20_mask(addr);
+        if masked >= 0xA0000 && masked < 0xC0000 {
+            if self.video.mode == VideoMode::Mode13h && masked < 0xA0000 + 320 * 200 {
+                if let Some(fb) = &self.video.framebuffer {
+                    let video_offset = (masked - 0xA0000) as usize;
+                    if video_offset < fb.data.len() {
+                        return fb.data[video_offset];
+                    }
+                }
+            }
+            return 0;
+        }
         self.memory.read_u8(masked)
     }
 
@@ -304,6 +316,7 @@ impl DosMachine {
                     }
                 }
             }
+            return;
         }
 
         if masked < self.memory.len() as u32 {
@@ -374,6 +387,7 @@ impl DosMachine {
             gdtr_base: 0,
             idtr_limit: 0xFFFF,
             idtr_base: 0,
+            first_mcb_segment: 0x60,
         }
     }
 
@@ -383,24 +397,6 @@ impl DosMachine {
 
     #[inline(always)]
     pub(crate) fn apply_a20_mask(&self, addr: u32) -> u32 {
-        /*if addr >= 0x0FFFF0 {
-            log::debug!(
-                "A20 MASK: raw={:#x}, enabled={}, result={:#x}",
-                addr,
-                self.a20_enabled,
-                if self.a20_enabled {
-                    addr.min(0x10FFFF)
-                } else {
-                    addr & 0xFFFFF
-                }
-            );
-        }
-
-        if self.a20_enabled {
-            addr.min(0x10FFFF)
-        } else {
-            addr & 0xFFFFF
-        }*/
         if !self.a20_enabled {
             return addr & 0xFFFFF; // A20 OFF: сбрасываем 20-й бит (wrap-around на 1MB)
         }

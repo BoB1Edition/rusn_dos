@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
@@ -284,42 +284,35 @@ pub(crate) fn sub_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
 
-    if modrm.is_register_mode() {
-        let src_val = machine.read_reg16(modrm.reg_field);
-        let dst_val = machine.read_reg16(modrm.rm_field);
-        let result = dst_val.wrapping_sub(src_val);
-        let cf = dst_val < src_val;
-        let af = (dst_val & 0x0F) < (src_val & 0x0F);
-        let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-        machine.write_reg16(modrm.rm_field, result);
-        machine.registers.set_flags(flags::compute_flags_u16(
-            machine.registers.flags(),
-            result,
-            cf,
-            of,
-            af,
-        ));
+    // Источник – r/m16 (регистр или память)
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)   // регистр-источник
     } else {
-        // [NEW] Путь для памяти
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
-        let src_val = machine.read_reg16(modrm.reg_field);
-        let dst_val = machine.read_phys_u16(addr);
-        let result = dst_val.wrapping_sub(src_val);
-        let cf = dst_val < src_val;
-        let af = (dst_val & 0x0F) < (src_val & 0x0F);
-        let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
-        machine.write_phys_u16(addr, result);
-        machine.registers.set_flags(flags::compute_flags_u16(
-            machine.registers.flags(),
-            result,
-            cf,
-            of,
-            af,
-        ));
-    }
+        machine.read_phys_u16(addr)           // память-источник
+    };
+
+    // Приёмник – регистр из reg_field
+    let dst_reg = modrm.reg_field;
+    let dst_val = machine.read_reg16(dst_reg);
+
+    let result = dst_val.wrapping_sub(src_val);
+    let cf = dst_val < src_val;
+    let af = (dst_val & 0x0F) < (src_val & 0x0F);
+    let of = (((dst_val ^ src_val) & 0x8000) != 0) && (((dst_val ^ result) & 0x8000) != 0);
+
+    machine.write_reg16(dst_reg, result);
+    machine.registers.set_flags(flags::compute_flags_u16(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -812,5 +805,133 @@ pub(crate) fn adc_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
 
     machine.write_reg16(dst_reg, result);
     machine.registers.set_flags(flags::compute_flags_u16(machine.registers.flags(), result, new_cf, new_of, new_af));
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub fn sbb_r16_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // источник: r/m16
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr)
+    };
+
+    let dst_reg = modrm.reg_field;
+    let dst_val = machine.read_reg16(dst_reg);
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+    let borrow = if cf_in { 1u32 } else { 0u32 };
+
+    let result = (dst_val as u32).wrapping_sub(src_val as u32 + borrow) as u16;
+    let new_cf = (dst_val as u32) < (src_val as u32 + borrow);
+    let new_af = (dst_val & 0x0F) < ((src_val & 0x0F) + borrow as u16);
+    let new_of = ((dst_val ^ src_val) & 0x8000) != 0 && ((dst_val ^ result) & 0x8000) != 0;
+
+    machine.write_reg16(dst_reg, result);
+    machine.registers.set_flags(flags::compute_flags_u16(machine.registers.flags(), result, new_cf, new_of, new_af));
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// SUB r/m16, r16 (опкод 0x29)
+pub(crate) fn sub_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg16(modrm.reg_field);
+
+    if modrm.is_register_mode() {
+        // Приёмник — регистр
+        let dst_val = machine.read_reg16(modrm.rm_field);
+        let result = dst_val.wrapping_sub(src_val);
+        let cf = dst_val < src_val;
+        let af = (dst_val & 0x0F) < (src_val & 0x0F);
+        let of = ((dst_val ^ src_val) & 0x8000) != 0 && ((dst_val ^ result) & 0x8000) != 0;
+        machine.write_reg16(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_flags_u16(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
+    } else {
+        // Приёмник — память
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u16(addr);
+        let result = dst_val.wrapping_sub(src_val);
+        let cf = dst_val < src_val;
+        let af = (dst_val & 0x0F) < (src_val & 0x0F);
+        let of = ((dst_val ^ src_val) & 0x8000) != 0 && ((dst_val ^ result) & 0x8000) != 0;
+        machine.write_phys_u16(addr, result);
+        machine.registers.set_flags(flags::compute_flags_u16(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// CMP r/m16, r16 (опкод 0x39)
+pub(crate) fn cmp_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg16(modrm.reg_field);
+
+    // Приёмник (r/m16) — читаем, но не сохраняем
+    let dst_val = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u16(addr)
+    };
+
+    let result = dst_val.wrapping_sub(src_val);
+    let cf = dst_val < src_val;
+    let af = (dst_val & 0x0F) < (src_val & 0x0F);
+    let of = ((dst_val ^ src_val) & 0x8000) != 0 && ((dst_val ^ result) & 0x8000) != 0;
+
+    machine.registers.set_flags(flags::compute_flags_u16(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
     machine.log_instruction(csip, &bytes).ok();
 }

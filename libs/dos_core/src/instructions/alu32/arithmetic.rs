@@ -498,3 +498,124 @@ pub fn adc_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, new_cf, new_of, new_af));
     machine.log_instruction(csip, &bytes).ok();
 }
+
+pub fn sbb_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field)
+    } else {
+        let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u32(addr)
+    };
+
+    let dst_reg = modrm.reg_field;
+    let dst_val = machine.read_reg32(dst_reg);
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+    let borrow = if cf_in { 1u64 } else { 0u64 };
+
+    let result = (dst_val as u64).wrapping_sub(src_val as u64 + borrow) as u32;
+    let new_cf = (dst_val as u64) < (src_val as u64 + borrow);
+    let new_af = (dst_val & 0x0F) < ((src_val & 0x0F) + borrow as u32);
+    let new_of = ((dst_val ^ src_val) & 0x8000_0000) != 0 && ((dst_val ^ result) & 0x8000_0000) != 0;
+
+    machine.write_reg32(dst_reg, result);
+    machine.registers.set_flags(flags::compute_flags_u32(machine.registers.flags(), result, new_cf, new_of, new_af));
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// SUB r/m32, r32 (опкод 0x29 с префиксом 0x66)
+pub(crate) fn sub_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = machine.read_reg32(modrm.reg_field);
+
+    if modrm.is_register_mode() {
+        let dst_val = machine.read_reg32(modrm.rm_field);
+        let result = dst_val.wrapping_sub(src_val);
+        let cf = dst_val < src_val;
+        let af = (dst_val & 0x0F) < (src_val & 0x0F);
+        let of = ((dst_val ^ src_val) & 0x8000_0000) != 0 && ((dst_val ^ result) & 0x8000_0000) != 0;
+        machine.write_reg32(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        let dst_val = machine.read_phys_u32(addr);
+        let result = dst_val.wrapping_sub(src_val);
+        let cf = dst_val < src_val;
+        let af = (dst_val & 0x0F) < (src_val & 0x0F);
+        let of = ((dst_val ^ src_val) & 0x8000_0000) != 0 && ((dst_val ^ result) & 0x8000_0000) != 0;
+        machine.write_phys_u32(addr, result);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// CMP r/m32, r32 (опкод 0x39 с префиксом 0x66)
+pub(crate) fn cmp_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let src_val = machine.read_reg32(modrm.reg_field);
+    let dst_val = if modrm.is_register_mode() {
+        machine.read_reg32(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u32(addr)
+    };
+
+    let result = dst_val.wrapping_sub(src_val);
+    let cf = dst_val < src_val;
+    let af = (dst_val & 0x0F) < (src_val & 0x0F);
+    let of = ((dst_val ^ src_val) & 0x8000_0000) != 0 && ((dst_val ^ result) & 0x8000_0000) != 0;
+
+    machine.registers.set_flags(flags::compute_flags_u32(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
+    machine.log_instruction(csip, &bytes).ok();
+}

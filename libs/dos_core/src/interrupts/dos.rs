@@ -1,16 +1,22 @@
-// Ver: 1 File: ./libs/dos_core/src/interrupts/dos.rs
+// Ver: 4 File: ./libs/dos_core/src/interrupts/dos.rs
 //! Обработка прерываний DOS (INT 21h, INT 2Fh)
 //! Содержит реализацию основных функций DOS API
 
-use crate::{DosMachine, flags};
+use crate::{DosMachine, flags, mcb};
 use log::error;
 use std::io::{Read, Write};
 
 /// Обработчик прерывания INT 21h (основное DOS API)
 pub fn handle_int21(machine: &mut DosMachine) {
-    log::debug!("int 21");
     log::info!("int 21: {:#02x}", machine.registers.ah());
     match machine.registers.ah() {
+        0x00 => {
+            log::info!(
+                "Program terminated via INT 21h AH=00h, exit code={}",
+                machine.registers.al()
+            );
+            machine.halted = true;
+        }
         0x01 => read_char_with_echo(machine),
         0x02 => print_char(machine),
         0x06 => direct_console_io(machine),
@@ -32,9 +38,20 @@ pub fn handle_int21(machine: &mut DosMachine) {
         0x42 => seek_file(machine),  // Перемещение указателя
         0x43 => file_attributes(machine),
         0x47 => get_current_directory(machine),
-        0x4A => adjust_memory_block(machine),
+        0x48 => allocate_memory_handler(machine),
+        0x49 => free_memory_handler(machine),
+        0x4A => modify_memory_handler(machine),
         0x4C => machine.halted = true,
-        _ => panic!("Unsupported DOS call AH={:#02x}", machine.registers.ah()),
+        _ => {
+        log::warn!("Unsupported DOS call 21h/{:02X}h at CS:IP={:04X}:{:04X}",
+                machine.registers.ah(),
+                machine.registers.cs(),
+                machine.registers.ip()
+            );
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(0x0001);
+            machine.halted = true
+        }
     }
 }
 
@@ -110,7 +127,7 @@ fn print_dos_string(machine: &DosMachine) {
 }
 
 /// AH=4Ah — изменение размера блока памяти
-fn adjust_memory_block(machine: &mut DosMachine) {
+/*fn adjust_memory_block(machine: &mut DosMachine) {
     let requested_paragraphs = machine.registers.bx();
     const MAX_CONVENTIONAL_MEMORY_PARAGRAPHS: u16 = 0xA000; // 640 КБ = 0xA000 параграфов
 
@@ -127,7 +144,7 @@ fn adjust_memory_block(machine: &mut DosMachine) {
         machine.registers.set_ax(0x08); // Код ошибки: недостаточно памяти
         machine.registers.set_bx(0xA000);
     }
-}
+}*/
 
 fn read_char_with_echo(machine: &mut DosMachine) {
     let mut buffer = [0u8; 1];
@@ -142,22 +159,6 @@ fn read_char_with_echo(machine: &mut DosMachine) {
     let mut flags = machine.registers.flags();
     flags &= !(flags::ZF); // ZF = 0
     machine.registers.set_flags(flags);
-}
-
-fn extract_filename(machine: &DosMachine) -> String {
-    let ds = machine.registers.ds();
-    let dx = machine.registers.dx();
-
-    let mut bytes = Vec::new();
-    for i in 0..255 {
-        let byte = machine.read_u8(ds, dx.wrapping_add(i as u16));
-        if byte == 0 {
-            break;
-        }
-        bytes.push(byte);
-    }
-
-    String::from_utf8_lossy(&bytes).to_string()
 }
 
 fn set_carry_flag(machine: &mut DosMachine, value: bool) {
@@ -439,4 +440,45 @@ fn get_current_directory(machine: &mut DosMachine) {
 fn get_current_drive(machine: &mut DosMachine) {
     machine.registers.set_al(2); // Диск C:
     log::info!("INT 21h / AH=19h: Get current drive -> C:");
+}
+
+fn allocate_memory_handler(machine: &mut DosMachine) {
+    let paragraphs = machine.registers.bx();
+    let first_seg = machine.first_mcb_segment;
+    match mcb::allocate(machine, first_seg, paragraphs) {
+        Some(segment) => {
+            machine.registers.set_ax(segment);
+            set_carry_flag(machine, false);
+        }
+        None => {
+            let max = mcb::max_available(machine, first_seg);
+            machine.registers.set_ax(0x08);
+            machine.registers.set_bx(max);
+            set_carry_flag(machine, true);
+        }
+    }
+}
+
+fn free_memory_handler(machine: &mut DosMachine) {
+    let segment = machine.registers.es();
+    match mcb::free(machine, machine.first_mcb_segment, segment) {
+        Ok(()) => set_carry_flag(machine, false),
+        Err(code) => {
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(code);
+        }
+    }
+}
+
+fn modify_memory_handler(machine: &mut DosMachine) {
+    let segment = machine.registers.es();
+    let new_paragraphs = machine.registers.bx();
+    match mcb::modify(machine, machine.first_mcb_segment, segment, new_paragraphs) {
+        Ok(_) => set_carry_flag(machine, false),
+        Err(max) => {
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(0x08);
+            machine.registers.set_bx(max);
+        }
+    }
 }

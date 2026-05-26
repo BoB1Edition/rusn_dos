@@ -87,42 +87,26 @@ impl ExeLoader {
         }
 
         let loaded_len = code_data.len();
-let bss_paragraphs = self.header.e_minep as usize; // или e_maxep
-if bss_paragraphs > 0 {
-    let bss_start = code_base + loaded_len as u32;
-    let bss_size = bss_paragraphs * 16;
-    for i in 0..bss_size {
-        if (bss_start as usize + i) < memory.len() {
-            memory.write_u8(bss_start + i as u32, 0);
+        let bss_paragraphs = self.header.e_minep as usize; // или e_maxep
+        if bss_paragraphs > 0 {
+            let bss_start = code_base + loaded_len as u32;
+            let bss_size = bss_paragraphs * 16;
+            for i in 0..bss_size {
+                if (bss_start as usize + i) < memory.len() {
+                    memory.write_u8(bss_start + i as u32, 0);
+                }
+            }
         }
-    }
-}
-log::info!(
-    "EXE load: file_size={}, header_size={}, code_data_len={}, expected_offset=0x274C",
-    self.data.len(),
-    header_size,
-    code_data.len(),
-);
-if code_data.len() <= 0x274C {
-    log::warn!("File does not contain data at header-relative offset 0x274C!");
-}
-let check_addr = 0x1274C;
-let expected_offset_in_file = 0x27AC;
-let file_byte_0 = self.data[expected_offset_in_file as usize];
-let file_byte_1 = self.data[(expected_offset_in_file + 1) as usize];
-let mem_byte_0 = memory.read_u8(check_addr);
-let mem_byte_1 = memory.read_u8(check_addr + 1);
+        log::info!(
+            "EXE load: file_size={}, header_size={}, code_data_len={}, expected_offset=0x274C",
+            self.data.len(),
+            header_size,
+            code_data.len(),
+        );
+        if code_data.len() <= 0x274C {
+            log::warn!("File does not contain data at header-relative offset 0x274C!");
+        }
 
-log::debug!(
-    "COPY VERIFY: file[{:#04X}]={:02X}{:02X} → mem[{:#05X}]={:02X}{:02X}",
-    expected_offset_in_file,
-    file_byte_1, file_byte_0,  // little-endian display
-    check_addr,
-    mem_byte_1, mem_byte_0
-);
-if file_byte_0 != mem_byte_0 || file_byte_1 != mem_byte_1 {
-    log::error!("COPY MISMATCH at {:#05X}!", check_addr);
-}
         // 4. Применяем релокации
         self.apply_relocations(&mut memory, LOAD_SEGMENT);
 
@@ -135,6 +119,9 @@ if file_byte_0 != mem_byte_0 || file_byte_1 != mem_byte_1 {
 
         // 5. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
+        //machine.first_mcb_segment = 0x1000;
+        let first_mcb_segment = machine.first_mcb_segment;
+        crate::mcb::init_memory_map(&mut machine, first_mcb_segment);
         init_ivt(&mut machine);
         let cs = LOAD_SEGMENT.wrapping_add(self.header.cs);
         let ip = self.header.ip;
@@ -213,10 +200,14 @@ if file_byte_0 != mem_byte_0 || file_byte_1 != mem_byte_1 {
         let psp_base = segment as u32 * 16;
         memory.write_u8(psp_base, 0xCD);
         memory.write_u8(psp_base + 1, 0x20);
-        memory.write_u8(psp_base + 2, 0x00); // 640 КБ = 0xA000 параграфов
-        memory.write_u8(psp_base + 3, 0xA0);
+        memory.write_u16(psp_base + 0x02, 0x00F0);
         memory.write_u8(psp_base + 5, 0xCD);
         memory.write_u8(psp_base + 6, 0x21);
         memory.write_u8(psp_base + 7, 0xCB);
+        memory.write_u8(psp_base + 8, 0x00);
+        memory.write_u8(psp_base + 9, 0x00);
+
+        // 0x2C: Сегмент окружения (Environment) - обычно PSP + 16
+        memory.write_u16(psp_base + 0x2C, segment.wrapping_add(0x10));
     }
 }

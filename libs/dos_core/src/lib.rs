@@ -13,6 +13,7 @@ mod consts;
 mod modrm;
 mod instructions;
 mod interrupts;
+mod mcb;
 pub mod loader;
 pub mod filesystem;
 pub mod video;

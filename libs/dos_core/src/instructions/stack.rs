@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/stack.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/stack.rs
 use crate::{machine::DosMachine, modrm::ModRm, pop_reg16, push_reg16};
 
 pub(crate) fn push_cs(machine: &mut DosMachine) {
@@ -20,7 +20,9 @@ pub(crate) fn push_es(machine: &mut DosMachine) {
     machine.write_u16(machine.registers.ss(), machine.registers.sp(), es);
 }
 
-pub(crate) fn pushf(machine: &mut DosMachine) {
+pub(crate) fn pushf(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec();
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_sub(2));
@@ -29,6 +31,7 @@ pub(crate) fn pushf(machine: &mut DosMachine) {
         machine.registers.sp(),
         machine.registers.flags(),
     );
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 /*pub(crate) fn pop_ds(machine: &mut DosMachine) {
@@ -39,12 +42,15 @@ pub(crate) fn pushf(machine: &mut DosMachine) {
     machine.registers.set_ds(ds);
 }
 */
-pub(crate) fn popf(machine: &mut DosMachine) {
+pub(crate) fn popf(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec();
     let flags = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_add(2));
     machine.registers.set_flags(flags);
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 pub(crate) fn pop_fs(machine: &mut DosMachine) {
@@ -387,4 +393,29 @@ pub(crate) fn pop_ds(machine: &mut DosMachine) {
     machine.registers.set_sp(sp.wrapping_add(2));
     machine.registers.set_ds(ds);
     machine.log_instruction(csip, &[0x1F]).ok();
+}
+
+/// PUSHFD – сохранить 32-битный EFLAGS в стек
+pub(crate) fn pushfd(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let mut bytes = prev.to_vec();
+    bytes.push(0x9C); // опкод
+    let eflags = machine.registers.eflags(); // потребуется добавить метод eflags()
+    let new_esp = machine.registers.esp().wrapping_sub(4);
+    machine.registers.set_esp(new_esp);
+    let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_esp);
+    machine.write_phys_u32(phys_addr, eflags);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// POPFD – восстановить 32-битный EFLAGS из стека
+pub(crate) fn popfd(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec();
+    let esp = machine.registers.esp();
+    let phys_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(esp);
+    let eflags = machine.read_phys_u32(phys_addr);
+    machine.registers.set_esp(esp.wrapping_add(4));
+    machine.registers.set_eflags(eflags);
+    machine.log_instruction(csip, &bytes).ok();
 }

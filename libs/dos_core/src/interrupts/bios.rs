@@ -163,3 +163,13 @@ pub(crate) fn handle_int08(machine: &mut DosMachine) {
     machine.out_imm8_al(0x20, 0x20);
     log::info!("INT 8h (IRQ0) handled");
 }
+
+pub(crate) fn handle_int12(machine: &mut DosMachine) {
+    // Возвращаем размер непрерывной low memory в КБ (стандартно 640 КБ)
+    let memory_kb = 640u16;
+    machine.registers.set_ax(memory_kb);
+    let mut flags = machine.registers.flags();
+    flags &= !(flags::CF); // CF=0 (успех)
+    machine.registers.set_flags(flags);
+    log::info!("INT 12h: Returned low memory size = {} KB", memory_kb);
+}

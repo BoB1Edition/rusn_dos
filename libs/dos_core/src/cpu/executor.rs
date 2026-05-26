@@ -1,16 +1,16 @@
-// Ver: 1 File: ./libs/dos_core/src/cpu/executor.rs
+// Ver: 4 File: ./libs/dos_core/src/cpu/executor.rs
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
 use crate::{
+    cpu::{adc, and, execute::add, jumps, or, sbb, stack, sub, xor},
     dispatch_op32, flags,
     instructions::{
-        alu, alu32, bcd, control, control32, exchange, extended, extended32, incs, mov, mov32,
-        segment, stack, system,
+        alu, alu32, bcd, control, control32, exchange, incs, mov, mov32, segment, stack, system,
     },
     machine::DosMachine,
     modrm::ModRm,
-    push_reg16, video,
+    video,
 };
 
 /*struct DebugLog {
@@ -73,112 +73,23 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         machine.registers.ip() - full_bytes.len() as u16,
     ];
     match opcode {
-        0x00 => alu::add_rm8_r8(machine, &full_bytes),
-        0x01 => dispatch_op32!(
-            machine,
-            alu32::add_rm32_r32(machine, &full_bytes),
-            alu::add_rm16_r16(machine, &full_bytes)
-        ),
-        0x02 => alu::add_r8_rm8(machine, &full_bytes),
-        0x03 => dispatch_op32!(
-            machine,
-            alu32::add_r32_rm32(machine, &full_bytes),
-            alu::add_r16_rm16(machine, &full_bytes)
-        ),
-        0x04 => alu::add_al_imm8(machine, &full_bytes),
-        0x05 => dispatch_op32!(
-            machine,
-            alu32::add_eax_imm32(machine, &full_bytes),
-            alu::add_ax_imm16(machine, &full_bytes)
-        ),
-        0x06 => {
-            stack::push_es(machine);
-            machine.log_instruction(csip, &full_bytes).ok();
+        0x00..=0x05 => add(opcode, machine, &full_bytes),
+        0x06..=0x07 | 0x0E | 0x1E..=0x1F | 0x50..=0x5F | 0x68 | 0x8F | 0x9C..=0x9D => {
+            stack(opcode, machine, &full_bytes)
         }
-        0x07 => {
-            machine.log_instruction(csip, &full_bytes).ok();
-            stack::pop_es(machine);
-        }
-        0x08 => alu::or_rm8_r8(machine, &full_bytes),
-        0x09 => dispatch_op32!(
-            machine,
-            alu32::or_rm32_r32(machine, &full_bytes),
-            alu::or_rm16_r16(machine, &full_bytes)
-        ),
-        0x0A => alu::or_r8_rm8(machine, &full_bytes),
-        0x0B => dispatch_op32!(
-            machine,
-            alu32::or_r32_rm32(machine, &full_bytes),
-            alu::or_r16_rm16(machine, &full_bytes)
-        ),
-        0x0C => alu::or_al_imm8(machine, &full_bytes),
-        0x0D => dispatch_op32!(
-            machine,
-            alu32::or_eax_imm32(machine, &full_bytes),
-            alu::or_ax_imm16(machine, &full_bytes)
-        ),
-        0x0E => {
-            machine.log_instruction(csip, &full_bytes).ok();
-            stack::push_cs(machine);
-        }
-        0x10 => alu::adc_rm8_r8(machine, &full_bytes),
-        0x11 => dispatch_op32!(
-            machine,
-            alu32::adc_rm32_r32(machine, &full_bytes),
-            alu::adc_rm16_r16(machine, &full_bytes)
-        ),
-        0x13 => dispatch_op32!(
-            machine,
-            alu32::adc_r32_rm32(machine, &full_bytes),
-            alu::adc_r16_rm16(machine, &full_bytes)
-        ),
-        0x18 => alu::sbb_rm8_r8(machine, &full_bytes),
-        0x19 => dispatch_op32!(
-            machine,
-            alu32::sbb_rm32_r32(machine, &full_bytes),
-            alu::sbb_rm16_r16(machine, &full_bytes)
-        ),
-        0x1E => {
-            machine.log_instruction(csip, &full_bytes).ok();
-            stack::push_ds(machine);
-        }
-        0x1F => {
-            machine.log_instruction(csip, &full_bytes).ok();
-            stack::pop_ds(machine);
-        }
-        0x20 => alu::and_rm8_r8(machine, &full_bytes),
-        0x21 => dispatch_op32!(
-            machine,
-            alu32::and_rm32_r32(machine, &full_bytes),
-            alu::and_rm16_r16(machine, &full_bytes)
-        ),
-        0x23 => dispatch_op32!(
-            machine,
-            alu32::and_r32_rm32(machine, &full_bytes),
-            alu::and_r16_rm16(machine, &full_bytes)
-        ),
-        0x24 => alu::and_al_imm8(machine, &full_bytes),
-        0x2A => alu::sub_r8_rm8(machine, &full_bytes), // 8-битный вариант
-        0x2B => dispatch_op32!(
-            machine,
-            alu32::sub_r32_rm32(machine, &full_bytes),
-            alu::sub_r16_rm16(machine, &full_bytes)
-        ),
-        0x2C => alu::sub_al_imm8(machine, &full_bytes),
+        0x08..=0x0D => or(opcode, machine, &full_bytes),
+        0x10..=0x11 | 0x13 => adc(opcode, machine, &full_bytes),
+        0x18..=0x19 | 0x1B => sbb(opcode, machine, &full_bytes),
+        0x20..=0x21 | 0x23..=0x24 => and(opcode, machine, &full_bytes),
+        0x29 | 0x2A..=0x2C => sub(opcode, machine, &full_bytes),
         0x2F => bcd::das(machine, &full_bytes),
-        0x30 => alu::xor_rm8_r8(machine, &full_bytes),
-        0x31 => dispatch_op32!(
-            machine,
-            alu32::xor_rm32_r32(machine, &full_bytes),
-            alu::xor_rm16_r16(machine, &full_bytes)
-        ),
-        0x32 => alu::xor_r8_rm(machine, &full_bytes),
-        0x33 => dispatch_op32!(
-            machine,
-            alu32::xor_r32_rm32(machine, &full_bytes),
-            alu::xor_r16_rm16(machine, &full_bytes)
-        ),
+        0x30..=0x33 => xor(opcode, machine, &full_bytes),
         0x38 => alu::cmp_rm8_r8(machine, &full_bytes),
+        0x39 => dispatch_op32!(
+            machine,
+            alu32::cmp_rm32_r32(machine, &full_bytes),
+            alu::cmp_rm16_r16(machine, &full_bytes)
+        ),
         0x3A => alu::cmp_r8_rm8(machine, &full_bytes),
         0x3B => dispatch_op32!(
             machine,
@@ -207,34 +118,12 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         0x4D => incs::dec_bp(machine, &full_bytes),
         0x4E => incs::dec_si(machine, &full_bytes),
         0x4F => incs::dec_di(machine, &full_bytes),
-        0x50 => stack::push_ax(machine, &full_bytes),
-        0x51 => stack::push_cx(machine, &full_bytes),
-        0x52 => stack::push_dx(machine, &full_bytes),
-        0x53 => stack::push_bx(machine, &full_bytes),
-        0x54 => stack::push_sp(machine, &full_bytes),
-        0x55 => stack::push_bp(machine, &full_bytes),
-        0x56 => stack::push_si(machine, &full_bytes),
-        0x57 => stack::push_di(machine, &full_bytes),
-        0x58 => stack::pop_ax(machine, &full_bytes),
-        0x59 => stack::pop_cx(machine, &full_bytes),
-        0x5A => stack::pop_dx(machine, &full_bytes),
-        0x5B => stack::pop_bx(machine, &full_bytes),
-        0x5C => stack::pop_sp(machine, &full_bytes),
-        0x5D => stack::pop_bp(machine, &full_bytes),
-        0x5E => stack::pop_si(machine, &full_bytes),
-        0x5F => stack::pop_di(machine, &full_bytes),
-        0x60 => dispatch_op32!(machine, stack::pushad(machine), stack::pusha(machine)),
-        0x61 => dispatch_op32!(machine, stack::popad(machine), stack::popa(machine)),
         0x62 => dispatch_op32!(
             machine,
             control32::bound_r32_rm32(machine, &full_bytes),
             control::bound_r16_rm16(machine, &full_bytes)
         ),
-        0x68 => dispatch_op32!(
-            machine,
-            stack::push_imm32(machine, &full_bytes),
-            stack::push_imm16(machine, &full_bytes)
-        ),
+
         0x69 => dispatch_op32!(
             machine,
             alu32::imul_r32_rm32_imm32(machine, &full_bytes),
@@ -301,18 +190,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                 );
             }
         }
-        0x70 => control::jo_rel8(machine, &full_bytes),
-        0x72 => control::jb(machine, &full_bytes),
-        0x73 => control::jae_rel8(machine, &full_bytes),
-        0x74 => control::jz(machine, &full_bytes),
-        0x75 => control::jne_rel8(machine, &full_bytes),
-        0x76 => control::jbe_rel8(machine, &full_bytes),
-        0x77 => control::ja(machine, &full_bytes),
-        0x79 => control::jns_rel8(machine, &full_bytes),
-        0x7C => control::jl_rel8(machine, &full_bytes),
-        0x7D => control::jge_rel8(machine, &full_bytes),
-        0x7E => control::jle_rel8(machine, &full_bytes),
-        0x7F => control::jg_rel8(machine, &full_bytes),
+        0x70..=0x7F => jumps(opcode, machine, &full_bytes),
         0x80 => alu::group_x80(machine, &full_bytes),
         0x81 => dispatch_op32!(
             machine,
@@ -354,9 +232,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             mov::lea_r16_rm16(machine, &full_bytes)
         ),
         0x8E => mov::mov_sreg_rm16(machine, &full_bytes),
-        0x8F => {
-            stack::pop_rm16(machine, &full_bytes);
-        }
         0x90 => system::nop(machine, &full_bytes),
         0x91 => dispatch_op32!(
             machine,
@@ -402,14 +277,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         ),
         0x9B => system::wait(machine, &full_bytes),
         0x9A => control::call_far(machine, &full_bytes),
-        0x9C => {
-            machine.log_instruction(csip, &full_bytes).ok();
-            stack::pushf(machine);
-        }
-        0x9D => {
-            machine.log_instruction(csip, &full_bytes).ok();
-            stack::popf(machine);
-        }
+
         0x9E => system::sahf(machine, &full_bytes),
         0x9F => system::lahf(machine, &full_bytes),
         0xA0 => {
@@ -700,6 +568,14 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             alu::test_ax_imm16(machine, &full_bytes)
         ),
         0xAA => {
+            if opcode == 0xAA && machine.has_rep_prefix {
+                log::trace!(
+                    "REP STOSB start: DI={:#04x}, CX={:#04x}, DF={}",
+                    machine.registers.di(),
+                    machine.registers.cx(),
+                    (machine.registers.flags() & flags::DF) != 0
+                );
+            }
             if machine.has_rep_prefix {
                 // REP STOSB: повторяем пока CX != 0
                 // Оптимизация: заливка всего экрана за один проход (если применимо)
@@ -779,8 +655,83 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                 mov::lodsb(machine, &full_bytes);
             }
         }
-        0xAE => mov::scasb(machine, &full_bytes),
-        0xAF => mov::scasw(machine, &full_bytes),
+        0xAE => {
+            if machine.has_rep_prefix {
+                let rep_prefix = machine.rep_prefix_type.unwrap_or(0);
+                if rep_prefix == 0xF3 {
+                    // REPE SCASB – повторять пока ZF=1 (равенство)
+                    while machine.registers.cx() != 0 {
+                        mov::scasb(machine, &full_bytes);
+                        let zf = (machine.registers.flags() & (flags::ZF)) != 0;
+                        if !zf {
+                            break;
+                        }
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
+                    }
+                } else if rep_prefix == 0xF2 {
+                    // REPNE SCASB – повторять пока ZF=0 (неравенство)
+                    while machine.registers.cx() != 0 {
+                        mov::scasb(machine, &full_bytes);
+                        let zf = (machine.registers.flags() & (flags::ZF)) != 0;
+                        if zf {
+                            break;
+                        }
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
+                    }
+                } else {
+                    // Обычный REP (просто повторять CX раз)
+                    while machine.registers.cx() != 0 {
+                        mov::scasb(machine, &full_bytes);
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
+                    }
+                }
+            } else {
+                mov::scasb(machine, &full_bytes);
+            }
+        }
+        0xAF => {
+            if machine.has_rep_prefix {
+                let rep_prefix = machine.rep_prefix_type.unwrap_or(0);
+                if rep_prefix == 0xF3 {
+                    while machine.registers.cx() != 0 {
+                        mov::scasw(machine, &full_bytes);
+                        let zf = (machine.registers.flags() & (flags::ZF)) != 0;
+                        if !zf {
+                            break;
+                        }
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
+                    }
+                } else if rep_prefix == 0xF2 {
+                    while machine.registers.cx() != 0 {
+                        mov::scasw(machine, &full_bytes);
+                        let zf = (machine.registers.flags() & (flags::ZF)) != 0;
+                        if zf {
+                            break;
+                        }
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
+                    }
+                } else {
+                    while machine.registers.cx() != 0 {
+                        mov::scasw(machine, &full_bytes);
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
+                    }
+                }
+            } else {
+                mov::scasw(machine, &full_bytes);
+            }
+        }
         0xB0 => mov::mov_al_imm8(machine, &full_bytes),
         0xB1 => mov::mov_cl_imm8(machine, &full_bytes),
         0xB2 => mov::mov_dl_imm8(machine, &full_bytes),

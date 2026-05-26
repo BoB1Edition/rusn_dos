@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/registers.rs
+// Ver: 2 File: ./libs/dos_core/src/registers.rs
 
 #[derive(Debug, Clone)]
 pub(crate) struct Registers {
@@ -17,7 +17,7 @@ pub(crate) struct Registers {
     ss: u16,
     fs: u16,
     gs: u16,
-    flags: u16,
+    eflags: u32,
 }
 
 impl Registers {
@@ -48,7 +48,7 @@ impl Default for Registers {
             ss: 0,
             fs: 0,
             gs: 0,
-            flags: 0x0002, // Бит 1 всегда 1 на 8086
+            eflags: 0x00000002, // Бит 1 всегда 1 на 8086
         }
     }
 }
@@ -295,7 +295,7 @@ impl Registers {
     }
 
     pub(crate) fn flags(&self) -> u16 {
-        self.flags
+        (self.eflags & 0xFFFF) as u16
     }
 
     pub(crate) fn set_cs(&mut self, cs: u16) {
@@ -315,8 +315,14 @@ impl Registers {
     }
 
     pub(crate) fn set_flags(&mut self, flags: u16) {
-        //self.flags = flags;
-        self.flags = flags | 0x0002;
+        self.eflags = (self.eflags & 0xFFFF_0000) | (flags as u32) | 0x2;
+    }
+
+    pub(crate) fn eflags(&self) -> u32 {
+        self.eflags
+    }
+    pub(crate) fn set_eflags(&mut self, eflags: u32) {
+        self.eflags = eflags;
     }
 
     pub(crate) fn fs(&self) -> u16 {
