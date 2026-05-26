@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
+// Ver: 3 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
 
 use crate::{DosMachine, flags, modrm::ModRm};
 
@@ -25,25 +25,13 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let af = ((dst & 0x0F) + (src & 0x0F)) > 0x0F;
         let of = (((dst ^ src) & 0x8000_0000) == 0) && ((dst ^ result) & 0x8000_0000) != 0;
         machine.write_reg32(modrm.rm_field, result);
-        // Установка флагов...
-        let mut flags = machine.registers.flags();
-        flags &= !(flags::CF | flags::AF | flags::ZF | flags::SF | flags::OF);
-        if result == 0 {
-            flags |= flags::ZF;
-        }
-        if (result & 0x8000_0000) != 0 {
-            flags |= flags::SF;
-        }
-        if cf {
-            flags |= flags::CF;
-        }
-        if of {
-            flags |= flags::OF;
-        }
-        if af {
-            flags |= flags::AF;
-        }
-        machine.registers.set_flags(flags);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
     } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b110 {
         // [disp16] — разрешено ТОЛЬКО если НЕТ 0x67
         if machine.has_address_size_prefix {
@@ -65,24 +53,14 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
             (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
         machine.write_phys_u32(phys_addr, result);
         // Установка флагов...
-        let mut flags = machine.registers.flags();
-        flags &= !(flags::CF | flags::AF | flags::ZF | flags::SF | flags::OF);
-        if result == 0 {
-            flags |= flags::ZF;
-        }
-        if (result & 0x8000_0000) != 0 {
-            flags |= flags::SF;
-        }
-        if cf {
-            flags |= flags::CF;
-        }
-        if of {
-            flags |= flags::OF;
-        }
-        if af {
-            flags |= flags::AF;
-        }
-        machine.registers.set_flags(flags);
+        machine.write_phys_u32(phys_addr, result);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
     } else {
         log::error!("Unsupported memory mode in ADD r/m32, r32");
         machine.halted = true;
