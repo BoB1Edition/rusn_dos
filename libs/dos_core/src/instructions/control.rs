@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/control.rs
+// Ver: 5 File: ./libs/dos_core/src/instructions/control.rs
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
@@ -6,7 +6,7 @@ pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    let mut bytes = prev.to_vec();
+    /*let mut bytes = prev.to_vec();
     let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
     bytes.extend_from_slice(&rel16.to_le_bytes());
     let _ = machine.log_instruction(csip, &bytes);
@@ -17,7 +17,25 @@ pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
         .set_sp(machine.registers.sp().wrapping_sub(2));
     machine.write_u16(machine.registers.ss(), machine.registers.sp(), return_ip);
     let new_ip = (return_ip as i32 + rel16 as i32) as u16;
+    machine.registers.set_ip(new_ip);*/
+    let mut bytes = prev.to_vec();
+    let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
+    bytes.extend_from_slice(&rel16.to_le_bytes());
+
+    let return_ip = machine.registers.ip().wrapping_add(2);
+
+    // x86: запись в стек только через SS физически
+    let stack_addr = ((machine.registers.ss() as u32) << 4)
+        .wrapping_add(machine.registers.sp().wrapping_sub(2) as u32);
+    machine.write_phys_u16(stack_addr, return_ip);
+    machine
+        .registers
+        .set_sp(machine.registers.sp().wrapping_sub(2));
+
+    let new_ip = (return_ip as i32 + rel16 as i32) as u16;
     machine.registers.set_ip(new_ip);
+
+    machine.log_instruction(csip, &bytes).ok();
 }
 
 pub(crate) fn retn(machine: &mut DosMachine, prev: &[u8]) {
@@ -25,12 +43,22 @@ pub(crate) fn retn(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    let _ = machine.log_instruction(csip, prev);
+    /*let _ = machine.log_instruction(csip, prev);
     let ip = machine.read_u16(machine.registers.ss(), machine.registers.sp());
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_add(2));
+    machine.registers.set_ip(ip);*/
+    let stack_addr =
+        ((machine.registers.ss() as u32) << 4).wrapping_add(machine.registers.sp() as u32);
+
+    let ip = machine.read_phys_u16(stack_addr);
+    machine
+        .registers
+        .set_sp(machine.registers.sp().wrapping_add(2));
     machine.registers.set_ip(ip);
+
+    machine.log_instruction(csip, prev).ok();
 }
 
 pub(crate) fn jz(machine: &mut DosMachine, prev: &[u8]) {
@@ -74,7 +102,7 @@ pub(crate) fn ja(machine: &mut DosMachine, prev: &[u8]) {
     }
 }
 
-pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
+/*pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
@@ -90,30 +118,19 @@ pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .expect("Failed to resolve memory address in CALL r/m16");
-        log::trace!(
-    "CALL [0x{:04X}] DS={:04X} (phys=0x{:05X})",
-    0x01EC, // или динамически из disp
-    machine.registers.ds(),
-    addr
-);
-// Вставьте в call_rm16 перед let val = machine.read_phys_u16(addr);
-let dump_start = addr.saturating_sub(16);
-let dump_end = addr.saturating_add(16);
-log::trace!("MEMORY DUMP [{:#05X}-{:#05X}]:", dump_start, dump_end);
-for a in dump_start..=dump_end {
-    let byte = machine.read_phys_u8(a);
-    log::trace!("  [{:#05X}] = {:#02X} ({})", a, byte, if byte >= 32 && byte < 127 { byte as char } else { '.' });
-}
         let val = machine.read_phys_u16(addr);
         log::trace!(
             "CALL [mem]: phys={:#05X} → value={:#04X} at CS:IP={:#04X}:{:#04X}",
-            addr, val, csip[0], csip[1]
+            addr,
+            val,
+            csip[0],
+            csip[1]
         );
-        
+
         val
     };
-    
-        if target_ip == 0 {
+
+    if target_ip == 0 {
         log::error!(
             "CALL r/m16: target IP is zero at CS:IP={:04X}:{:04X}. Halting.",
             machine.registers.cs(),
@@ -124,8 +141,56 @@ for a in dump_start..=dump_end {
         return;
     }
     let current_ip = machine.registers.ip();
-    machine.registers.set_sp(machine.registers.sp().wrapping_sub(2));
-    machine.write_u16(machine.registers.ss(), machine.registers.sp(), current_ip);
+    machine
+        .registers
+        .set_sp(machine.registers.sp().wrapping_sub(2));
+    //machine.write_u16(machine.registers.ss(), machine.registers.sp(), current_ip);
+
+
+
+    machine.registers.set_ip(target_ip);
+    machine.log_instruction(csip, &bytes).ok();
+}*/
+
+pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    let target_ip = if modrm.is_register_mode() {
+        machine.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .expect("Failed to resolve memory address in CALL r/m16");
+        machine.read_phys_u16(addr)
+    };
+
+    if target_ip == 0 {
+        log::error!(
+            "CALL r/m16: target IP is zero at CS:IP={:04X}:{:04X}. Halting.",
+            machine.registers.cs(),
+            machine.registers.ip()
+        );
+        machine.log_instruction(csip, &bytes).ok();
+        machine.halted = true;
+        return;
+    }
+
+    let current_ip = machine.registers.ip();
+    let new_sp = machine.registers.sp().wrapping_sub(2);
+    machine.registers.set_sp(new_sp);
+
+    // ✅ ИСПРАВЛЕНО: Физическая запись в стек через SS, игнорируем override_segment
+    let stack_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_sp as u32);
+    machine.write_phys_u16(stack_addr, current_ip);
+
     machine.registers.set_ip(target_ip);
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -240,7 +305,6 @@ pub(crate) fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/control.rs
 pub(crate) fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -449,7 +513,6 @@ pub(crate) fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/control.rs
 pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -457,6 +520,7 @@ pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
     bytes.push(0x9A); // опкод CALL far
+
     let ip_offset = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&ip_offset.to_le_bytes());
@@ -464,12 +528,20 @@ pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     let cs_segment = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&cs_segment.to_le_bytes());
+
+    // === ИСПРАВЛЕНИЕ: Физическая запись в стек ===
+    // 1. Сохраняем CS
     let sp = machine.registers.sp().wrapping_sub(2);
+    let stack_addr_cs = ((machine.registers.ss() as u32) << 4).wrapping_add(sp as u32);
+    machine.write_phys_u16(stack_addr_cs, machine.registers.cs());
     machine.registers.set_sp(sp);
-    machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
+
+    // 2. Сохраняем IP
     let sp = machine.registers.sp().wrapping_sub(2);
+    let stack_addr_ip = ((machine.registers.ss() as u32) << 4).wrapping_add(sp as u32);
+    machine.write_phys_u16(stack_addr_ip, machine.registers.ip());
     machine.registers.set_sp(sp);
-    machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
+
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
     machine.log_instruction(csip, &bytes).ok();
@@ -559,21 +631,26 @@ pub(crate) fn retf(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let bytes = prev.to_vec();
 
-    // 1. Извлекаем IP из стека (первое слово)
-    let sp = machine.registers.sp();
-    let ip = machine.read_u16(machine.registers.ss(), sp);
-    machine.registers.set_sp(sp.wrapping_add(2));
+    // === ИСПРАВЛЕНИЕ: Физическое чтение из стека ===
+    // 1. Извлекаем IP
+    let stack_addr_ip =
+        ((machine.registers.ss() as u32) << 4).wrapping_add(machine.registers.sp() as u32);
+    let ip = machine.read_phys_u16(stack_addr_ip);
+    machine
+        .registers
+        .set_sp(machine.registers.sp().wrapping_add(2));
 
-    // 2. Извлекаем CS из стека (второе слово)
-    let sp = machine.registers.sp();
-    let cs = machine.read_u16(machine.registers.ss(), sp);
-    machine.registers.set_sp(sp.wrapping_add(2));
+    // 2. Извлекаем CS
+    let stack_addr_cs =
+        ((machine.registers.ss() as u32) << 4).wrapping_add(machine.registers.sp() as u32);
+    let cs = machine.read_phys_u16(stack_addr_cs);
+    machine
+        .registers
+        .set_sp(machine.registers.sp().wrapping_add(2));
 
-    // Устанавливаем восстановленные значения
     machine.registers.set_ip(ip);
     machine.registers.set_cs(cs);
 
-    // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -636,12 +713,14 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     // 1. Сохраняем текущий CS
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
-    machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
+    let ss_base = (machine.registers.ss() as u32) << 4;
+    machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
+    machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
 
     // 2. Сохраняем текущий IP
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
-    machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
+    //machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
 
     // 3. Загружаем новый сегмент и смещение
     machine.registers.set_cs(cs_segment);
@@ -650,6 +729,7 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     // Флаги НЕ изменяются
     machine.log_instruction(csip, &bytes).ok();
 }
+
 pub(crate) fn jmp_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -829,18 +909,21 @@ pub(crate) fn jbe_rel8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn retn_imm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     let imm16 = machine.read_instr_u16(machine.registers.ip());
     bytes.extend_from_slice(&imm16.to_le_bytes());
-    machine.registers.step(Some(2)); // 2 байта imm16
-
-    // Извлекаем IP из стека
-    let ip = machine.read_u16(machine.registers.ss(), machine.registers.sp());
+    machine.registers.step(Some(2)); // продвигаем на 2 байта (imm16)
+    let stack_addr =
+        ((machine.registers.ss() as u32) << 4).wrapping_add(machine.registers.sp() as u32);
+    let ip = machine.read_phys_u16(stack_addr);
     let new_sp = machine.registers.sp().wrapping_add(2 + imm16);
     machine.registers.set_sp(new_sp);
-    machine.registers.set_ip(ip);
 
+    machine.registers.set_ip(ip);
     machine.log_instruction(csip, &bytes).ok();
 }
 
