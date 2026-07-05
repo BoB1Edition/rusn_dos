@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/registers.rs
+// Ver: 1 File: ./libs/dos_core/src/registers.rs
 
 #[derive(Debug, Clone)]
 pub(crate) struct Registers {
@@ -311,6 +311,7 @@ impl Registers {
     }
 
     pub(crate) fn set_ss(&mut self, ss: u16) {
+        log::debug!("set sp CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X} new ss = {:04X}", self.cs(),self.ip(),self.ss(), self.sp(), ss);
         self.ss = ss;
     }
 

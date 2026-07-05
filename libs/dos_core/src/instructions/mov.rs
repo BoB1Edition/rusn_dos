@@ -185,7 +185,10 @@ pub(crate) fn mov_sreg_rm16(machine: &mut DosMachine, prev: &[u8]) {
             machine.halted = true;
             return;
         }
-        2 => machine.registers.set_ss(src_val),
+        2 => {
+            machine.inhibit_interrupts = true;
+            machine.registers.set_ss(src_val)
+        },
         3 => machine.registers.set_ds(src_val),
         4 => machine.registers.set_fs(src_val),
         5 => {

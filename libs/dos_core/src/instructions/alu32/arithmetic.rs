@@ -1,4 +1,4 @@
-// Ver: 3 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
 
 use crate::{DosMachine, flags, modrm::ModRm};
 
@@ -51,8 +51,6 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
         let of =
             (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
-        machine.write_phys_u32(phys_addr, result);
-        // Установка флагов...
         machine.write_phys_u32(phys_addr, result);
         machine.registers.set_flags(flags::compute_flags_u32(
             machine.registers.flags(),

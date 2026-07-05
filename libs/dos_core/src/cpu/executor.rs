@@ -1,54 +1,15 @@
-// Ver: 4 File: ./libs/dos_core/src/cpu/executor.rs
+// Ver: 1 File: ./libs/dos_core/src/cpu/executor.rs
 //! Модуль выполнения инструкций процессора
 //! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
 
 use crate::{
-    cpu::{adc, and, execute::add, jumps, or, sbb, stack, sub, xor},
-    dispatch_op32, flags,
-    instructions::{
+    cpu::{
+        adc, and, auxiliary::execute_rep_simple, cmp, execute::add, incs, jumps, or, sbb, stack,
+        sub, xor,
+    }, dispatch_op32, flags, instructions::{
         alu, alu32, bcd, control, control32, exchange, incs, mov, mov32, segment, stack, system,
-    },
-    machine::DosMachine,
-    modrm::ModRm,
-    video,
+    }, machine::DosMachine, modrm::ModRm, rep_movs_video_opt, video
 };
-
-/*struct DebugLog {
-    logfile: File
-}
-
-impl DebugLog {
-    pub(crate) fn new<T: ToString>(logname: T) -> Self {
-        let logfile = File::create_new(logname.to_string()).expect("not create log Debug file");
-        Self { logfile }
-    }
-    fn print(&self, machine: &DosMachine, segment: u16, offset: u16, size: u8) {
-        let csip = [machine.registers.cs(), machine.registers.ip()];
-        let read_csip = [segment, offset];
-        let mut v = Vec::with_capacity(size as usize);
-        for i in 0..size {
-            v.push(machine.read_u8(segment, offset+i as u16));
-        }
-        let hex_bytes: Vec<String> = v.iter().map(|b| format!("{:02X}", b)).collect();
-        writeln!(
-            &self.logfile,
-            "{:#04x}:{:#04x}:\t{:#04x}:{:#04x}:\t{}",
-            csip[0],
-            csip[1],
-            read_csip[0],
-            read_csip[1],
-            hex_bytes.join(" ")
-        ).ok();
-        let _ = &self.logfile.sync_all().ok();
-    }
-    fn print_text<T: ToString>(&self, msg: T) {
-        writeln!(
-            &self.logfile,
-            "{}",
-            msg.to_string()
-        ).ok();
-    }
-}*/
 
 /// Диспетчеризация базовых опкодов (без префикса 0x0F)
 pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
@@ -84,40 +45,8 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         0x29 | 0x2A..=0x2C => sub(opcode, machine, &full_bytes),
         0x2F => bcd::das(machine, &full_bytes),
         0x30..=0x33 => xor(opcode, machine, &full_bytes),
-        0x38 => alu::cmp_rm8_r8(machine, &full_bytes),
-        0x39 => dispatch_op32!(
-            machine,
-            alu32::cmp_rm32_r32(machine, &full_bytes),
-            alu::cmp_rm16_r16(machine, &full_bytes)
-        ),
-        0x3A => alu::cmp_r8_rm8(machine, &full_bytes),
-        0x3B => dispatch_op32!(
-            machine,
-            alu32::cmp_r32_rm32(machine, &full_bytes),
-            alu::cmp_r16_rm16(machine, &full_bytes)
-        ),
-        0x3C => alu::cmp_al_imm8(machine, &full_bytes),
-        0x3D => dispatch_op32!(
-            machine,
-            alu32::cmp_eax_imm32(machine, &full_bytes),
-            alu::cmp_ax_imm16(machine, &full_bytes)
-        ),
-        0x40 => incs::inc_ax(machine, &full_bytes),
-        0x41 => incs::inc_cx(machine, &full_bytes),
-        0x42 => incs::inc_dx(machine, &full_bytes),
-        0x43 => incs::inc_bx(machine, &full_bytes),
-        0x44 => incs::inc_sp(machine, &full_bytes),
-        0x45 => incs::inc_bp(machine, &full_bytes),
-        0x46 => incs::inc_si(machine, &full_bytes),
-        0x47 => incs::inc_di(machine, &full_bytes),
-        0x48 => incs::dec_ax(machine, &full_bytes),
-        0x49 => incs::dec_cx(machine, &full_bytes),
-        0x4A => incs::dec_dx(machine, &full_bytes),
-        0x4B => incs::dec_bx(machine, &full_bytes),
-        0x4C => incs::dec_sp(machine, &full_bytes),
-        0x4D => incs::dec_bp(machine, &full_bytes),
-        0x4E => incs::dec_si(machine, &full_bytes),
-        0x4F => incs::dec_di(machine, &full_bytes),
+        0x38..=0x3D => cmp(opcode, machine, &full_bytes),
+        0x40..=0x4F => incs(opcode, machine, &full_bytes),
         0x62 => dispatch_op32!(
             machine,
             control32::bound_r32_rm32(machine, &full_bytes),
@@ -129,18 +58,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             alu32::imul_r32_rm32_imm32(machine, &full_bytes),
             alu::imul_r16_rm16_imm16(machine, &full_bytes)
         ),
-        0x6C => {
-            if machine.has_rep_prefix {
-                while machine.registers.cx() != 0 {
-                    system::insb(machine, &full_bytes);
-                    machine
-                        .registers
-                        .set_cx(machine.registers.cx().wrapping_sub(1));
-                }
-            } else {
-                system::insb(machine, &full_bytes);
-            }
-        }
+        0x6C => execute_rep_simple(machine, &full_bytes, system::insb),
         0x6D => {
             if machine.has_rep_prefix {
                 while machine.registers.cx() != 0 {
@@ -153,18 +71,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                 system::insw(machine, &full_bytes);
             }
         }
-        0x6E => {
-            if machine.has_rep_prefix {
-                while machine.registers.cx() != 0 {
-                    system::outsb(machine, &full_bytes);
-                    machine
-                        .registers
-                        .set_cx(machine.registers.cx().wrapping_sub(1));
-                }
-            } else {
-                system::outsb(machine, &full_bytes);
-            }
-        }
+        0x6E => execute_rep_simple(machine, &full_bytes, system::outsb),
         0x6F => {
             if machine.has_rep_prefix {
                 if machine.has_operand_size_prefix {
@@ -321,166 +228,8 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             mov32::mov_address_eax(machine, &full_bytes),
             mov::mov_address_ax(machine, &full_bytes)
         ),
-        0xA4 => {
-            if machine.has_rep_prefix {
-                if machine.video.mode == video::VideoMode::Mode13h
-                    && machine.registers.es() == 0xA000
-                    && machine.registers.ds() == 0xA000
-                    && machine.registers.cx() > 1000
-                {
-                    let si = machine.registers.si() as usize;
-                    let di = machine.registers.di() as usize;
-                    let cx = machine.registers.cx() as usize;
-                    let df = (machine.registers.flags() & (flags::DF)) != 0;
-                    let video_size = 320 * 200;
-
-                    let out_of_bounds = if df {
-                        si < cx - 1 || di < cx - 1
-                    } else {
-                        si.saturating_add(cx) > video_size || di.saturating_add(cx) > video_size
-                    };
-
-                    if out_of_bounds {
-                        // Fallback если выходим за границы
-                        while machine.registers.cx() != 0 {
-                            mov::movsb(machine, &full_bytes);
-                            machine
-                                .registers
-                                .set_cx(machine.registers.cx().wrapping_sub(1));
-                        }
-                    } else if let Some(fb) = machine.video.framebuffer.as_mut() {
-                        if df {
-                            // [FIX] Для DF=1 используем цикл, чтобы избежать багов с перекрытием
-                            while machine.registers.cx() != 0 {
-                                mov::movsb(machine, &full_bytes);
-                                machine
-                                    .registers
-                                    .set_cx(machine.registers.cx().wrapping_sub(1));
-                            }
-                        } else {
-                            // DF=0: Оптимизация для прямого направления
-                            if di > si && di < si + cx {
-                                // Перекрывающиеся области (приемник внутри источника) — копируем назад
-                                for i in (0..cx).rev() {
-                                    fb.data[di + i] = fb.data[si + i];
-                                }
-                            } else {
-                                // Прямое копирование
-                                for i in 0..cx {
-                                    fb.data[di + i] = fb.data[si + i];
-                                }
-                            }
-                            machine.video.dirty = true;
-                            machine.registers.set_si((si + cx) as u16);
-                            machine.registers.set_di((di + cx) as u16);
-                            machine.registers.set_cx(0);
-                        }
-                    } else {
-                        // Нет доступа к framebuffer — стандартный цикл
-                        while machine.registers.cx() != 0 {
-                            mov::movsb(machine, &full_bytes);
-                            machine
-                                .registers
-                                .set_cx(machine.registers.cx().wrapping_sub(1));
-                        }
-                    }
-                } else {
-                    while machine.registers.cx() != 0 {
-                        mov::movsb(machine, &full_bytes);
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
-                    }
-                }
-            } else {
-                mov::movsb(machine, &full_bytes);
-            }
-        }
-        0xA5 => {
-            if machine.has_rep_prefix {
-                if machine.video.mode == video::VideoMode::Mode13h
-                    && machine.registers.es() == 0xA000
-                    && machine.registers.ds() == 0xA000
-                    && machine.registers.cx() > 500
-                {
-                    let si = machine.registers.si() as usize;
-                    let di = machine.registers.di() as usize;
-                    let cx = machine.registers.cx() as usize;
-                    let df = (machine.registers.flags() & (flags::DF)) != 0;
-                    let video_size = 320 * 200 / 2; // в словах
-
-                    // Проверка выхода за границы видеопамяти (в словах)
-                    let out_of_bounds = if df {
-                        si / 2 < cx.saturating_sub(1) || di / 2 < cx.saturating_sub(1)
-                    } else {
-                        si / 2 + cx > video_size || di / 2 + cx > video_size
-                    };
-
-                    if out_of_bounds {
-                        while machine.registers.cx() != 0 {
-                            mov::movsw(machine, &full_bytes);
-                            machine
-                                .registers
-                                .set_cx(machine.registers.cx().wrapping_sub(1));
-                        }
-                    } else if let Some(fb) = machine.video.framebuffer.as_mut() {
-                        if df {
-                            // DF=1: используем обычный цикл для корректного направления
-                            while machine.registers.cx() != 0 {
-                                mov::movsw(machine, &full_bytes);
-                                machine
-                                    .registers
-                                    .set_cx(machine.registers.cx().wrapping_sub(1));
-                            }
-                        } else {
-                            if di > si && di < si + cx * 2 {
-                                for i in (0..cx).rev() {
-                                    let src_idx = si / 2 + i;
-                                    let dst_idx = di / 2 + i;
-                                    let word = u16::from_le_bytes([
-                                        fb.data[src_idx * 2],
-                                        fb.data[src_idx * 2 + 1],
-                                    ]);
-                                    fb.data[dst_idx * 2] = word as u8;
-                                    fb.data[dst_idx * 2 + 1] = (word >> 8) as u8;
-                                }
-                            } else {
-                                for i in 0..cx {
-                                    let src_idx = si / 2 + i;
-                                    let dst_idx = di / 2 + i;
-                                    let word = u16::from_le_bytes([
-                                        fb.data[src_idx * 2],
-                                        fb.data[src_idx * 2 + 1],
-                                    ]);
-                                    fb.data[dst_idx * 2] = word as u8;
-                                    fb.data[dst_idx * 2 + 1] = (word >> 8) as u8;
-                                }
-                            }
-                            machine.video.dirty = true;
-                            machine.registers.set_si((si + cx * 2) as u16);
-                            machine.registers.set_di((di + cx * 2) as u16);
-                            machine.registers.set_cx(0);
-                        }
-                    } else {
-                        while machine.registers.cx() != 0 {
-                            mov::movsw(machine, &full_bytes);
-                            machine
-                                .registers
-                                .set_cx(machine.registers.cx().wrapping_sub(1));
-                        }
-                    }
-                } else {
-                    while machine.registers.cx() != 0 {
-                        mov::movsw(machine, &full_bytes);
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
-                    }
-                }
-            } else {
-                mov::movsw(machine, &full_bytes);
-            }
-        }
+        0xA4 => rep_movs_video_opt!(machine, &full_bytes, mov::movsb, 1, 1000),
+        0xA5 => rep_movs_video_opt!(machine, &full_bytes, mov::movsw, 2, 500),
         0xA6 => {
             if machine.has_rep_prefix {
                 let prefix_type = machine.rep_prefix_type.unwrap_or(0);
@@ -568,14 +317,6 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             alu::test_ax_imm16(machine, &full_bytes)
         ),
         0xAA => {
-            if opcode == 0xAA && machine.has_rep_prefix {
-                log::trace!(
-                    "REP STOSB start: DI={:#04x}, CX={:#04x}, DF={}",
-                    machine.registers.di(),
-                    machine.registers.cx(),
-                    (machine.registers.flags() & flags::DF) != 0
-                );
-            }
             if machine.has_rep_prefix {
                 // REP STOSB: повторяем пока CX != 0
                 // Оптимизация: заливка всего экрана за один проход (если применимо)
@@ -641,20 +382,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                 mov::stosw(machine, &full_bytes);
             }
         }
-        0xAC => {
-            if machine.has_rep_prefix {
-                // REP LODSB: повторяем пока CX != 0
-                while machine.registers.cx() != 0 {
-                    mov::lodsb(machine, &full_bytes);
-                    machine
-                        .registers
-                        .set_cx(machine.registers.cx().wrapping_sub(1));
-                }
-            } else {
-                // Однократное выполнение LODSB
-                mov::lodsb(machine, &full_bytes);
-            }
-        }
+        0xAC => execute_rep_simple(machine, &full_bytes, mov::lodsb),
         0xAE => {
             if machine.has_rep_prefix {
                 let rep_prefix = machine.rep_prefix_type.unwrap_or(0);

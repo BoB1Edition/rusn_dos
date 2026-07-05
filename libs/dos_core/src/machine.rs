@@ -1,4 +1,4 @@
-// Ver: 3 File: ./libs/dos_core/src/machine.rs
+// Ver: 5 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -47,6 +47,7 @@ pub struct DosMachine {
     pub(crate) idtr_limit: u16,
     pub(crate) idtr_base: u32,
     pub(crate) first_mcb_segment: u16,
+    pub(crate) inhibit_interrupts: bool
 }
 
 impl DosMachine {
@@ -296,16 +297,6 @@ impl DosMachine {
     #[inline(always)]
     pub fn write_phys_u8(&mut self, addr: u32, value: u8) {
         let masked = self.apply_a20_mask(addr);
-        if (0x12740..=0x12750).contains(&masked) {
-            log::warn!(
-                "WRITE PHYS U8: addr={:#05X}, val={:#02X}, at CS:IP={:#04X}:{:#04X}, DS={:#04X}",
-                masked,
-                value,
-                self.registers.cs(),
-                self.registers.ip(),
-                self.registers.ds()
-            );
-        }
         if masked >= 0xA0000 && masked < 0xC0000 {
             if self.video.mode == VideoMode::Mode13h && masked < 0xA0000 + 320 * 200 {
                 if let Some(fb) = self.video.framebuffer.as_mut() {
@@ -328,9 +319,9 @@ impl DosMachine {
 
     #[inline(always)]
     pub fn write_phys_u16(&mut self, addr: u32, value: u16) {
-        if addr == 0x1274C {
+        if addr == 0x22460 {
             log::warn!(
-                "WRITE to [1274C] = {:04X} at CS:IP={:04X}:{:04X}",
+                "WRITE to [22460] = {:04X} at CS:IP={:04X}:{:04X}",
                 value,
                 self.registers.cs(),
                 self.registers.ip()
@@ -388,6 +379,7 @@ impl DosMachine {
             idtr_limit: 0xFFFF,
             idtr_base: 0,
             first_mcb_segment: 0x60,
+            inhibit_interrupts: false,
         }
     }
 

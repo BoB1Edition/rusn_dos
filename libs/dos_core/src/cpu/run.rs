@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/cpu/run.rs
+// Ver: 1 File: ./libs/dos_core/src/cpu/run.rs
 
 use crate::{DosMachine, cpu::execute_0f::execute_0f, executor::execute, video};
 use std::error::Error;
@@ -10,6 +10,11 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
     let mut tick_counter: u64 = 65535;
 
     while !machine.halted {
+        if machine.registers.cs() == 0x0000 && machine.registers.ip() == 0x0000 {
+            log::info!("Program terminated via RET to 0000:0000 (stack unwind)");
+            machine.halted = true;
+            return Ok(Some(machine.registers.al()));
+        }
         let opcode = machine.read_instr_u8(machine.registers.ip());
         machine.registers.step(None);
 
@@ -58,7 +63,7 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
             } // GS:
             0xF0 => {
                 machine.has_lock_prefix = true; // REPNE
-                //machine.rep_prefix_type = Some(0xF0)
+                machine.rep_prefix_type = Some(0xF0)
             }
             0xF2 => {
                 machine.has_rep_prefix = true; // REPNE
@@ -98,10 +103,14 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
         }
         tick_counter += 1;
         if tick_counter >= 65536 {
-            if crate::flags::test_if(machine.registers.flags()) {
+            // ✅ ПРОВЕРЯЕМ ФЛАГ ПЕРЕД ВЫЗОВОМ INT 08h
+            if !machine.inhibit_interrupts && crate::flags::test_if(machine.registers.flags()) {
                 crate::instructions::system::call_interrupt(machine, 0x08);
             }
             tick_counter = 0;
+        }
+        if machine.inhibit_interrupts {
+            machine.inhibit_interrupts = false; // Сбрасываем после 1 инструкции
         }
     }
     Ok(Some(machine.registers.al()))

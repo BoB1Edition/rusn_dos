@@ -1,48 +1,7 @@
-// Ver: 2 File: ./libs/dos_core/src/instructions/system.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/system.rs
 use log::{error, warn};
 
 use crate::{flags, interrupts::{bios, dos, ems}, machine::DosMachine};
-
-pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let mut bytes = prev.to_vec();
-    
-    // Читаем номер прерывания
-    let vector = machine.read_instr_u8( machine.registers.ip());
-    bytes.push(vector);
-    machine.registers.step(None);
-
-    // 1. Читаем адрес обработчика из IVT (физический адрес = vector * 4)
-    let ivt_addr = (vector as u32) * 4;
-    let handler_ip = machine.read_phys_u16(ivt_addr);
-    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
-
-    // 2. Проверяем "магический" сегмент 0xF000 — внутренний обработчик эмулятора
-    if handler_cs == 0xF000 {
-        dispatch_internal_interrupt(machine, vector);
-    } else {
-        let mut sp = machine.registers.sp();
-        
-        sp = sp.wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_u16(machine.registers.ss(), sp, machine.registers.flags());
-        
-        sp = sp.wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
-        
-        sp = sp.wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
-        let mut f = machine.registers.flags();
-        f &= !(flags::IF | flags::TF);
-        machine.registers.set_flags(f);
-        machine.registers.set_cs(handler_cs);
-        machine.registers.set_ip(handler_ip);
-    }
-    
-    machine.log_instruction(csip, &bytes).ok();
-}
 
 pub(crate) fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
@@ -115,41 +74,6 @@ pub(crate) fn cmc(machine: &mut DosMachine, prev: &[u8]) {
     let flags = machine.registers.flags();
     let new_flags = flags ^ 1; // XOR с 1 инвертирует младший бит (CF)
     machine.registers.set_flags(new_flags);
-
-    machine.log_instruction(csip, &bytes).ok();
-}
-
-pub(crate) fn iret(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let bytes = prev.to_vec();
-
-    // 1. Извлекаем IP из стека
-    let sp = machine.registers.sp();
-    let ip = machine.read_u16(machine.registers.ss(), sp);
-    machine.registers.set_sp(sp.wrapping_add(2));
-
-    // 2. Извлекаем CS из стека
-    let sp = machine.registers.sp();
-    let cs = machine.read_u16(machine.registers.ss(), sp);
-    machine.registers.set_sp(sp.wrapping_add(2));
-
-    // 3. Извлекаем FLAGS из стека
-    let sp = machine.registers.sp();
-    let flags = machine.read_u16(machine.registers.ss(), sp);
-    machine.registers.set_sp(sp.wrapping_add(2));
-
-    // Устанавливаем восстановленные значения
-    machine.registers.set_ip(ip);
-    machine.registers.set_cs(cs);
-    machine.registers.set_flags(flags);
-
-    // Логирование с указанием адреса возврата
-    log::debug!(
-        "IRET: returning to {:#04x}:{:#04x}, flags={:#04x}",
-        cs,
-        ip,
-        flags
-    );
 
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -733,41 +657,6 @@ pub(crate) fn insw(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 /// INT 3 — прерывание 3 (точка останова)
-pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
-    let bytes = prev.to_vec();
-    let vector: u8 = 3; // фиксированный вектор
-
-    let ivt_addr = (vector as u32) * 4;
-    let handler_ip = machine.read_phys_u16(ivt_addr);
-    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
-    if handler_cs == 0xF000 {
-        dispatch_internal_interrupt(machine, vector);
-    } else {
-        // Переход к обработчику в программе
-        let mut sp = machine.registers.sp();
-        sp = sp.wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_u16(machine.registers.ss(), sp, machine.registers.flags());
-
-        sp = sp.wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_u16(machine.registers.ss(), sp, machine.registers.cs());
-
-        sp = sp.wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
-
-        let mut f = machine.registers.flags();
-        f &= !(flags::IF | flags::TF);
-        machine.registers.set_flags(f);
-
-        machine.registers.set_cs(handler_cs);
-        machine.registers.set_ip(handler_ip);
-    }
-
-    machine.log_instruction(csip, &bytes).ok();
-}
 
 fn dispatch_internal_interrupt(machine: &mut DosMachine, vector: u8) {
     match vector {
@@ -818,3 +707,96 @@ pub(crate) fn call_interrupt(machine: &mut DosMachine, vector: u8) {
     }
 }
 
+// В system.rs
+
+pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let mut bytes = prev.to_vec();
+    let vector = machine.read_instr_u8(machine.registers.ip());
+    bytes.push(vector);
+    machine.registers.step(None);
+
+    let ivt_addr = (vector as u32) * 4;
+    let handler_ip = machine.read_phys_u16(ivt_addr);
+    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
+
+    if handler_cs == 0xF000 {
+        dispatch_internal_interrupt(machine, vector);
+    } else {
+        // x86: стек всегда работает через SS физически. Игнорируем override_segment.
+        let ss_base = (machine.registers.ss() as u32) << 4;
+        let mut sp = machine.registers.sp();
+        
+        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.flags());
+        
+        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
+        
+        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
+        
+        let mut f = machine.registers.flags();
+        f &= !(flags::IF | flags::TF);
+        machine.registers.set_flags(f);
+        
+        machine.registers.set_cs(handler_cs);
+        machine.registers.set_ip(handler_ip);
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn iret(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec();
+    let ss_base = (machine.registers.ss() as u32) << 4;
+
+    // 1. Извлекаем IP
+    let sp = machine.registers.sp();
+    let ip = machine.read_phys_u16(ss_base.wrapping_add(sp as u32));
+    machine.registers.set_sp(sp.wrapping_add(2));
+
+    // 2. Извлекаем CS
+    let sp = machine.registers.sp();
+    let cs = machine.read_phys_u16(ss_base.wrapping_add(sp as u32));
+    machine.registers.set_sp(sp.wrapping_add(2));
+
+    // 3. Извлекаем FLAGS
+    let sp = machine.registers.sp();
+    let flags = machine.read_phys_u16(ss_base.wrapping_add(sp as u32));
+    machine.registers.set_sp(sp.wrapping_add(2));
+
+    machine.registers.set_ip(ip);
+    machine.registers.set_cs(cs);
+    machine.registers.set_flags(flags);
+    
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let bytes = prev.to_vec();
+    let vector: u8 = 3;
+    let ivt_addr = (vector as u32) * 4;
+    let handler_ip = machine.read_phys_u16(ivt_addr);
+    let handler_cs = machine.read_phys_u16(ivt_addr + 2);
+
+    if handler_cs == 0xF000 {
+        dispatch_internal_interrupt(machine, vector);
+    } else {
+        let ss_base = (machine.registers.ss() as u32) << 4;
+        let mut sp = machine.registers.sp();
+        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.flags());
+        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
+        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
+        let mut f = machine.registers.flags();
+        f &= !(flags::IF | flags::TF);
+        machine.registers.set_flags(f);
+        machine.registers.set_cs(handler_cs);
+        machine.registers.set_ip(handler_ip);
+    }
+    machine.log_instruction(csip, &bytes).ok();
+}

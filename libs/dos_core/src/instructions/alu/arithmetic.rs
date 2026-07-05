@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {

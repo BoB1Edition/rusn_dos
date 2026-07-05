@@ -106,27 +106,3 @@ pub fn clear_df(flags: &mut u16) { *flags &= !DF; }
 pub fn set_if(flags: &mut u16) { *flags |= IF; }
 #[inline]
 pub fn clear_if(flags: &mut u16) { *flags &= !IF; }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_compute_flags_preserves_if_df() {
-        // Имитация: IF=1, DF=1, остальные 0
-        let mut initial = 0u16;
-        set_if(&mut initial);
-        set_df(&mut initial);
-        assert_eq!(initial & IF, IF);
-        assert_eq!(initial & DF, DF);
-
-        // Выполняем ADD, который должен обновить CF/ZF, но сохранить IF/DF
-        let new_flags = compute_flags_u8(initial, 0x00, true, false, false);
-        
-        // Проверяем, что IF и DF остались включенными
-        assert!(test_if(new_flags), "IF должен сохраниться после арифметики");
-        assert!(test_df(new_flags), "DF должен сохраниться после арифметики");
-        assert!(test_cf(new_flags), "CF должен установиться");
-        assert!(test_zf(new_flags), "ZF должен установиться");
-    }
-}

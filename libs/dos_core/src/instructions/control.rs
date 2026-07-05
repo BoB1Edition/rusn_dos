@@ -1,4 +1,4 @@
-// Ver: 5 File: ./libs/dos_core/src/instructions/control.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/control.rs
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
@@ -6,18 +6,6 @@ pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    /*let mut bytes = prev.to_vec();
-    let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
-    bytes.extend_from_slice(&rel16.to_le_bytes());
-    let _ = machine.log_instruction(csip, &bytes);
-    let return_ip = machine.registers.ip().wrapping_add(2);
-
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_sub(2));
-    machine.write_u16(machine.registers.ss(), machine.registers.sp(), return_ip);
-    let new_ip = (return_ip as i32 + rel16 as i32) as u16;
-    machine.registers.set_ip(new_ip);*/
     let mut bytes = prev.to_vec();
     let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
     bytes.extend_from_slice(&rel16.to_le_bytes());
@@ -43,12 +31,6 @@ pub(crate) fn retn(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    /*let _ = machine.log_instruction(csip, prev);
-    let ip = machine.read_u16(machine.registers.ss(), machine.registers.sp());
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_ip(ip);*/
     let stack_addr =
         ((machine.registers.ss() as u32) << 4).wrapping_add(machine.registers.sp() as u32);
 
@@ -56,6 +38,9 @@ pub(crate) fn retn(machine: &mut DosMachine, prev: &[u8]) {
     machine
         .registers
         .set_sp(machine.registers.sp().wrapping_add(2));
+    if csip[0] == 0x1000 && csip[1] == 0x900 {
+        log::debug!("ip: {:04X}, stack_addr: {:04X}", ip, stack_addr)
+    }
     machine.registers.set_ip(ip);
 
     machine.log_instruction(csip, prev).ok();
@@ -101,56 +86,6 @@ pub(crate) fn ja(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_ip(new_ip);
     }
 }
-
-/*pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [
-        machine.registers.cs(),
-        machine.registers.ip() - prev.len() as u16,
-    ];
-    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
-    machine.registers.step(None);
-    let mut bytes = prev.to_vec();
-    bytes.push(modrm_byte);
-    let modrm = ModRm::from_byte(modrm_byte);
-    let target_ip = if modrm.is_register_mode() {
-        machine.read_reg16(modrm.rm_field)
-    } else {
-        let addr = modrm
-            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .expect("Failed to resolve memory address in CALL r/m16");
-        let val = machine.read_phys_u16(addr);
-        log::trace!(
-            "CALL [mem]: phys={:#05X} → value={:#04X} at CS:IP={:#04X}:{:#04X}",
-            addr,
-            val,
-            csip[0],
-            csip[1]
-        );
-
-        val
-    };
-
-    if target_ip == 0 {
-        log::error!(
-            "CALL r/m16: target IP is zero at CS:IP={:04X}:{:04X}. Halting.",
-            machine.registers.cs(),
-            machine.registers.ip()
-        );
-        machine.log_instruction(csip, &bytes).ok();
-        machine.halted = true; // Останавливаем эмулятор, чтобы не уйти в 0x00:0x00
-        return;
-    }
-    let current_ip = machine.registers.ip();
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_sub(2));
-    //machine.write_u16(machine.registers.ss(), machine.registers.sp(), current_ip);
-
-
-
-    machine.registers.set_ip(target_ip);
-    machine.log_instruction(csip, &bytes).ok();
-}*/
 
 pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
@@ -683,6 +618,8 @@ pub(crate) fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
 
 /// CALL ptr16:16 — Far call through memory (межсегментный вызов через память)
 /// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
+/// CALL ptr16:16 — Far call through memory (межсегментный вызов через память)
+/// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
 pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -710,22 +647,23 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let cs_segment = machine.read_phys_u16(addr + 2);
 
     // Сохраняем текущий CS:IP в стек в порядке: сначала CS, затем IP
+    // x86 стек всегда работает через SS физически
+    
     // 1. Сохраняем текущий CS
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
     let ss_base = (machine.registers.ss() as u32) << 4;
     machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
-    machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
 
     // 2. Сохраняем текущий IP
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
-    //machine.write_u16(machine.registers.ss(), sp, machine.registers.ip());
+    // ✅ ИСПРАВЛЕНО: Записываем IP по новому адресу SP
+    machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
 
     // 3. Загружаем новый сегмент и смещение
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
-
     // Флаги НЕ изменяются
     machine.log_instruction(csip, &bytes).ok();
 }

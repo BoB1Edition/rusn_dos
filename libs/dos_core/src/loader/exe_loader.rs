@@ -1,5 +1,8 @@
 // Ver: 1 File: ./libs/dos_core/src/loader/exe_loader.rs
-use crate::{DosMachine, init_ivt, loader::exe_header::MzHeader, memory::Memory};
+use crate::{
+    DosMachine, consts::MCB_SIGNATURE_NON_LAST, init_ivt, loader::exe_header::MzHeader,
+    memory::Memory,
+};
 use std::fs::File;
 
 pub struct ExeLoader {
@@ -120,8 +123,25 @@ impl ExeLoader {
         // 5. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
         //machine.first_mcb_segment = 0x1000;
-        let first_mcb_segment = machine.first_mcb_segment;
-        crate::mcb::init_memory_map(&mut machine, first_mcb_segment);
+        let loaded_bytes = code_data.len();
+        let bss_bytes = self.header.e_minep as usize * 16; // размер BSS в байтах
+        let total_prog_bytes = loaded_bytes + bss_bytes;
+        let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16; // округление вверх
+        let end_segment = LOAD_SEGMENT + prog_paragraphs;
+
+        // Устанавливаем начало кучи после программы
+        let prog_mcb_seg = PSP_SEGMENT;
+        let prog_mcb_size = end_segment - PSP_SEGMENT - 1; // минус 1 параграф на сам MCB
+        let prog_mcb = crate::mcb::MCB {
+            signature: MCB_SIGNATURE_NON_LAST,
+            owner: 0x0001, // владелец - текущий процесс
+            size: prog_mcb_size,
+        };
+        prog_mcb.write(&mut machine, prog_mcb_seg);
+        log::debug!("mcb end_segment: {}", end_segment);
+        machine.first_mcb_segment = end_segment;
+        // Инициализируем кучу (свободную память) после программы
+        crate::mcb::init_memory_map(&mut machine, end_segment);
         init_ivt(&mut machine);
         let cs = LOAD_SEGMENT.wrapping_add(self.header.cs);
         let ip = self.header.ip;
@@ -134,6 +154,21 @@ impl ExeLoader {
         machine.registers.set_ss(ss);
         machine.registers.set_ip(ip);
         machine.registers.set_sp(sp);
+
+        let stack_top_phys = (ss as u32 * 16) + (sp as u32);
+        if stack_top_phys >= 4 {
+            // 1. Сохраняем CS = PSP_SEGMENT (сегмент PSP)
+            machine.memory.write_u16(stack_top_phys - 4, PSP_SEGMENT);
+            // 2. Сохраняем IP = 0x0000 (там лежит CD 20h - INT 20h в PSP)
+            machine.memory.write_u16(stack_top_phys - 2, 0x0000);
+            // 3. Корректируем SP, чтобы он указывал на "вершину" стека
+            machine.registers.set_sp(sp.wrapping_sub(4));
+            log::debug!(
+                "Stack initialized with return address PSP:0000. SS:SP={:04X}:{:04X}",
+                ss,
+                machine.registers.sp()
+            );
+        }
 
         log::info!(
             "Loaded .EXE file: CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X}, DS={:04X}",

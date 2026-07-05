@@ -10,6 +10,16 @@
 │       ├── src
 │       │   ├── consts.rs
 │       │   ├── cpu
+│       │   │   ├── execute
+│       │   │   │   ├── adc.rs
+│       │   │   │   ├── add.rs
+│       │   │   │   ├── checks.rs
+│       │   │   │   ├── jumps.rs
+│       │   │   │   ├── logical.rs
+│       │   │   │   ├── mod.rs
+│       │   │   │   ├── sbb.rs
+│       │   │   │   ├── stack.rs
+│       │   │   │   └── sub.rs
 │       │   │   ├── execute_0f.rs
 │       │   │   ├── executor.rs
 │       │   │   ├── flags.rs
@@ -57,6 +67,7 @@
 │       │   ├── machine.rs
 │       │   ├── macros
 │       │   │   └── mod.rs
+│       │   ├── mcb.rs
 │       │   ├── memory.rs
 │       │   ├── modrm.rs
 │       │   ├── registers.rs
@@ -88,4 +99,4 @@
 ├── tests
 └── tree.tree
 
-18 directories, 71 files
+19 directories, 81 files
