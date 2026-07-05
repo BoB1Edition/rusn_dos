@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/mov32.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/mov32.rs
 use crate::{machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
@@ -18,8 +18,8 @@ pub(crate) fn mov_address_eax(machine: &mut DosMachine, prev: &[u8]) {
     };
     bytes.extend_from_slice(&addr32.to_le_bytes());
     let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    let offset = (addr32 & 0xFFFF) as u16;
-    machine.write_u32(segment, offset, machine.registers.eax());
+    let phys_addr = ((segment as u32) << 4).wrapping_add(addr32);
+    machine.write_phys_u32(phys_addr, machine.registers.eax());
 
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -63,7 +63,8 @@ pub(crate) fn mov_eax_address16(machine: &mut DosMachine, prev: &[u8]) {
     bytes.extend_from_slice(&addr16.to_le_bytes());
 
     let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    let value = machine.read_u32(segment, addr16);
+    let phys_addr = ((segment as u32) << 4).wrapping_add(addr16 as u32);
+    let value = machine.read_phys_u32(phys_addr);
     machine.registers.set_eax(value);
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -215,14 +216,10 @@ pub(crate) fn mov_eax_address32(machine: &mut DosMachine, prev: &[u8]) {
         addr16 as u32
     };
     bytes.extend_from_slice(&addr32.to_le_bytes());
-
     let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-    let offset = (addr32 & 0xFFFF) as u16;
-
-    let value = machine.read_u32(segment, offset);
-
+    let phys_addr = ((segment as u32) << 4).wrapping_add(addr32);
+    let value = machine.read_phys_u32(phys_addr);
     machine.registers.set_eax(value);
-
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -269,7 +266,7 @@ fn compute_lea_offset_32(
     sib_byte: Option<u8>,
     bytes: &mut Vec<u8>,
 ) -> u32 {
-    let mod_field = (modrm.mod_field >> 6) & 0x03;
+    let mod_field = modrm.mod_field;
     let rm_field = modrm.rm_field & 0x07;
 
     // Базовый адрес

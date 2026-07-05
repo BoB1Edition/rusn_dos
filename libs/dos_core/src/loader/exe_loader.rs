@@ -1,6 +1,9 @@
 // Ver: 1 File: ./libs/dos_core/src/loader/exe_loader.rs
 use crate::{
-    DosMachine, consts::MCB_SIGNATURE_NON_LAST, init_ivt, loader::exe_header::MzHeader,
+    DosMachine,
+    consts::{MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST},
+    init_ivt,
+    loader::exe_header::MzHeader,
     memory::Memory,
 };
 use std::fs::File;
@@ -119,29 +122,34 @@ impl ExeLoader {
         } else {
             File::create("logopcode.txt")?
         };
-
-        // 5. Инициализируем машину
         let mut machine = DosMachine::new_with_memory(memory, logfile);
-        //machine.first_mcb_segment = 0x1000;
+
         let loaded_bytes = code_data.len();
         let bss_bytes = self.header.e_minep as usize * 16; // размер BSS в байтах
         let total_prog_bytes = loaded_bytes + bss_bytes;
         let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16; // округление вверх
         let end_segment = LOAD_SEGMENT + prog_paragraphs;
 
-        // Устанавливаем начало кучи после программы
-        let prog_mcb_seg = PSP_SEGMENT;
-        let prog_mcb_size = end_segment - PSP_SEGMENT - 1; // минус 1 параграф на сам MCB
+        machine.first_mcb_segment = PSP_SEGMENT;
+
         let prog_mcb = crate::mcb::MCB {
             signature: MCB_SIGNATURE_NON_LAST,
-            owner: 0x0001, // владелец - текущий процесс
-            size: prog_mcb_size,
+            owner: PSP_SEGMENT, // владелец - PSP программы
+            size: prog_paragraphs,
         };
-        prog_mcb.write(&mut machine, prog_mcb_seg);
-        log::debug!("mcb end_segment: {}", end_segment);
-        machine.first_mcb_segment = end_segment;
-        // Инициализируем кучу (свободную память) после программы
-        crate::mcb::init_memory_map(&mut machine, end_segment);
+        prog_mcb.write(&mut machine, PSP_SEGMENT);
+
+        let free_mcb_seg = end_segment;
+        let free_mcb = crate::mcb::MCB {
+            signature: MCB_SIGNATURE_LAST,
+            owner: 0,                       // свободен
+            size: 0xF000 - end_segment - 1, // вся оставшаяся память до 0xF000
+        };
+        free_mcb.write(&mut machine, free_mcb_seg);
+        let psp_end_paragraphs = end_segment;
+        machine
+            .memory
+            .write_u16((PSP_SEGMENT as u32 * 16) + 0x02, psp_end_paragraphs);
         init_ivt(&mut machine);
         let cs = LOAD_SEGMENT.wrapping_add(self.header.cs);
         let ip = self.header.ip;
@@ -235,7 +243,6 @@ impl ExeLoader {
         let psp_base = segment as u32 * 16;
         memory.write_u8(psp_base, 0xCD);
         memory.write_u8(psp_base + 1, 0x20);
-        memory.write_u16(psp_base + 0x02, 0x00F0);
         memory.write_u8(psp_base + 5, 0xCD);
         memory.write_u8(psp_base + 6, 0x21);
         memory.write_u8(psp_base + 7, 0xCB);

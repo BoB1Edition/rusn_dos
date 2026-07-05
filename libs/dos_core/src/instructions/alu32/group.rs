@@ -1,42 +1,36 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/group.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/group.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 
 pub fn group_x83_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
-    let imm8 = machine.read_instr_u8(
-        machine.registers.ip().wrapping_add(1)
-    );
-    machine.registers.step(Some(2));
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
     bytes.push(modrm_byte);
-    bytes.push(imm8);
     let modrm = ModRm::from_byte(modrm_byte);
-    
-    // Расширяем imm8 до i8, затем до i32 со знаком (sign-extend)
-    let imm32 = (imm8 as i8) as i32 as u32;
-    
+
     if modrm.is_register_mode() {
-        // Операция над регистром
+        let imm8 = machine.read_instr_u8(machine.registers.ip());
+        machine.registers.step(None);
+        bytes.push(imm8);
+        let imm32 = (imm8 as i8) as i32 as u32;
         let dst_val = machine.read_reg32(modrm.rm_field);
-        let (result, flags) = perform_group_x83_operation_32(machine,modrm.reg_field, dst_val, imm32, machine.registers.flags());
-        if modrm.reg_field != 7 { // CMP (reg_field=7) не сохраняет результат
-            machine.write_reg32(modrm.rm_field, result);
-        }
+        let (result, flags) = perform_group_x83_operation_32(machine, modrm.reg_field, dst_val, imm32, machine.registers.flags());
+        if modrm.reg_field != 7 { machine.write_reg32(modrm.rm_field, result); }
         machine.registers.set_flags(flags);
     } else {
-        // Операция над памятью
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
+        let imm8 = machine.read_instr_u8(machine.registers.ip());
+        machine.registers.step(None);
+        bytes.push(imm8);
+        let imm32 = (imm8 as i8) as i32 as u32;
         let dst_val = machine.read_phys_u32(addr);
-        let (result, flags) = perform_group_x83_operation_32(machine,modrm.reg_field, dst_val, imm32, machine.registers.flags());
-        if modrm.reg_field != 7 { // CMP не сохраняет результат
-            machine.write_phys_u32(addr, result);
-        }
+        let (result, flags) = perform_group_x83_operation_32(machine, modrm.reg_field, dst_val, imm32, machine.registers.flags());
+        if modrm.reg_field != 7 { machine.write_phys_u32(addr, result); }
         machine.registers.set_flags(flags);
     }
-    
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -106,35 +100,35 @@ fn perform_group_x83_operation_32(machine: &DosMachine, op_field: u8, dst_val: u
 }
 
 pub fn group_f7_rm32(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    
-    let modrm_byte = machine.read_instr_u8( machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
     let reg_field = modrm.reg_field;
-    
-    // Для TEST (reg_field 0/1) требуется дополнительное слово imm32
-    let imm32 = if reg_field == 0 || reg_field == 1 {
-        let imm = machine.read_instr_u32( machine.registers.ip());
-        machine.registers.step(Some(4));
-        bytes.extend_from_slice(&imm.to_le_bytes());
-        Some(imm)
-    } else {
-        None
-    };
-    
+
     if modrm.is_register_mode() {
+        let imm32 = if reg_field == 0 || reg_field == 1 {
+            let imm = machine.read_instr_u32(machine.registers.ip());
+            machine.registers.step(Some(4));
+            bytes.extend_from_slice(&imm.to_le_bytes());
+            Some(imm)
+        } else { None };
         group_f7_register_32(machine, reg_field, modrm.rm_field, imm32);
     } else {
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
+        let imm32 = if reg_field == 0 || reg_field == 1 {
+            let imm = machine.read_instr_u32(machine.registers.ip());
+            machine.registers.step(Some(4));
+            bytes.extend_from_slice(&imm.to_le_bytes());
+            Some(imm)
+        } else { None };
         group_f7_memory_32(machine, reg_field, addr, imm32);
     }
-    
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -357,31 +351,30 @@ fn group_f7_memory_32(machine: &mut DosMachine, reg_field: u8, addr: u32, imm32:
 
 pub fn group_x81_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
-    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
-    let imm32 = machine.read_instr_u32(machine.registers.ip().wrapping_add(1));
-    machine.registers.step(Some(5)); // ModR/M + 4 байта imm32
     let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
     bytes.push(modrm_byte);
-    bytes.extend_from_slice(&imm32.to_le_bytes());
     let modrm = ModRm::from_byte(modrm_byte);
 
     if modrm.is_register_mode() {
+        let imm32 = machine.read_instr_u32(machine.registers.ip());
+        machine.registers.step(Some(4));
+        bytes.extend_from_slice(&imm32.to_le_bytes());
         let dst_val = machine.read_reg32(modrm.rm_field);
         let (result, flags) = perform_group_x83_operation_32(machine, modrm.reg_field, dst_val, imm32, machine.registers.flags());
-        if modrm.reg_field != 7 {
-            machine.write_reg32(modrm.rm_field, result);
-        }
+        if modrm.reg_field != 7 { machine.write_reg32(modrm.rm_field, result); }
         machine.registers.set_flags(flags);
     } else {
         let addr = modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes).unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
+        let imm32 = machine.read_instr_u32(machine.registers.ip());
+        machine.registers.step(Some(4));
+        bytes.extend_from_slice(&imm32.to_le_bytes());
         let dst_val = machine.read_phys_u32(addr);
         let (result, flags) = perform_group_x83_operation_32(machine, modrm.reg_field, dst_val, imm32, machine.registers.flags());
-        if modrm.reg_field != 7 {
-            machine.write_phys_u32(addr, result);
-        }
+        if modrm.reg_field != 7 { machine.write_phys_u32(addr, result); }
         machine.registers.set_flags(flags);
     }
-
     machine.log_instruction(csip, &bytes).ok();
 }

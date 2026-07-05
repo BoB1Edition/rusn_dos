@@ -1,7 +1,12 @@
-// Ver: 1 File: ./libs/dos_core/src/loader/com_loader.rs
+// Ver: 2 File: ./libs/dos_core/src/loader/com_loader.rs
 use std::fs::File;
 
-use crate::{DosMachine, init_ivt, memory::Memory};
+use crate::{
+    DosMachine,
+    consts::{MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST},
+    init_ivt,
+    memory::Memory,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct ComLoader {
@@ -44,6 +49,28 @@ impl ComLoader {
         };
 
         let mut machine = DosMachine::new_with_memory(memory, logfile);
+
+        machine.first_mcb_segment = PSP_SEGMENT;
+        let com_paragraphs = ((self.data.len() + 0x100 + 15) / 16) as u16; // +0x100 для PSP header
+        let end_segment = PSP_SEGMENT + com_paragraphs;
+        let prog_mcb = crate::mcb::MCB {
+            signature: MCB_SIGNATURE_NON_LAST,
+            owner: PSP_SEGMENT,
+            size: com_paragraphs,
+        };
+        prog_mcb.write(&mut machine, PSP_SEGMENT);
+        let free_mcb_seg = end_segment;
+        let free_mcb = crate::mcb::MCB {
+            signature: MCB_SIGNATURE_LAST,
+            owner: 0,
+            size: 0xF000 - end_segment - 1,
+        };
+        free_mcb.write(&mut machine, free_mcb_seg);
+
+        machine
+            .memory
+            .write_u16((PSP_SEGMENT as u32 * 16) + 0x02, end_segment);
+
         init_ivt(&mut machine);
         machine.registers.set_cs(PSP_SEGMENT);
         machine.registers.set_ds(PSP_SEGMENT);
@@ -70,10 +97,6 @@ impl ComLoader {
         let psp_base = segment as u32 * 16;
         memory.write_u8(psp_base, 0xCD);
         memory.write_u8(psp_base + 1, 0x20);
-        // Размер памяти в параграфах (640 КБ = 0xA000 параграфов)
-        memory.write_u8(psp_base + 2, 0x00);
-        memory.write_u8(psp_base + 3, 0xA0);
-        // INT 21h / RETF — точка входа для вызовов DOS
         memory.write_u8(psp_base + 5, 0xCD);
         memory.write_u8(psp_base + 6, 0x21);
         memory.write_u8(psp_base + 7, 0xCB);

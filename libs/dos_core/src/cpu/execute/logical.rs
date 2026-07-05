@@ -65,7 +65,7 @@ pub(crate) fn xor(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u8]
             alu32::xor_rm32_r32(machine, &full_bytes),
             alu::xor_rm16_r16(machine, &full_bytes)
         ),
-        0x32 => alu::xor_r8_rm(machine, &full_bytes),
+        0x32 => alu::xor_r8_rm8(machine, &full_bytes),
         0x33 => dispatch_op32!(
             machine,
             alu32::xor_r32_rm32(machine, &full_bytes),

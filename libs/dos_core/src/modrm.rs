@@ -69,8 +69,8 @@ impl ModRm {
                     machine.registers.step(Some(4));
                     bytes.extend_from_slice(&disp.to_le_bytes());
                     let effective = scaled_index.wrapping_add(disp);
-                    // База EBP → сегмент SS по умолчанию
-                    let seg = machine.override_segment.unwrap_or(machine.registers.ss());
+
+                    let seg = machine.override_segment.unwrap_or(machine.registers.ds());
                     return Some(((seg as u32) << 4).wrapping_add(effective));
                 }
 

@@ -1,14 +1,17 @@
-// Ver: 1 File: ./libs/dos_core/src/cpu/executor.rs
-//! Модуль выполнения инструкций процессора
-//! Содержит цикл выполнения, обработку префиксов и диспетчеризацию опкодов
+// Ver: 2 File: ./libs/dos_core/src/cpu/executor.rs
 
 use crate::{
     cpu::{
         adc, and, auxiliary::execute_rep_simple, cmp, execute::add, incs, jumps, or, sbb, stack,
         sub, xor,
-    }, dispatch_op32, flags, instructions::{
+    },
+    dispatch_op32, flags,
+    instructions::{
         alu, alu32, bcd, control, control32, exchange, incs, mov, mov32, segment, stack, system,
-    }, machine::DosMachine, modrm::ModRm, rep_movs_video_opt, video
+    },
+    machine::DosMachine,
+    modrm::ModRm,
+    rep_movs_video_opt, video,
 };
 
 /// Диспетчеризация базовых опкодов (без префикса 0x0F)
@@ -237,24 +240,26 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                 if prefix_type == 0xF3 {
                     while machine.registers.cx() != 0 {
                         mov::cmpsb(machine, &full_bytes);
+
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if !zf {
                             break; // остановка при первом несовпадении
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else if prefix_type == 0xF2 {
                     while machine.registers.cx() != 0 {
                         mov::cmpsb(machine, &full_bytes);
+
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if zf {
                             break; // остановка при первом совпадении
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else {
                     while machine.registers.cx() != 0 {
@@ -276,25 +281,26 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                     // REPE/REPZ — повторять пока совпадают (ZF=1)
                     while machine.registers.cx() != 0 {
                         mov::cmpsw(machine, &full_bytes);
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if !zf {
                             break; // остановка при первом несовпадении
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else if rep_prefix == 0xF2 {
                     // REPNE/REPNZ — повторять пока не совпадают (ZF=0)
                     while machine.registers.cx() != 0 {
                         mov::cmpsw(machine, &full_bytes);
+
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if zf {
                             break; // остановка при первом совпадении
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else {
                     // Обычный REP (редкий случай) — повторять просто по CX
@@ -390,25 +396,26 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                     // REPE SCASB – повторять пока ZF=1 (равенство)
                     while machine.registers.cx() != 0 {
                         mov::scasb(machine, &full_bytes);
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if !zf {
                             break;
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else if rep_prefix == 0xF2 {
                     // REPNE SCASB – повторять пока ZF=0 (неравенство)
                     while machine.registers.cx() != 0 {
                         mov::scasb(machine, &full_bytes);
+                        
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if zf {
                             break;
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else {
                     // Обычный REP (просто повторять CX раз)
@@ -429,24 +436,24 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                 if rep_prefix == 0xF3 {
                     while machine.registers.cx() != 0 {
                         mov::scasw(machine, &full_bytes);
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if !zf {
                             break;
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else if rep_prefix == 0xF2 {
                     while machine.registers.cx() != 0 {
                         mov::scasw(machine, &full_bytes);
+                        machine
+                            .registers
+                            .set_cx(machine.registers.cx().wrapping_sub(1));
                         let zf = (machine.registers.flags() & (flags::ZF)) != 0;
                         if zf {
                             break;
                         }
-                        machine
-                            .registers
-                            .set_cx(machine.registers.cx().wrapping_sub(1));
                     }
                 } else {
                     while machine.registers.cx() != 0 {

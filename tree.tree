@@ -10,10 +10,12 @@
 │       ├── src
 │       │   ├── consts.rs
 │       │   ├── cpu
+│       │   │   ├── auxiliary.rs
 │       │   │   ├── execute
 │       │   │   │   ├── adc.rs
 │       │   │   │   ├── add.rs
 │       │   │   │   ├── checks.rs
+│       │   │   │   ├── incs.rs
 │       │   │   │   ├── jumps.rs
 │       │   │   │   ├── logical.rs
 │       │   │   │   ├── mod.rs
@@ -99,4 +101,4 @@
 ├── tests
 └── tree.tree
 
-19 directories, 81 files
+19 directories, 83 files

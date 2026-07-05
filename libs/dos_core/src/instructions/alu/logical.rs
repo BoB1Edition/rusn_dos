@@ -26,7 +26,7 @@ pub(crate) fn or_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 /// XOR r8, r/m8
-pub(crate) fn xor_r8_rm(machine: &mut DosMachine, prev: &[u8]) {
+pub(crate) fn xor_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);

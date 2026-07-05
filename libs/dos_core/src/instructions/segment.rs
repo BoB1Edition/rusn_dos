@@ -1,9 +1,6 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/segment.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/segment.rs
 use crate::{DosMachine, modrm::ModRm};
 
-/// LES r16, m16:16 — Load ES and register from far pointer
-/// Читает 32-битный указатель из памяти в формате "смещение:сегмент" (little-endian)
-/// и загружает младшие 16 бит в регистр, старшие 16 бит в сегментный регистр ES
 pub(crate) fn les_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
     let modrm_byte = machine.read_instr_u8( machine.registers.ip());
@@ -40,17 +37,12 @@ pub(crate) fn les_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub fn lds_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()];
+    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
     let mut bytes = prev.to_vec();
-    
-    // Читаем байт ModR/M
-    let modrm_byte = machine.read_u8(machine.registers.cs(), machine.registers.ip());
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     bytes.push(modrm_byte);
-    
     let modrm = ModRm::from_byte(modrm_byte);
-    
-    // LDS не поддерживает режим регистра (mod=11) — это #UD
     if modrm.is_register_mode() {
         log::error!(
             "LDS with register mode (mod=11) at CS:IP={:#04x}:{:#04x} — invalid opcode",
@@ -60,8 +52,6 @@ pub fn lds_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
         machine.halted = true;
         return;
     }
-    
-    // Вычисляем адрес операнда памяти
     let addr = match modrm.resolve_address(machine, machine.has_address_size_prefix, &mut bytes) {
         Some(a) => a,
         None => {
@@ -70,15 +60,9 @@ pub fn lds_r16_m16(machine: &mut DosMachine, prev: &[u8]) {
             return;
         }
     };
-    
-    // Читаем 32-битный указатель из памяти: [offset:segment]
     let offset = machine.read_phys_u16(addr);
     let segment = machine.read_phys_u16(addr.wrapping_add(2));
-    
-    // Загружаем регистр (из поля reg_field ModR/M)
     machine.write_reg16(modrm.reg_field, offset);
-    
-    // Загружаем сегмент DS
     machine.registers.set_ds(segment);
     
     log::debug!(

@@ -122,7 +122,6 @@ pub(crate) fn call_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let new_sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(new_sp);
 
-    // ✅ ИСПРАВЛЕНО: Физическая запись в стек через SS, игнорируем override_segment
     let stack_addr = ((machine.registers.ss() as u32) << 4).wrapping_add(new_sp as u32);
     machine.write_phys_u16(stack_addr, current_ip);
 
@@ -226,14 +225,11 @@ pub(crate) fn jmp_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
-
-    // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
-    // В реальном режиме усекаем до 16 бит
     let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
     machine.registers.set_ip(new_ip);
 
@@ -245,7 +241,7 @@ pub(crate) fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -264,13 +260,13 @@ pub(crate) fn jne_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/control.rs
+
 pub(crate) fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -280,8 +276,6 @@ pub(crate) fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let cf = (machine.registers.flags() & 1) != 0;
 
     if !cf {
-        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
-        // В реальном режиме усекаем до 16 бит
         let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
         machine.registers.set_ip(new_ip);
     }
@@ -289,28 +283,23 @@ pub(crate) fn jae_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/control.rs
+
 pub(crate) fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
 
-    // Проверяем флаги знака (SF) и переполнения (OF)
-    // SF = бит 7, OF = бит 11
     let flags = machine.registers.flags();
     let sf = (flags & (flags::SF)) != 0; // Sign Flag (бит 7)
     let of = (flags & (flags::OF)) != 0; // Overflow Flag (бит 11)
 
-    // Прыжок выполняется если SF == OF (результат >= 0 при знаковом сравнении)
     if sf == of {
-        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
-        // В реальном режиме усекаем до 16 бит
         let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
         machine.registers.set_ip(new_ip);
     }
@@ -318,13 +307,12 @@ pub(crate) fn jge_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/control.rs
+
 pub(crate) fn jmp_rel16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 16-битное смещение со знаком (little-endian)
     let rel16 = machine.read_instr_u16(machine.registers.ip()) as i16;
     machine.registers.step(Some(2)); // продвигаем на 2 байта (смещение)
     let mut bytes = prev.to_vec();
@@ -343,7 +331,7 @@ pub(crate) fn jcxz_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -366,28 +354,21 @@ pub(crate) fn loopnz_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
     bytes.push(rel8 as u8);
 
-    // 1. Декрементируем CX (флаги НЕ устанавливаются!)
     let cx = machine.registers.cx();
     let new_cx = cx.wrapping_sub(1);
     machine.registers.set_cx(new_cx);
 
-    // 2. Проверяем флаг нуля ZF (бит 6)
     let zf = (machine.registers.flags() & (flags::ZF)) != 0;
-
-    // 3. Выполняем прыжок если CX ≠ 0 И ZF = 0 (не равно)
     if new_cx != 0 && !zf {
-        // Вычисляем новый IP: текущий IP (после чтения смещения) + sign_extend(rel8)
         let new_ip = (machine.registers.ip() as i16).wrapping_add(rel8 as i16) as u16;
         machine.registers.set_ip(new_ip);
     }
-
-    // Флаги НЕ изменяются — критически важно! (декремент не устанавливает флаги)
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -396,7 +377,7 @@ pub(crate) fn loopz_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -426,7 +407,7 @@ pub(crate) fn jl_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -464,8 +445,6 @@ pub(crate) fn call_far(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&cs_segment.to_le_bytes());
 
-    // === ИСПРАВЛЕНИЕ: Физическая запись в стек ===
-    // 1. Сохраняем CS
     let sp = machine.registers.sp().wrapping_sub(2);
     let stack_addr_cs = ((machine.registers.ss() as u32) << 4).wrapping_add(sp as u32);
     machine.write_phys_u16(stack_addr_cs, machine.registers.cs());
@@ -487,7 +466,7 @@ pub(crate) fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -509,13 +488,13 @@ pub(crate) fn jns_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-// libs/dos_core/src/instructions/control.rs
+
 pub(crate) fn jg_rel8(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -541,8 +520,6 @@ pub(crate) fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let mut bytes = prev.to_vec();
 
-    // Читаем 32 бита из кода: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-    // Порядок байтов: [IP_lo, IP_hi, CS_lo, CS_hi] (little-endian для каждого слова)
     let ip_offset = machine.read_instr_u16(machine.registers.ip());
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&ip_offset.to_le_bytes());
@@ -551,11 +528,9 @@ pub(crate) fn jmp_far(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&cs_segment.to_le_bytes());
 
-    // Загружаем новый сегмент и смещение (без сохранения старого состояния!)
     machine.registers.set_cs(cs_segment);
     machine.registers.set_ip(ip_offset);
 
-    // Флаги НЕ изменяются — критически важно!
     machine.log_instruction(csip, &bytes).ok();
 }
 
@@ -566,8 +541,6 @@ pub(crate) fn retf(machine: &mut DosMachine, prev: &[u8]) {
     ];
     let bytes = prev.to_vec();
 
-    // === ИСПРАВЛЕНИЕ: Физическое чтение из стека ===
-    // 1. Извлекаем IP
     let stack_addr_ip =
         ((machine.registers.ss() as u32) << 4).wrapping_add(machine.registers.sp() as u32);
     let ip = machine.read_phys_u16(stack_addr_ip);
@@ -594,7 +567,7 @@ pub(crate) fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.cs(),
         machine.registers.ip() - prev.len() as u16,
     ];
-    // Читаем 8-битное смещение со знаком
+    
     let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
     machine.registers.step(None); // продвигаем на 1 байт (смещение)
     let mut bytes = prev.to_vec();
@@ -616,10 +589,6 @@ pub(crate) fn jle_rel8(machine: &mut DosMachine, prev: &[u8]) {
     machine.log_instruction(csip, &bytes).ok();
 }
 
-/// CALL ptr16:16 — Far call through memory (межсегментный вызов через память)
-/// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
-/// CALL ptr16:16 — Far call through memory (межсегментный вызов через память)
-/// Читает 32 бита из памяти: сначала 16 бит смещения (IP), затем 16 бит сегмента (CS)
 pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let csip = [
         machine.registers.cs(),
@@ -646,19 +615,13 @@ pub(crate) fn call_far_rm16(machine: &mut DosMachine, prev: &[u8]) {
     let ip_offset = machine.read_phys_u16(addr);
     let cs_segment = machine.read_phys_u16(addr + 2);
 
-    // Сохраняем текущий CS:IP в стек в порядке: сначала CS, затем IP
-    // x86 стек всегда работает через SS физически
-    
-    // 1. Сохраняем текущий CS
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
     let ss_base = (machine.registers.ss() as u32) << 4;
     machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
 
-    // 2. Сохраняем текущий IP
     let sp = machine.registers.sp().wrapping_sub(2);
     machine.registers.set_sp(sp);
-    // ✅ ИСПРАВЛЕНО: Записываем IP по новому адресу SP
     machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
 
     // 3. Загружаем новый сегмент и смещение
@@ -734,11 +697,9 @@ pub(crate) fn jae_rel16(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.step(Some(2));
     bytes.extend_from_slice(&rel16.to_le_bytes());
 
-    // Условие: CF == 0
     let cf = (machine.registers.flags() & flags::CF) == 0;
 
     if cf {
-        // Вычисляем новый IP: текущий IP (после смещения) + rel16
         let new_ip = (machine.registers.ip() as i32).wrapping_add(rel16 as i32) as u16;
         machine.registers.set_ip(new_ip);
     }

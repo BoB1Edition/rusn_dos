@@ -5,7 +5,6 @@ use std::error::Error;
 
 pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>> {
     let palette = video::load_vga_palette();
-    //let debug = DebugLog::new("debug.log");
 
     let mut tick_counter: u64 = 65535;
 
@@ -40,33 +39,33 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
             0x26 => {
                 machine.override_segment = Some(machine.registers.es());
                 machine.opcode_override_segment = Some(opcode);
-            } // ES:
+            }
             0x2E => {
                 machine.override_segment = Some(machine.registers.cs());
                 machine.opcode_override_segment = Some(opcode);
-            } // CS:
+            }
             0x36 => {
                 machine.override_segment = Some(machine.registers.ss());
                 machine.opcode_override_segment = Some(opcode);
-            } // SS:
+            }
             0x3E => {
                 machine.override_segment = Some(machine.registers.ds());
                 machine.opcode_override_segment = Some(opcode);
-            } // DS:
+            }
             0x64 => {
                 machine.override_segment = Some(machine.registers.fs());
                 machine.opcode_override_segment = Some(opcode);
-            } // FS:
+            }
             0x65 => {
                 machine.override_segment = Some(machine.registers.gs());
                 machine.opcode_override_segment = Some(opcode);
-            } // GS:
+            }
             0xF0 => {
-                machine.has_lock_prefix = true; // REPNE
+                machine.has_lock_prefix = true;
                 machine.rep_prefix_type = Some(0xF0)
             }
             0xF2 => {
-                machine.has_rep_prefix = true; // REPNE
+                machine.has_rep_prefix = true;
                 machine.rep_prefix_type = Some(0xF2)
             }
             0xF3 => {
@@ -103,14 +102,13 @@ pub(crate) fn run(machine: &mut DosMachine) -> Result<Option<u8>, Box<dyn Error>
         }
         tick_counter += 1;
         if tick_counter >= 65536 {
-            // ✅ ПРОВЕРЯЕМ ФЛАГ ПЕРЕД ВЫЗОВОМ INT 08h
             if !machine.inhibit_interrupts && crate::flags::test_if(machine.registers.flags()) {
                 crate::instructions::system::call_interrupt(machine, 0x08);
             }
             tick_counter = 0;
         }
         if machine.inhibit_interrupts {
-            machine.inhibit_interrupts = false; // Сбрасываем после 1 инструкции
+            machine.inhibit_interrupts = false;
         }
     }
     Ok(Some(machine.registers.al()))

@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/mcb.rs
+// Ver: 1 File: ./libs/dos_core/src/mcb.rs
 //! DOS Memory Control Block (MCB) allocator.
 //! Real-mode paragraph-based memory manager.
 
@@ -34,9 +34,7 @@ impl MCB {
 
 /// Инициализирует карту памяти, создавая первый MCB, охватывающий всю доступную память.
 pub fn init_memory_map(machine: &mut DosMachine, first_mcb_segment: u16) {
-    //let total_paragraphs = (machine.memory.len() / 16) as u32;
-    //let available = total_paragraphs.saturating_sub(first_mcb_segment as u32);
-    const MAX_CONVENTIONAL_SEGMENT: u16 = 0xA000; // сразу за 640 КБ начинается видеопамять
+    const MAX_CONVENTIONAL_SEGMENT: u16 = 0xF000; // сразу за 640 КБ начинается видеопамять
     let available = MAX_CONVENTIONAL_SEGMENT.saturating_sub(first_mcb_segment);
     //log::debug!("total_paragraphs: {}, available: {}, len: {}", total_paragraphs, available, machine.memory.len());
     log::debug!("available: {}, len: {}", available, machine.memory.len());

@@ -1,4 +1,4 @@
-// Ver: 5 File: ./libs/dos_core/src/machine.rs
+// Ver: 1 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;

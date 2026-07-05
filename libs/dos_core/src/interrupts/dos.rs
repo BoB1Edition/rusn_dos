@@ -1,6 +1,4 @@
 // Ver: 1 File: ./libs/dos_core/src/interrupts/dos.rs
-//! Обработка прерываний DOS (INT 21h, INT 2Fh)
-//! Содержит реализацию основных функций DOS API
 
 use crate::{DosMachine, flags, mcb};
 use log::error;
@@ -125,26 +123,6 @@ fn print_dos_string(machine: &DosMachine) {
 
     println!("{}", s);
 }
-
-/// AH=4Ah — изменение размера блока памяти
-/*fn adjust_memory_block(machine: &mut DosMachine) {
-    let requested_paragraphs = machine.registers.bx();
-    const MAX_CONVENTIONAL_MEMORY_PARAGRAPHS: u16 = 0xA000; // 640 КБ = 0xA000 параграфов
-
-    if requested_paragraphs <= MAX_CONVENTIONAL_MEMORY_PARAGRAPHS {
-        // Успех: сбрасываем флаг переноса (CF=0)
-        let mut flags = machine.registers.flags();
-        flags &= !(flags::CF); // CF = 0
-        machine.registers.set_flags(flags);
-    } else {
-        // Ошибка: недостаточно памяти
-        let mut flags = machine.registers.flags();
-        flags |= flags::CF; // CF = 1
-        machine.registers.set_flags(flags);
-        machine.registers.set_ax(0x08); // Код ошибки: недостаточно памяти
-        machine.registers.set_bx(0xA000);
-    }
-}*/
 
 fn read_char_with_echo(machine: &mut DosMachine) {
     let mut buffer = [0u8; 1];

@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/shift.rs
+// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/shift.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 fn perform_shift(op_field: u8, value: u32, count: u8, flags: u16) -> (u32, u16) {

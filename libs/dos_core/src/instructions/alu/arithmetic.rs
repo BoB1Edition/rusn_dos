@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/alu/arithmetic.rs
 use crate::{DosMachine, flags, modrm::ModRm};
 
 pub(crate) fn add_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
@@ -57,16 +57,42 @@ pub(crate) fn add_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
     let mut bytes = prev.to_vec();
     bytes.push(modrm_byte);
     let modrm = ModRm::from_byte(modrm_byte);
-    let src_val = if modrm.is_register_mode() {
-        machine.read_reg16(modrm.reg_field)
+    
+    // Источник: регистр из reg_field
+    let src_val = machine.read_reg16(modrm.reg_field);
+
+    if modrm.is_register_mode() {
+        // Приёмник: регистр из rm_field
+        let dst_val = machine.read_reg16(modrm.rm_field);
+        let res = dst_val as u32 + src_val as u32;
+        let result = res as u16;
+        let cf = res > 0xFFFF;
+        let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
+        let of = (((dst_val ^ src_val) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
+        
+        machine.write_reg16(modrm.rm_field, result);
+        machine.registers.set_flags(flags::compute_flags_u16(
+            machine.registers.flags(), result, cf, of, af,
+        ));
     } else {
+        // Приёмник: память
         let addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
         bytes.extend_from_slice(&addr.to_le_bytes());
-        machine.read_phys_u16(addr)
-    };
-    do_add_16(machine, modrm.rm_field, src_val);
+        
+        let dst_val = machine.read_phys_u16(addr);
+        let res = dst_val as u32 + src_val as u32;
+        let result = res as u16;
+        let cf = res > 0xFFFF;
+        let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
+        let of = (((dst_val ^ src_val) & 0x8000) == 0) && ((dst_val ^ result) & 0x8000) != 0;
+        
+        machine.write_phys_u16(addr, result);
+        machine.registers.set_flags(flags::compute_flags_u16(
+            machine.registers.flags(), result, cf, of, af,
+        ));
+    }
     machine.log_instruction(csip, &bytes).ok();
 }
 

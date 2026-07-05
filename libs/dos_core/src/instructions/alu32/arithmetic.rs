@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
 
 use crate::{DosMachine, flags, modrm::ModRm};
 
@@ -60,8 +60,27 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
             af,
         ));
     } else {
-        log::error!("Unsupported memory mode in ADD r/m32, r32");
-        machine.halted = true;
+        let phys_addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&phys_addr.to_le_bytes());
+        
+        let dst_val = machine.read_phys_u32(phys_addr);
+        let src_val = machine.read_reg32(modrm.reg_field);
+        let res = (dst_val as u64) + (src_val as u64);
+        let result = res as u32;
+        let cf = res > 0xFFFFFFFF;
+        let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
+        let of = (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
+        
+        machine.write_phys_u32(phys_addr, result);
+        machine.registers.set_flags(flags::compute_flags_u32(
+            machine.registers.flags(),
+            result,
+            cf,
+            of,
+            af,
+        ));
     }
     machine.log_instruction(csip, &bytes).ok();
 }
@@ -79,11 +98,10 @@ pub(crate) fn sub_r32_rm32(machine: &mut DosMachine, prev: &[u8]) {
     let src_val = if modrm.is_register_mode() {
         machine.read_reg32(modrm.rm_field)
     } else {
-        let offset = modrm
+        let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
-            .unwrap() as u16;
-        let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
+            .unwrap();
+        bytes.extend_from_slice(&phys_addr.to_le_bytes());
         machine.read_phys_u32(phys_addr)
     };
     let dst_reg = modrm.reg_field;

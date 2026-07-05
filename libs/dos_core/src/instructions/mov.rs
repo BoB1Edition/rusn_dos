@@ -65,8 +65,6 @@ pub(crate) fn mov_rm16_sreg(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u16(phys_addr, sreg_value);
     }
 
@@ -90,8 +88,6 @@ pub(crate) fn mov_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u16(phys_addr, src_val);
     }
     machine.log_instruction(csip, &bytes).ok();
@@ -260,8 +256,6 @@ pub(crate) fn mov_rm16_imm16(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u16(phys_addr, imm16);
     }
 
@@ -426,8 +420,6 @@ pub(crate) fn mov_rm8_r8(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u8(phys_addr, src_val);
     }
 
@@ -485,8 +477,6 @@ pub(crate) fn mov_rm8_imm8(machine: &mut DosMachine, prev: &[u8]) {
         let phys_addr = modrm
             .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
             .unwrap();
-        //let segment = machine.override_segment.unwrap_or(machine.registers.ds());
-        //let phys_addr = ((segment as u32) << 4).wrapping_add(offset as u32);
         machine.write_phys_u8(phys_addr, imm8);
     }
 
