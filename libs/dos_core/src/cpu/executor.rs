@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/cpu/executor.rs
+// Ver: 4 File: ./libs/dos_core/src/cpu/executor.rs
 
 use crate::{
     cpu::{
@@ -38,7 +38,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
     ];
     match opcode {
         0x00..=0x05 => add(opcode, machine, &full_bytes),
-        0x06..=0x07 | 0x0E | 0x1E..=0x1F | 0x50..=0x5F | 0x68 | 0x8F | 0x9C..=0x9D => {
+        0x06..=0x07 | 0x0E | 0x1E..=0x1F | 0x50..=0x61 | 0x68 | 0x8F | 0x9C..=0x9D => {
             stack(opcode, machine, &full_bytes)
         }
         0x08..=0x0D => or(opcode, machine, &full_bytes),
@@ -55,7 +55,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             control32::bound_r32_rm32(machine, &full_bytes),
             control::bound_r16_rm16(machine, &full_bytes)
         ),
-
+        0x63 => system::arpl(machine, &full_bytes),
         0x69 => dispatch_op32!(
             machine,
             alu32::imul_r32_rm32_imm32(machine, &full_bytes),
@@ -408,7 +408,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
                     // REPNE SCASB – повторять пока ZF=0 (неравенство)
                     while machine.registers.cx() != 0 {
                         mov::scasb(machine, &full_bytes);
-                        
+
                         machine
                             .registers
                             .set_cx(machine.registers.cx().wrapping_sub(1));
@@ -538,6 +538,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             mov32::mov_rm32_imm32(machine, &full_bytes),
             mov::mov_rm16_imm16(machine, &full_bytes)
         ),
+        0xC9 => control::leave(machine, &full_bytes),
         0xCB => control::retf(machine, &full_bytes),
         0xCC => system::int3(machine, &full_bytes),
         0xD0 => alu::shift_group_d0_rm8(machine, &full_bytes),

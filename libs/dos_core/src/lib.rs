@@ -14,6 +14,7 @@ mod modrm;
 mod instructions;
 mod interrupts;
 mod mcb;
+mod keyboard;
 pub mod loader;
 pub mod filesystem;
 pub mod video;

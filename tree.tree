@@ -60,6 +60,7 @@
 │       │   │   ├── ems.rs
 │       │   │   └── mod.rs
 │       │   ├── ivt.rs
+│       │   ├── keyboard.rs
 │       │   ├── lib.rs
 │       │   ├── loader
 │       │   │   ├── com_loader.rs
@@ -76,6 +77,7 @@
 │       │   ├── utils
 │       │   │   └── logging.rs
 │       │   └── video
+│       │       ├── fonts_vga8x16.rs
 │       │       └── mod.rs
 │       └── tests
 ├── README.md
@@ -101,4 +103,4 @@
 ├── tests
 └── tree.tree
 
-19 directories, 83 files
+19 directories, 85 files

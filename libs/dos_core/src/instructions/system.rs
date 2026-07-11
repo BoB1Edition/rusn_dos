@@ -1,25 +1,24 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/system.rs
+// Ver: 3 File: ./libs/dos_core/src/instructions/system.rs
 use log::{error, warn};
 
-use crate::{flags, interrupts::{bios, dos, ems}, machine::DosMachine};
+use crate::{
+    flags, interrupts::{bios, dos, ems}, machine::DosMachine, modrm::ModRm,
+};
 
 pub(crate) fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0xEC); // опкод IN AL, DX
 
     let port = machine.registers.dx();
     let value = match port {
-        0x60 => {
-            // Порт клавиатуры (8042) — возвращаем сканкод клавиши
-            // Для демо-режима возвращаем '1' (сканкод 0x02) с периодической сменой
-            let tick = machine.registers.ip() as u64 / 1000;
-            match tick % 4 {
-                0 => 0x02, // '1'
-                1 => 0x03, // '2'
-                2 => 0x04, // '3'
-                _ => 0x01, // ESC (для выхода)
-            }
+        0x60 => machine.keyboard.read_port_60(),
+        0x64 => {
+            // Статус контроллера клавиатуры
+            machine.keyboard.read_port_64()
         }
         0x40..=0x42 => {
             // Порты таймера 8253/8254 — возвращаем текущее время в мс
@@ -47,13 +46,19 @@ pub(crate) fn in_al_dx(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn nop(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub(crate) fn hlt(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     log::info!(
@@ -67,7 +72,10 @@ pub(crate) fn hlt(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn cmc(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     // Инвертируем флаг переноса (бит 0)
@@ -79,43 +87,17 @@ pub(crate) fn cmc(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let port = machine.read_instr_u8( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let port = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(port);
     let value = match port {
-        0x60 => {
-            // Порт данных клавиатуры (8042)
-            // Возвращаем сканкод с битом 7=0 (нажатие) для простоты
-            let tick = machine.registers.ip() as u64 / 1000;
-            match tick % 4 {
-                0 => 0x1E, // 'A'
-                1 => 0x30, // 'B'
-                2 => 0x2E, // 'C'
-                _ => 0x01, // ESC
-            }
-        }
-        0x64 => {
-            // Статус контроллера клавиатуры 8042
-            // Бит 0: Output buffer status (1 = данные готовы для чтения из порта 0x60)
-            // Бит 1: Input buffer status (1 = буфер занят, 0 = свободен) ← КРИТИЧНО!
-
-            let mut status = 0x18; // Базовый статус: система OK, буферы свободны
-
-            // Бит 1 ставим в 1 ТОЛЬКО если команда ещё не обработана
-            // В реальной hardware: ~100 мкс после записи команды
-            // В эмуляции: считаем команду обработанной сразу после записи
-            // machine.a20_command_pending используется ВНУТРЕННЕ, не влияет на статус
-
-            log::debug!(
-                "Keyboard controller status read: {:#04x} (a20_pending={})",
-                status,
-                machine.a20_command_pending
-            );
-
-            status
-        }
+        0x60 => machine.keyboard.read_port_60(),
+        0x64 => machine.keyboard.read_port_64(),
 
         0x40..=0x42 => {
             // Порты таймера 8253/8254
@@ -127,11 +109,7 @@ pub(crate) fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
         0x20 | 0xA0 => 0x00, // PIC — всегда готов к обслуживанию
         0x92 => {
             log::debug!("0x92 in a20_enabled: {}", machine.a20_enabled);
-            if machine.a20_enabled {
-                0x02
-            } else {
-                0x00
-            }
+            if machine.a20_enabled { 0x02 } else { 0x00 }
         } // Fast A20 Gate — линия A20 включена
         _ => {
             warn!("IN AL, imm8 from unimplemented port {:#02x}", port);
@@ -144,8 +122,11 @@ pub(crate) fn in_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
-    let port = machine.read_instr_u8( machine.registers.ip());
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let port = machine.read_instr_u8(machine.registers.ip());
     machine.registers.step(None);
     let mut bytes = prev.to_vec();
     bytes.push(port);
@@ -300,7 +281,10 @@ pub(crate) fn out_imm8_al(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn std(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     // Устанавливаем флаг направления DF (бит 10) в 1
@@ -312,7 +296,10 @@ pub(crate) fn std(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn stc(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     // Устанавливаем флаг переноса CF (бит 0) в 1
@@ -325,7 +312,10 @@ pub(crate) fn stc(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/system.rs
 pub(crate) fn clc(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     let mut flags = machine.registers.flags();
@@ -337,7 +327,10 @@ pub(crate) fn clc(machine: &mut DosMachine, prev: &[u8]) {
 
 // libs/dos_core/src/instructions/system.rs
 pub(crate) fn sahf(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x9E);
 
@@ -358,7 +351,10 @@ pub(crate) fn sahf(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn outsw(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x6F); // опкод OUTSW
 
@@ -416,7 +412,10 @@ pub(crate) fn outsw(machine: &mut DosMachine, prev: &[u8]) {
 /// OUTSD — Output String Doubleword (32-bit)
 /// Выводит двойное слово из [DS:ESI] в порт DX, обновляет ESI на ±4
 pub(crate) fn outsd(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x66); // префикс операнда
     bytes.push(0x6F); // опкод OUTSD
@@ -451,7 +450,10 @@ pub(crate) fn outsd(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn lahf(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x9F); // опкод LAHF
 
@@ -474,7 +476,10 @@ pub(crate) fn lahf(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn outsb(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x6E); // опкод OUTSB
 
@@ -492,13 +497,13 @@ pub(crate) fn outsb(machine: &mut DosMachine, prev: &[u8]) {
 
     // Эмуляция вывода в различные порты
     match port {
-        0x60 => {
+        /*0x60 => {
             // Порт данных клавиатуры (8042) — эмуляция команд
             log::info!("OUTSB to keyboard data port (0x60): command {:#02x}", value);
             if value == 0xED {
                 machine.keyboard_led_command_pending = true;
             }
-        }
+        }*/
         0x3F8..=0x3FF => {
             // COM1 последовательный порт — эмуляция вывода символа
             if value >= 32 && value < 127 {
@@ -541,7 +546,10 @@ pub(crate) fn outsb(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn wait(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
 
     // В эмуляторе без поддержки FPU инструкция является no-op
@@ -559,7 +567,10 @@ pub(crate) fn wait(machine: &mut DosMachine, prev: &[u8]) {
 /// INSB — Input String Byte
 /// Читает байт из порта DX и записывает его в [ES:DI], затем обновляет DI
 pub(crate) fn insb(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x6C); // опкод INSB
 
@@ -616,7 +627,10 @@ pub(crate) fn insb(machine: &mut DosMachine, prev: &[u8]) {
 /// INSW — Input String Word
 /// Читает слово из порта DX и записывает его в [ES:DI], затем обновляет DI на ±2
 pub(crate) fn insw(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip()  - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     bytes.push(0x6D); // опкод INSW
 
@@ -661,6 +675,10 @@ pub(crate) fn insw(machine: &mut DosMachine, prev: &[u8]) {
 fn dispatch_internal_interrupt(machine: &mut DosMachine, vector: u8) {
     match vector {
         0x08 => bios::handle_int08(machine),
+        0x09 => {
+            machine.out_imm8_al(0x20, 0x20);
+            log::debug!("IRQ1 (Keyboard) handled");
+        }
         0x10 => bios::handle_int10(machine),
         0x12 => bios::handle_int12(machine),
         0x15 => bios::handle_int15(machine),
@@ -693,11 +711,19 @@ pub(crate) fn call_interrupt(machine: &mut DosMachine, vector: u8) {
     } else {
         let sp = machine.registers.sp() as u32;
         let base = (machine.registers.ss() as u32) << 4;
-        machine.registers.set_sp((sp.wrapping_sub(6) & 0xFFFF) as u16);
+        machine
+            .registers
+            .set_sp((sp.wrapping_sub(6) & 0xFFFF) as u16);
         let new_sp = machine.registers.sp() as u32;
         machine.write_phys_u16(base.wrapping_add(new_sp), machine.registers.flags());
-        machine.write_phys_u16(base.wrapping_add(new_sp.wrapping_add(2)), machine.registers.cs());
-        machine.write_phys_u16(base.wrapping_add(new_sp.wrapping_add(4)), machine.registers.ip());
+        machine.write_phys_u16(
+            base.wrapping_add(new_sp.wrapping_add(2)),
+            machine.registers.cs(),
+        );
+        machine.write_phys_u16(
+            base.wrapping_add(new_sp.wrapping_add(4)),
+            machine.registers.ip(),
+        );
 
         let mut f = machine.registers.flags();
         f &= !(flags::IF | flags::TF);
@@ -707,10 +733,11 @@ pub(crate) fn call_interrupt(machine: &mut DosMachine, vector: u8) {
     }
 }
 
-// В system.rs
-
 pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let mut bytes = prev.to_vec();
     let vector = machine.read_instr_u8(machine.registers.ip());
     bytes.push(vector);
@@ -726,20 +753,23 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
         // x86: стек всегда работает через SS физически. Игнорируем override_segment.
         let ss_base = (machine.registers.ss() as u32) << 4;
         let mut sp = machine.registers.sp();
-        
-        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
         machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.flags());
-        
-        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
         machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
-        
-        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
         machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
-        
+
         let mut f = machine.registers.flags();
         f &= !(flags::IF | flags::TF);
         machine.registers.set_flags(f);
-        
+
         machine.registers.set_cs(handler_cs);
         machine.registers.set_ip(handler_ip);
     }
@@ -747,7 +777,10 @@ pub(crate) fn int(machine: &mut DosMachine, prev: &[u8]) {
 }
 
 pub(crate) fn iret(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
     let ss_base = (machine.registers.ss() as u32) << 4;
 
@@ -769,12 +802,15 @@ pub(crate) fn iret(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_ip(ip);
     machine.registers.set_cs(cs);
     machine.registers.set_flags(flags);
-    
+
     machine.log_instruction(csip, &bytes).ok();
 }
 
 pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
-    let csip = [machine.registers.cs(), machine.registers.ip() - prev.len() as u16];
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
     let bytes = prev.to_vec();
     let vector: u8 = 3;
     let ivt_addr = (vector as u32) * 4;
@@ -786,11 +822,14 @@ pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
     } else {
         let ss_base = (machine.registers.ss() as u32) << 4;
         let mut sp = machine.registers.sp();
-        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
         machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.flags());
-        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
         machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.cs());
-        sp = sp.wrapping_sub(2); machine.registers.set_sp(sp);
+        sp = sp.wrapping_sub(2);
+        machine.registers.set_sp(sp);
         machine.write_phys_u16(ss_base.wrapping_add(sp as u32), machine.registers.ip());
         let mut f = machine.registers.flags();
         f &= !(flags::IF | flags::TF);
@@ -798,5 +837,72 @@ pub(crate) fn int3(machine: &mut DosMachine, prev: &[u8]) {
         machine.registers.set_cs(handler_cs);
         machine.registers.set_ip(handler_ip);
     }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+
+pub(crate) fn arpl(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // RPL из регистра-источника (reg_field) — младшие 2 бита
+    let src_rpl = machine.read_reg16(modrm.reg_field) & 0x03;
+
+    if modrm.is_register_mode() {
+        // Приёмник — регистр
+        let dst_old = machine.read_reg16(modrm.rm_field);
+        let dst_rpl_old = dst_old & 0x03;
+        let dst_new = (dst_old & 0xFFFC) | src_rpl;
+        machine.write_reg16(modrm.rm_field, dst_new);
+
+        // Устанавливаем ZF
+        let mut flags = machine.registers.flags();
+        if src_rpl > dst_rpl_old {
+            flags |= flags::ZF;
+        } else {
+            flags &= !flags::ZF;
+        }
+        machine.registers.set_flags(flags);
+
+        log::debug!(
+            "ARPL: reg{} {:#06x} → {:#06x} (RPL {} → {}), ZF={}",
+            modrm.rm_field, dst_old, dst_new, dst_rpl_old, src_rpl,
+            src_rpl > dst_rpl_old
+        );
+    } else {
+        // Приёмник — память
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+
+        let dst_old = machine.read_phys_u16(addr);
+        let dst_rpl_old = dst_old & 0x03;
+        let dst_new = (dst_old & 0xFFFC) | src_rpl;
+        machine.write_phys_u16(addr, dst_new);
+
+        // Устанавливаем ZF
+        let mut flags = machine.registers.flags();
+        if src_rpl > dst_rpl_old {
+            flags |= flags::ZF;
+        } else {
+            flags &= !flags::ZF;
+        }
+        machine.registers.set_flags(flags);
+
+        log::debug!(
+            "ARPL: [{:#06x}] {:#06x} → {:#06x} (RPL {} → {}), ZF={}",
+            addr, dst_old, dst_new, dst_rpl_old, src_rpl,
+            src_rpl > dst_rpl_old
+        );
+    }
+
     machine.log_instruction(csip, &bytes).ok();
 }

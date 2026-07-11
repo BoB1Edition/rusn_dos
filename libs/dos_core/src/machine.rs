@@ -1,14 +1,11 @@
-// Ver: 1 File: ./libs/dos_core/src/machine.rs
+// Ver: 3 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
 use minifb::Window;
 
 use crate::{
-    filesystem::FileSystem,
-    memory::Memory,
-    registers::Registers,
-    video::{VideoMode, VideoSystem},
+    filesystem::FileSystem, keyboard::Keyboard, memory::Memory, registers::Registers, video::{VideoMode, VideoSystem},
 };
 
 #[derive(Debug)]
@@ -28,14 +25,13 @@ pub struct DosMachine {
     window: Option<*mut Window>,
     pub(crate) has_rep_prefix: bool,
     pub(crate) rep_prefix_type: Option<u8>,
-    pub(crate) keyboard_led_command_pending: bool,
+    pub(crate) keyboard: Keyboard,
     pub(crate) timer_channel_0: Option<u8>,
     pub(crate) timer_channel_1: Option<u8>,
     pub(crate) timer_channel_2: Option<u8>,
     pub(crate) timer_initialized: bool,
     pub(crate) a20_enabled: bool,
     pub(crate) a20_command_pending: bool,
-    pub(crate) keyboard_status: u8,
     pub(crate) ems_page_frame_segment: u16,
     pub(crate) ems_total_pages: u16,
     pub(crate) ems_free_pages: u16,
@@ -47,7 +43,7 @@ pub struct DosMachine {
     pub(crate) idtr_limit: u16,
     pub(crate) idtr_base: u32,
     pub(crate) first_mcb_segment: u16,
-    pub(crate) inhibit_interrupts: bool
+    pub(crate) inhibit_interrupts: bool,
 }
 
 impl DosMachine {
@@ -260,13 +256,28 @@ impl DosMachine {
     pub(crate) fn print_4byte(&self, segment: u16, offset: u16) {
         for i in 0..10 {
             let op = self.read_u8(segment, offset + i);
-            println!("op{i}: {op:#02X}")
+            println!("op{i}: {op:#04X}")
         }
     }
     #[inline(always)]
     pub fn read_phys_u8(&self, addr: u32) -> u8 {
         let masked = self.apply_a20_mask(addr);
         if masked >= 0xA0000 && masked < 0xC0000 {
+            // === ТЕКСТОВЫЙ РЕЖИМ (0xB8000 - 0xBFFFF) ===
+            if self.video.mode == VideoMode::Text80x25 && masked >= 0xB8000 && masked < 0xC0000 {
+                let offset = (masked - 0xB8000) as usize;
+                if offset < self.video.text_buffer.data.len() * 2 {
+                    let word = self.video.text_buffer.data[offset / 2];
+                    // Возвращаем либо символ (четный байт), либо атрибут (нечетный)
+                    return if offset % 2 == 0 {
+                        (word & 0xFF) as u8
+                    } else {
+                        ((word >> 8) & 0xFF) as u8
+                    };
+                }
+                return 0;
+            }
+            // === ГРАФИЧЕСКИЙ РЕЖИМ (Mode13h) ===
             if self.video.mode == VideoMode::Mode13h && masked < 0xA0000 + 320 * 200 {
                 if let Some(fb) = &self.video.framebuffer {
                     let video_offset = (masked - 0xA0000) as usize;
@@ -298,6 +309,24 @@ impl DosMachine {
     pub fn write_phys_u8(&mut self, addr: u32, value: u8) {
         let masked = self.apply_a20_mask(addr);
         if masked >= 0xA0000 && masked < 0xC0000 {
+            // === ТЕКСТОВЫЙ РЕЖИМ (0xB8000 - 0xBFFFF) ===
+            if self.video.mode == VideoMode::Text80x25 && masked >= 0xB8000 && masked < 0xC0000 {
+                let offset = (masked - 0xB8000) as usize;
+                if offset < self.video.text_buffer.data.len() * 2 {
+                    let idx = offset / 2;
+                    let word = self.video.text_buffer.data[idx];
+                    // Обновляем либо символ, либо атрибут, сохраняя вторую половину слова
+                    let new_word = if offset % 2 == 0 {
+                        (word & 0xFF00) | (value as u16) // Младший байт (символ)
+                    } else {
+                        (word & 0x00FF) | ((value as u16) << 8) // Старший байт (атрибут)
+                    };
+                    self.video.text_buffer.data[idx] = new_word;
+                    self.video.dirty = true;
+                }
+                return;
+            }
+            // === ГРАФИЧЕСКИЙ РЕЖИМ (Mode13h) ===
             if self.video.mode == VideoMode::Mode13h && masked < 0xA0000 + 320 * 200 {
                 if let Some(fb) = self.video.framebuffer.as_mut() {
                     let video_offset = (masked - 0xA0000) as usize;
@@ -357,9 +386,9 @@ impl DosMachine {
             video: VideoSystem::new(),
             window: None,
             has_rep_prefix: false,
+            keyboard: Keyboard::new(),
             filesystem: FileSystem::new(),
             rep_prefix_type: None,
-            keyboard_led_command_pending: false,
             timer_initialized: false,
             timer_channel_0: None,
             timer_channel_1: None,
@@ -367,7 +396,6 @@ impl DosMachine {
             serial_buffer: Some(Vec::new()),
             a20_enabled: false,
             a20_command_pending: false,
-            keyboard_status: 0x18,
             ems_page_frame_segment: 0xD000, // Стандартный фрейм EMS
             ems_total_pages: 256,           // 4 MB памяти (256 * 16KB)
             ems_free_pages: 256,
@@ -431,6 +459,18 @@ impl DosMachine {
                 log::warn!("OUT AL, {:#02x} to unimplemented port {:#02x}", value, port);
             }
         }
+    }
+    
+    pub fn halted(&self) -> bool {
+        self.halted
+    }
+    
+    pub fn video(&self) -> &VideoSystem {
+        &self.video
+    }
+    
+    pub fn video_mut(&mut self) -> &mut VideoSystem {
+        &mut self.video
     }
 }
 

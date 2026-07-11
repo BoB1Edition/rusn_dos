@@ -1,4 +1,4 @@
-// Ver: 1 File: src/app.rs
+// Ver: 3 File: src/app.rs
 use std::{
     error::Error,
     ffi::OsStr,
@@ -202,7 +202,11 @@ impl App {
                 self.resolution.height as usize,
                 WindowOptions::default(),
             )?;
-            dm.run(Some(&mut window))?;
+            window.set_target_fps(60);
+            //while window.is_open() && !dm.halted() {
+                // 1. Выполняем инструкции CPU
+                dm.run(Some(&mut window))?;
+            //}
             Ok(())
         } else {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();

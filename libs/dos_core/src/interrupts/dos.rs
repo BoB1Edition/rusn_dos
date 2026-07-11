@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/interrupts/dos.rs
+// Ver: 2 File: ./libs/dos_core/src/interrupts/dos.rs
 
 use crate::{DosMachine, flags, mcb};
 use log::error;
@@ -29,10 +29,13 @@ pub fn handle_int21(machine: &mut DosMachine) {
             set_carry_flag(machine, false);
         }
         0x35 => get_interrupt_vector(machine),
+        0x3B => set_current_directory(machine), // CHDIR
+        0x3C => create_file(machine),           // CREATE FILE
         0x3D => open_file(machine),
         0x3E => close_file(machine),
         0x3F => read_file(machine),  // Чтение из файла
         0x40 => write_file(machine), // Запись в файл
+        0x41 => delete_file(machine),           // DELETE FILE
         0x42 => seek_file(machine),  // Перемещение указателя
         0x43 => file_attributes(machine),
         0x47 => get_current_directory(machine),
@@ -40,8 +43,11 @@ pub fn handle_int21(machine: &mut DosMachine) {
         0x49 => free_memory_handler(machine),
         0x4A => modify_memory_handler(machine),
         0x4C => machine.halted = true,
+        0x4E => find_first(machine),            // FIND FIRST
+        0x4F => find_next(machine),             // FIND NEXT
         _ => {
-        log::warn!("Unsupported DOS call 21h/{:02X}h at CS:IP={:04X}:{:04X}",
+            log::warn!(
+                "Unsupported DOS call 21h/{:02X}h at CS:IP={:04X}:{:04X}",
                 machine.registers.ah(),
                 machine.registers.cs(),
                 machine.registers.ip()
@@ -314,7 +320,12 @@ fn get_interrupt_vector(machine: &mut DosMachine) {
     machine.registers.set_bx(ip);
     // Сбрасываем CF = 0 (успех)
     set_carry_flag(machine, false);
-    log::info!("INT 21h / AH=35h: Get interrupt vector {:02X}h -> {:04X}:{:04X}", vector, cs, ip);
+    log::info!(
+        "INT 21h / AH=35h: Get interrupt vector {:02X}h -> {:04X}:{:04X}",
+        vector,
+        cs,
+        ip
+    );
 }
 
 fn set_interrupt_vector(machine: &mut DosMachine) {
@@ -347,7 +358,10 @@ fn file_attributes(machine: &mut DosMachine) {
     match al {
         0x00 => {
             // Получить атрибуты
-            log::info!("INT 21h / AH=43h, AL=00h: Get file attributes for '{}'", filename);
+            log::info!(
+                "INT 21h / AH=43h, AL=00h: Get file attributes for '{}'",
+                filename
+            );
             match machine.filesystem.resolve_path(&filename) {
                 Ok(path) if path.exists() => {
                     // Возвращаем атрибут "архивный" (бит 5) и CF=0
@@ -397,7 +411,11 @@ fn get_current_directory(machine: &mut DosMachine) {
         (b'A' + dl - 1) as char
     };
 
-    let dir = machine.filesystem.get_current_directory(drive_letter).unwrap_or("").to_string();;
+    let dir = machine
+        .filesystem
+        .get_current_directory(drive_letter)
+        .unwrap_or("")
+        .to_string();
 
     let seg = machine.registers.ds();
     let mut off = machine.registers.si();
@@ -459,4 +477,149 @@ fn modify_memory_handler(machine: &mut DosMachine) {
             machine.registers.set_bx(max);
         }
     }
+}
+
+/// AH=3Bh — CHDIR (Set Current Directory)
+fn set_current_directory(machine: &mut DosMachine) {
+    let path = machine.filesystem.extract_filename(
+        machine.registers.ds(),
+        machine.registers.dx(),
+        |seg, off| machine.read_u8(seg, off),
+    );
+    
+    // Парсим букву диска, если она есть (например, "C:\DIR")
+    let (drive, dir_path) = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
+        (path.chars().next().unwrap().to_ascii_uppercase(), &path[2..])
+    } else {
+        (machine.filesystem.get_current_drive(), path.as_str())
+    };
+
+    match machine.filesystem.set_current_directory(drive, dir_path) {
+        Ok(_) => set_carry_flag(machine, false),
+        Err(e) => {
+            log::error!("CHDIR failed: {}", e);
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(3); // AX=3: Path not found
+        }
+    }
+}
+
+/// AH=3Ch — CREATE FILE
+fn create_file(machine: &mut DosMachine) {
+    let path = machine.filesystem.extract_filename(
+        machine.registers.ds(),
+        machine.registers.dx(),
+        |seg, off| machine.read_u8(seg, off),
+    );
+    let attrs = machine.registers.cx();
+    
+    match machine.filesystem.create_file(&path, attrs as u16) {
+        Ok(handle) => {
+            set_carry_flag(machine, false);
+            machine.registers.set_ax(handle);
+        }
+        Err(e) => {
+            log::error!("Create file failed: {}", e);
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(5); // AX=5: Access denied
+        }
+    }
+}
+
+/// AH=41h — DELETE FILE
+fn delete_file(machine: &mut DosMachine) {
+    let path = machine.filesystem.extract_filename(
+        machine.registers.ds(),
+        machine.registers.dx(),
+        |seg, off| machine.read_u8(seg, off),
+    );
+    
+    match machine.filesystem.delete_file(&path) {
+        Ok(_) => set_carry_flag(machine, false),
+        Err(e) => {
+            log::error!("Delete file failed: {}", e);
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(2); // AX=2: File not found
+        }
+    }
+}
+
+/// AH=4Eh — FIND FIRST
+fn find_first(machine: &mut DosMachine) {
+    let path = machine.filesystem.extract_filename(
+        machine.registers.ds(),
+        machine.registers.dx(),
+        |seg, off| machine.read_u8(seg, off),
+    );
+    let _search_attrs = machine.registers.cx(); // Атрибуты для поиска (пока игнорируем)
+    let dta_addr = get_dta_addr(machine);
+
+    match machine.filesystem.find_first(&path, dta_addr) {
+        Ok(Some(found)) => {
+            write_dta(machine, dta_addr, &found);
+            set_carry_flag(machine, false);
+        }
+        Ok(None) => {
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(18); // AX=18: No more files
+        }
+        Err(e) => {
+            log::error!("Find first failed: {}", e);
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(2); // AX=2: File not found
+        }
+    }
+}
+
+/// AH=4Fh — FIND NEXT
+fn find_next(machine: &mut DosMachine) {
+    let dta_addr = get_dta_addr(machine);
+    
+    match machine.filesystem.find_next(dta_addr) {
+        Ok(Some(found)) => {
+            write_dta(machine, dta_addr, &found);
+            set_carry_flag(machine, false);
+        }
+        Ok(None) => {
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(18); // AX=18: No more files
+        }
+        Err(e) => {
+            log::error!("Find next failed: {}", e);
+            set_carry_flag(machine, true);
+            machine.registers.set_ax(18);
+        }
+    }
+}
+
+/// Возвращает физический адрес DTA (Disk Transfer Area).
+/// По умолчанию в DOS DTA находится в PSP по смещению 0080h.
+fn get_dta_addr(machine: &DosMachine) -> u32 {
+    // В полноценном эмуляторе здесь нужно брать сегмент из AH=1Ah, 
+    // но пока используем стандартный DS:0080h
+    ((machine.registers.ds() as u32) << 4) + 0x0080
+}
+
+/// Записывает структуру FoundFile в DTA по стандарту DOS (43 байта).
+fn write_dta(machine: &mut DosMachine, dta_addr: u32, found: &crate::filesystem::FoundFile) {
+    // 0x00 - 0x14: Search context (21 байт). 
+    // Наш filesystem.rs хранит контекст в HashMap по ключу dta_addr, 
+    // поэтому эти 21 байт в памяти можем оставить нетронутыми.
+    
+    // 0x15: Атрибуты файла
+    machine.write_phys_u8(dta_addr + 0x15, found.attr);
+    // 0x16-0x17: Время
+    machine.write_phys_u16(dta_addr + 0x16, found.time);
+    // 0x18-0x19: Дата
+    machine.write_phys_u16(dta_addr + 0x18, found.date);
+    // 0x1A-0x1D: Размер файла (32 бита)
+    machine.write_phys_u32(dta_addr + 0x1A, found.size);
+    
+    // 0x1E-0x2A: Имя файла в формате 8.3 (13 байт, включая null-terminator)
+    let name_bytes = found.name_83.as_bytes();
+    for (i, &b) in name_bytes.iter().take(12).enumerate() {
+        machine.write_phys_u8(dta_addr + 0x1E + i as u32, b);
+    }
+    // Null-terminator
+    machine.write_phys_u8(dta_addr + 0x1E + name_bytes.len().min(12) as u32, 0);
 }

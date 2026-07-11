@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/mcb.rs
+// Ver: 2 File: ./libs/dos_core/src/mcb.rs
 //! DOS Memory Control Block (MCB) allocator.
 //! Real-mode paragraph-based memory manager.
 
@@ -198,7 +198,6 @@ fn coalesce(machine: &mut DosMachine, first_seg: u16) {
                 signature: next.signature,
                 ..mcb
             }.write(machine, seg);
-            // не сдвигаем seg, остаёмся на этом же месте (могло появиться ещё свободное место)
         } else {
             seg = next_seg;
         }

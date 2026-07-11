@@ -1,9 +1,8 @@
-// Ver: 1 File: ./libs/dos_core/src/interrupts/bios.rs
+// Ver: 3 File: ./libs/dos_core/src/interrupts/bios.rs
 use std::io::Write;
 
 use crate::video::VideoMode;
 use crate::{DosMachine, consts, flags};
-
 
 pub(crate) fn handle_int10(machine: &mut DosMachine) {
     match machine.registers.ah() {
@@ -56,10 +55,32 @@ pub(crate) fn handle_int10(machine: &mut DosMachine) {
 pub(crate) fn handle_int16(machine: &mut DosMachine) {
     match machine.registers.ah() {
         0x00 | 0x10 => {
-            machine.registers.set_ax(0x3100);
+            if let Some(key) = machine.keyboard.pop_key() {
+                machine.registers.set_ax(key);
+            } else {
+                machine.registers.set_ax(0x0000);
+            }
+        }
+        0x01 => {
+            if let Some(key) = machine.keyboard.peek_key() {
+                machine.registers.set_ax(key);
+                let mut flags = machine.registers.flags();
+                flags &= !crate::flags::ZF; // ZF = 0
+                machine.registers.set_flags(flags);
+            } else {
+                let mut flags = machine.registers.flags();
+                flags |= crate::flags::ZF; // ZF = 1
+                machine.registers.set_flags(flags);
+            }
+        }
+        0x02 => {
+            machine.registers.set_al(machine.keyboard.shift_flags);
+        }
+        0x12 => {
+            machine.registers.set_al(machine.keyboard.shift_flags);
         }
         _ => {
-            log::info!("Unsupported INT 16h / AH={:02X}", machine.registers.ah());
+            log::warn!("Unsupported INT 16h / AH={:02X}", machine.registers.ah());
         }
     }
 }

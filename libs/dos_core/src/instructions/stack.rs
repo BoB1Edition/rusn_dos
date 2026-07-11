@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/stack.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/stack.rs
 use crate::{machine::DosMachine, modrm::ModRm, pop_reg16, push_reg16};
 
 // pushf
@@ -28,74 +28,6 @@ pub(crate) fn popf(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_sp(sp.wrapping_add(2));
     machine.registers.set_flags(flags);
     machine.log_instruction(csip, &bytes).ok();
-}
-
-// pusha
-pub(crate) fn pusha(machine: &mut DosMachine) {
-    let original_sp = machine.registers.sp();
-    let regs = [
-        machine.registers.ax(),
-        machine.registers.cx(),
-        machine.registers.dx(),
-        machine.registers.bx(),
-        original_sp,
-        machine.registers.bp(),
-        machine.registers.si(),
-        machine.registers.di(),
-    ];
-    let ss_base = (machine.registers.ss() as u32) << 4;
-    for &reg in regs.iter().rev() {
-        let sp = machine.registers.sp().wrapping_sub(2);
-        machine.registers.set_sp(sp);
-        machine.write_phys_u16(ss_base.wrapping_add(sp as u32), reg);
-    }
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-    machine.log_instruction(csip, &[0x60]).ok();
-}
-
-// popa
-pub(crate) fn popa(machine: &mut DosMachine) {
-    let ss_base = (machine.registers.ss() as u32) << 4;
-    let di = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_di(di);
-    let si = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_si(si);
-    let bp = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_bp(bp);
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2)); // skip SP
-    let bx = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_bx(bx);
-    let dx = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_dx(dx);
-    let cx = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_cx(cx);
-    let ax = machine.read_phys_u16(ss_base.wrapping_add(machine.registers.sp() as u32));
-    machine
-        .registers
-        .set_sp(machine.registers.sp().wrapping_add(2));
-    machine.registers.set_ax(ax);
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-    machine.log_instruction(csip, &[0x61]).ok();
 }
 
 // push_imm16
@@ -199,67 +131,6 @@ pub(crate) fn pop_fs(machine: &mut DosMachine) {
         .registers
         .set_sp(machine.registers.sp().wrapping_add(2));
     machine.registers.set_fs(fs);
-}
-
-pub(crate) fn pushad(machine: &mut DosMachine) {
-    let original_esp = machine.registers.esp();
-    let regs = [
-        machine.registers.eax(),
-        machine.registers.ecx(),
-        machine.registers.edx(),
-        machine.registers.ebx(),
-        original_esp,
-        machine.registers.ebp(),
-        machine.registers.esi(),
-        machine.registers.edi(),
-    ];
-    let base = (machine.registers.ss() as u32) << 4;
-    for &reg in regs.iter().rev() {
-        let new_esp = machine.registers.esp().wrapping_sub(4);
-        machine.registers.set_esp(new_esp);
-        let phys_addr = base.wrapping_add(new_esp); // A20 применится в write_phys_u32
-        machine.write_phys_u32(phys_addr, reg);
-    }
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-    machine.log_instruction(csip, &[0x66, 0x60]).ok();
-}
-
-pub(crate) fn popad(machine: &mut DosMachine) {
-    let base = (machine.registers.ss() as u32) << 4;
-    let mut esp = machine.registers.esp();
-
-    // Читаем в порядке: EDI, ESI, EBP, [skip ESP], EBX, EDX, ECX, EAX
-    let edi = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-    let esi = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-    let ebp = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-
-    // Пропускаем сохранённое значение ESP (стандартное поведение POPAD)
-    esp = esp.wrapping_add(4);
-
-    let ebx = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-    let edx = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-    let ecx = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-    let eax = machine.read_phys_u32(base.wrapping_add(esp));
-    esp = esp.wrapping_add(4);
-
-    // Восстанавливаем регистры
-    machine.registers.set_edi(edi);
-    machine.registers.set_esi(esi);
-    machine.registers.set_ebp(ebp);
-    machine.registers.set_esp(esp);
-    machine.registers.set_ebx(ebx);
-    machine.registers.set_edx(edx);
-    machine.registers.set_ecx(ecx);
-    machine.registers.set_eax(eax);
-
-    let csip = [machine.registers.cs(), machine.registers.ip() - 1];
-    machine.log_instruction(csip, &[0x66, 0x61]).ok();
 }
 
 pub(crate) fn pop_es(machine: &mut DosMachine) {
@@ -376,5 +247,179 @@ pub(crate) fn popfd(machine: &mut DosMachine, prev: &[u8]) {
     let eflags = machine.read_phys_u32(phys_addr);
     machine.registers.set_esp(esp.wrapping_add(4));
     machine.registers.set_eflags(eflags);
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// PUSHA — Push All General-Purpose Registers (16-bit, опкод 0x60 без префикса 0x66)
+/// Порядок: AX, CX, DX, BX, SP(original), BP, SI, DI
+pub(crate) fn pusha(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let bytes = prev.to_vec();
+
+    let ss_base = (machine.registers.ss() as u32) << 4;
+    
+    // Сохраняем оригинальное значение SP ДО начала операции
+    let temp_sp = machine.registers.sp();
+    
+    // Регистры для сохранения в порядке PUSHA
+    let regs = [
+        machine.registers.ax(),
+        machine.registers.cx(),
+        machine.registers.dx(),
+        machine.registers.bx(),
+        temp_sp,               // ← оригинальный SP
+        machine.registers.bp(),
+        machine.registers.si(),
+        machine.registers.di(),
+    ];
+
+    // PUSH каждый регистр (стек растёт вниз)
+    for &val in &regs {
+        let new_sp = machine.registers.sp().wrapping_sub(2);
+        machine.registers.set_sp(new_sp);
+        let addr = ss_base.wrapping_add(new_sp as u32);
+        machine.write_phys_u16(addr, val);
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// PUSHAD — Push All General-Purpose Registers (32-bit, опкод 0x60 с префиксом 0x66)
+/// Порядок: EAX, ECX, EDX, EBX, ESP(original), EBP, ESI, EDI
+pub(crate) fn pushad(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let mut bytes = prev.to_vec();
+    bytes.insert(0, 0x66); // Добавляем префикс для логирования
+
+    let ss_base = (machine.registers.ss() as u32) << 4;
+    
+    // Сохраняем оригинальное значение ESP ДО начала операции
+    let temp_esp = machine.registers.esp();
+    
+    // Регистры для сохранения в порядке PUSHAD
+    let regs = [
+        machine.registers.eax(),
+        machine.registers.ecx(),
+        machine.registers.edx(),
+        machine.registers.ebx(),
+        temp_esp,              // ← оригинальный ESP
+        machine.registers.ebp(),
+        machine.registers.esi(),
+        machine.registers.edi(),
+    ];
+
+    // PUSH каждый регистр (стек растёт вниз, по 4 байта)
+    for &val in &regs {
+        let new_esp = machine.registers.esp().wrapping_sub(4);
+        machine.registers.set_esp(new_esp);
+        let addr = ss_base.wrapping_add(new_esp);
+        machine.write_phys_u32(addr, val);
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// POPA — Pop All General-Purpose Registers (16-bit, опкод 0x61 без префикса 0x66)
+/// Порядок извлечения: DI, SI, BP, SP(игнорируется), BX, DX, CX, AX
+pub(crate) fn popa(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let bytes = prev.to_vec();
+
+    let ss_base = (machine.registers.ss() as u32) << 4;
+
+    // POP в обратном порядке: DI, SI, BP, (SP пропускается), BX, DX, CX, AX
+    let mut sp = machine.registers.sp();
+    
+    let di_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_di(machine.read_phys_u16(di_addr));
+    sp = sp.wrapping_add(2);
+    
+    let si_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_si(machine.read_phys_u16(si_addr));
+    sp = sp.wrapping_add(2);
+    
+    let bp_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_bp(machine.read_phys_u16(bp_addr));
+    sp = sp.wrapping_add(2);
+    
+    // SP из стека ИГНОРИРУЕТСЯ (по спецификации Intel)
+    sp = sp.wrapping_add(2);
+    
+    let bx_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_bx(machine.read_phys_u16(bx_addr));
+    sp = sp.wrapping_add(2);
+    
+    let dx_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_dx(machine.read_phys_u16(dx_addr));
+    sp = sp.wrapping_add(2);
+    
+    let cx_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_cx(machine.read_phys_u16(cx_addr));
+    sp = sp.wrapping_add(2);
+    
+    let ax_addr = ss_base.wrapping_add(sp as u32);
+    machine.registers.set_ax(machine.read_phys_u16(ax_addr));
+    sp = sp.wrapping_add(2);
+    
+    machine.registers.set_sp(sp);
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// POPAD — Pop All General-Purpose Registers (32-bit, опкод 0x61 с префиксом 0x66)
+pub(crate) fn popad(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let mut bytes = prev.to_vec();
+    bytes.insert(0, 0x66);
+
+    let ss_base = (machine.registers.ss() as u32) << 4;
+
+    let mut esp = machine.registers.esp();
+    
+    let edi_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_edi(machine.read_phys_u32(edi_addr));
+    esp = esp.wrapping_add(4);
+    
+    let esi_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_esi(machine.read_phys_u32(esi_addr));
+    esp = esp.wrapping_add(4);
+    
+    let ebp_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_ebp(machine.read_phys_u32(ebp_addr));
+    esp = esp.wrapping_add(4);
+    
+    // ESP из стека ИГНОРИРУЕТСЯ
+    esp = esp.wrapping_add(4);
+    
+    let ebx_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_ebx(machine.read_phys_u32(ebx_addr));
+    esp = esp.wrapping_add(4);
+    
+    let edx_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_edx(machine.read_phys_u32(edx_addr));
+    esp = esp.wrapping_add(4);
+    
+    let ecx_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_ecx(machine.read_phys_u32(ecx_addr));
+    esp = esp.wrapping_add(4);
+    
+    let eax_addr = ss_base.wrapping_add(esp);
+    machine.registers.set_eax(machine.read_phys_u32(eax_addr));
+    esp = esp.wrapping_add(4);
+    
+    machine.registers.set_esp(esp);
+
     machine.log_instruction(csip, &bytes).ok();
 }

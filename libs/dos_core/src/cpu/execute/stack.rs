@@ -1,3 +1,5 @@
+// Ver: 1 File: ./libs/dos_core/src/cpu/execute/stack.rs
+
 use crate::{dispatch_op32, instructions::stack};
 
 pub(crate) fn stack(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u8]) {
@@ -42,8 +44,8 @@ pub(crate) fn stack(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u
         0x5D => stack::pop_bp(machine, &full_bytes),
         0x5E => stack::pop_si(machine, &full_bytes),
         0x5F => stack::pop_di(machine, &full_bytes),
-        0x60 => dispatch_op32!(machine, stack::pushad(machine), stack::pusha(machine)),
-        0x61 => dispatch_op32!(machine, stack::popad(machine), stack::popa(machine)),
+        0x60 => dispatch_op32!(machine, stack::pushad(machine, &full_bytes), stack::pusha(machine, &full_bytes)),
+        0x61 => dispatch_op32!(machine, stack::popad(machine, &full_bytes), stack::popa(machine, &full_bytes)),
         0x68 => dispatch_op32!(
             machine,
             stack::push_imm32(machine, &full_bytes),

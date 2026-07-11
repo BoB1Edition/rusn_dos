@@ -1,4 +1,4 @@
-// Ver: 2 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
+// Ver: 3 File: ./libs/dos_core/src/instructions/alu32/arithmetic.rs
 
 use crate::{DosMachine, flags, modrm::ModRm};
 
@@ -25,33 +25,6 @@ pub fn add_rm32_r32(machine: &mut DosMachine, prev: &[u8]) {
         let af = ((dst & 0x0F) + (src & 0x0F)) > 0x0F;
         let of = (((dst ^ src) & 0x8000_0000) == 0) && ((dst ^ result) & 0x8000_0000) != 0;
         machine.write_reg32(modrm.rm_field, result);
-        machine.registers.set_flags(flags::compute_flags_u32(
-            machine.registers.flags(),
-            result,
-            cf,
-            of,
-            af,
-        ));
-    } else if modrm.mod_field == 0b00 && modrm.rm_field == 0b110 {
-        // [disp16] — разрешено ТОЛЬКО если НЕТ 0x67
-        if machine.has_address_size_prefix {
-            log::error!("Invalid memory mode for ADD with address-size prefix");
-            machine.halted = true;
-            return;
-        }
-        let disp16 = machine.read_instr_u16(machine.registers.ip());
-        machine.registers.step(Some(2));
-        bytes.extend_from_slice(&disp16.to_le_bytes());
-        let phys_addr = (machine.registers.ds() as u32) * 16 + (disp16 as u32);
-        let dst_val = machine.read_phys_u32(phys_addr);
-        let src_val = machine.read_reg32(modrm.reg_field);
-        let res = (dst_val as u64) + (src_val as u64);
-        let result = res as u32;
-        let cf = res > 0xFFFFFFFF;
-        let af = ((dst_val & 0x0F) + (src_val & 0x0F)) > 0x0F;
-        let of =
-            (((dst_val ^ src_val) & 0x8000_0000) == 0) && ((dst_val ^ result) & 0x8000_0000) != 0;
-        machine.write_phys_u32(phys_addr, result);
         machine.registers.set_flags(flags::compute_flags_u32(
             machine.registers.flags(),
             result,

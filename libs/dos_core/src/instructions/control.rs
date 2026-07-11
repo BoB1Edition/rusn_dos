@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/instructions/control.rs
+// Ver: 2 File: ./libs/dos_core/src/instructions/control.rs
 use crate::{flags, machine::DosMachine, modrm::ModRm};
 
 pub(crate) fn call(machine: &mut DosMachine, prev: &[u8]) {
@@ -842,5 +842,49 @@ pub(crate) fn jno_rel8(machine: &mut DosMachine, prev: &[u8]) {
         let new_ip = (machine.registers.ip() as i32).wrapping_add(rel8 as i32) as u16;
         machine.registers.set_ip(new_ip);
     }
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+pub(crate) fn leave(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let bytes = prev.to_vec();
+    
+    let ss_base = (machine.registers.ss() as u32) << 4;
+    
+    if machine.has_operand_size_prefix {
+        // === 32-битная версия: MOV ESP, EBP; POP EBP ===
+        let ebp = machine.registers.ebp();
+        machine.registers.set_esp(ebp);
+        
+        // Читаем старое значение EBP из стека
+        let esp = machine.registers.esp();
+        let old_ebp = machine.read_phys_u32(ss_base.wrapping_add(esp as u32));
+        machine.registers.set_ebp(old_ebp);
+        machine.registers.set_esp(esp.wrapping_add(4));
+        
+        log::trace!(
+            "LEAVE (32-bit): EBP={:#010x}, ESP={:#010x} -> {:#010x}",
+            old_ebp, ebp, machine.registers.esp()
+        );
+    } else {
+        // === 16-битная версия: MOV SP, BP; POP BP ===
+        let bp = machine.registers.bp();
+        machine.registers.set_sp(bp);
+        
+        // Читаем старое значение BP из стека
+        let sp = machine.registers.sp();
+        let old_bp = machine.read_phys_u16(ss_base.wrapping_add(sp as u32));
+        machine.registers.set_bp(old_bp);
+        machine.registers.set_sp(sp.wrapping_add(2));
+        
+        log::trace!(
+            "LEAVE (16-bit): BP={:#06x}, SP={:#06x} -> {:#06x}",
+            old_bp, bp, machine.registers.sp()
+        );
+    }
+    
     machine.log_instruction(csip, &bytes).ok();
 }

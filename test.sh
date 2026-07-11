@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export RUST_LOG=debug
+export RUST_LOG=warn
 cargo build
 
 echo ./test/test1
