@@ -1,0 +1,8 @@
+[package]
+name = "x86"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bus = { version = "0.1.0", path = "../bus" }
+log = { version = "0.4.33", features = ["std"] }

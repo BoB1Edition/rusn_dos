@@ -888,3 +888,26 @@ pub(crate) fn leave(machine: &mut DosMachine, prev: &[u8]) {
     
     machine.log_instruction(csip, &bytes).ok();
 }
+
+pub(crate) fn js_rel8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let rel8 = machine.read_instr_u8(machine.registers.ip()) as i8;
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(rel8 as u8);
+
+    // Проверяем флаг знака SF (бит 7)
+    let sf = (machine.registers.flags() & flags::SF) != 0;
+    if sf {
+        let new_ip = (machine.registers.ip() as i32).wrapping_add(rel8 as i32) as u16;
+        machine.registers.set_ip(new_ip);
+        log::debug!("JS rel8: TAKEN (SF=1), new IP={:#04x}", new_ip);
+    } else {
+        log::debug!("JS rel8: NOT TAKEN (SF=0), continue");
+    }
+
+    machine.log_instruction(csip, &bytes).ok();
+}

@@ -14,6 +14,7 @@ pub(crate) fn jumps(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u
         0x75 => control::jne_rel8(machine, &full_bytes),
         0x76 => control::jbe_rel8(machine, &full_bytes),
         0x77 => control::ja(machine, &full_bytes),
+        0x78 => control::js_rel8(machine, &full_bytes),
         0x79 => control::jns_rel8(machine, &full_bytes),
         0x7C => control::jl_rel8(machine, &full_bytes),
         0x7D => control::jge_rel8(machine, &full_bytes),
@@ -21,7 +22,7 @@ pub(crate) fn jumps(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u
         0x7F => control::jg_rel8(machine, &full_bytes),
         _ => {
             log::error!(
-                "opcode {:#04x} should not have been in the function stack",
+                "opcode {:#04x} should not have been in the function jumps",
                 opcode
             );
             machine.halted = true

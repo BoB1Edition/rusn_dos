@@ -961,3 +961,92 @@ pub(crate) fn cmp_rm16_r16(machine: &mut DosMachine, prev: &[u8]) {
 
     machine.log_instruction(csip, &bytes).ok();
 }
+
+/// ADC r8, r/m8 — опкод 0x12 /r
+/// Приёмник: регистр из reg_field (8-бит)
+/// Источник: регистр или память из rm_field (8-бит)
+/// Результат: dst + src + CF
+pub(crate) fn adc_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // Приёмник — всегда регистр (reg_field)
+    let dst_val = machine.read_reg8(modrm.reg_field);
+
+    // Источник — регистр или память (rm_field)
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg8(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u8(addr)
+    };
+
+    // Вычисляем результат с учётом CF
+    let cf_in = (machine.registers.flags() & crate::flags::CF) != 0;
+    let carry = cf_in as u16;
+    let res = dst_val as u16 + src_val as u16 + carry;
+    let result = res as u8;
+
+    // Флаги
+    let cf = res > 0xFF;
+    let af = ((dst_val & 0x0F) + (src_val & 0x0F) + carry as u8) > 0x0F;
+    let of = (((dst_val ^ src_val) & 0x80) == 0) && ((dst_val ^ result) & 0x80) != 0;
+
+    // Записываем результат в регистр-приёмник
+    machine.write_reg8(modrm.reg_field, result);
+    machine.registers.set_flags(crate::flags::compute_flags_u8(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
+    machine.log_instruction(csip, &bytes).ok();
+}
+
+/// ADC AL, imm8 — опкод 0x14
+/// AL = AL + imm8 + CF
+pub(crate) fn adc_al_imm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let imm8 = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    let mut bytes = prev.to_vec();
+    bytes.push(imm8);
+
+    let al = machine.registers.al();
+    let cf_in = (machine.registers.flags() & flags::CF) != 0;
+    let carry = cf_in as u16;
+
+    let res = al as u16 + imm8 as u16 + carry;
+    let result = res as u8;
+
+    // Флаги
+    let cf = res > 0xFF;
+    let af = ((al & 0x0F) + (imm8 & 0x0F) + carry as u8) > 0x0F;
+    let of = (((al ^ imm8) & 0x80) == 0) && ((al ^ result) & 0x80) != 0;
+
+    machine.registers.set_al(result);
+    machine.registers.set_flags(flags::compute_flags_u8(
+        machine.registers.flags(),
+        result,
+        cf,
+        of,
+        af,
+    ));
+
+    machine.log_instruction(csip, &bytes).ok();
+}

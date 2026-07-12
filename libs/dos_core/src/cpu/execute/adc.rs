@@ -26,11 +26,13 @@ pub(crate) fn adc(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u8]
             alu32::adc_rm32_r32(machine, &full_bytes),
             alu::adc_rm16_r16(machine, &full_bytes)
         ),
+        0x12 => alu::adc_r8_rm8(machine, &full_bytes),
         0x13 => dispatch_op32!(
             machine,
             alu32::adc_r32_rm32(machine, &full_bytes),
             alu::adc_r16_rm16(machine, &full_bytes)
         ),
+        0x14 => alu::adc_al_imm8(machine, &full_bytes),
         _ => {
             log::error!(
                 "opcode {:#04x} should not have been in the function adc",
@@ -40,3 +42,4 @@ pub(crate) fn adc(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u8]
         }
     }
 }
+

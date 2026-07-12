@@ -42,7 +42,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             stack(opcode, machine, &full_bytes)
         }
         0x08..=0x0D => or(opcode, machine, &full_bytes),
-        0x10..=0x11 | 0x13 => adc(opcode, machine, &full_bytes),
+        0x10..=0x14 => adc(opcode, machine, &full_bytes),
         0x18..=0x19 | 0x1B => sbb(opcode, machine, &full_bytes),
         0x20..=0x21 | 0x23..=0x24 => and(opcode, machine, &full_bytes),
         0x29 | 0x2A..=0x2C => sub(opcode, machine, &full_bytes),
