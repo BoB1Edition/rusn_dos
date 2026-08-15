@@ -41,6 +41,7 @@ pub(crate) fn and(opcode: u8, machine: &mut crate::DosMachine, full_bytes: &[u8]
             alu32::and_rm32_r32(machine, &full_bytes),
             alu::and_rm16_r16(machine, &full_bytes)
         ),
+        0x22 => alu::and_r8_rm8(machine, &full_bytes),
         0x23 => dispatch_op32!(
             machine,
             alu32::and_r32_rm32(machine, &full_bytes),

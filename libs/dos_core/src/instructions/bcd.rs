@@ -47,3 +47,66 @@ pub fn das(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_flags(new_flags);
     machine.log_instruction(csip, &bytes).ok();
 }
+
+/// DAA — Decimal Adjust after Addition (опкод 0x27)
+/// Корректирует результат сложения BCD в регистре AL
+pub(crate) fn daa(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let bytes = prev.to_vec();
+
+    let mut al = machine.registers.al();
+    let mut flags = machine.registers.flags();
+    let cf_old = (flags & flags::CF) != 0;
+    let af_old = (flags & flags::AF) != 0;
+
+    let mut cf_new = false;
+    let mut af_new = false;
+
+    // Шаг 1: корректировка младшей тетрады
+    if (al & 0x0F) > 9 || af_old {
+        al = al.wrapping_add(6);
+        af_new = true;
+        // Если был перенос из младшей тетрады, устанавливаем CF
+        if (al < 6) || cf_old {
+            cf_new = true;
+        }
+    }
+
+    // Шаг 2: корректировка старшей тетрады
+    if al > 0x99 || cf_old {
+        al = al.wrapping_add(0x60);
+        cf_new = true;
+    }
+
+    // Записываем результат
+    machine.registers.set_al(al);
+
+    // Устанавливаем флаги SF, ZF, PF
+    let sf = (al & 0x80) != 0;
+    let zf = al == 0;
+    let pf = (al.count_ones() % 2) == 0;
+
+    // Обновляем флаги
+    flags &= !(flags::CF | flags::AF | flags::SF | flags::ZF | flags::PF);
+    if cf_new {
+        flags |= flags::CF;
+    }
+    if af_new {
+        flags |= flags::AF;
+    }
+    if sf {
+        flags |= flags::SF;
+    }
+    if zf {
+        flags |= flags::ZF;
+    }
+    if pf {
+        flags |= flags::PF;
+    }
+
+    machine.registers.set_flags(flags);
+    machine.log_instruction(csip, &bytes).ok();
+}

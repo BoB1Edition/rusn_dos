@@ -44,7 +44,8 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
         0x08..=0x0D => or(opcode, machine, &full_bytes),
         0x10..=0x14 => adc(opcode, machine, &full_bytes),
         0x18..=0x19 | 0x1B => sbb(opcode, machine, &full_bytes),
-        0x20..=0x21 | 0x23..=0x24 => and(opcode, machine, &full_bytes),
+        0x20..=0x24 => and(opcode, machine, &full_bytes),
+        0x27 => bcd::daa(machine, &full_bytes),
         0x29 | 0x2A..=0x2C => sub(opcode, machine, &full_bytes),
         0x2F => bcd::das(machine, &full_bytes),
         0x30..=0x33 => xor(opcode, machine, &full_bytes),
@@ -118,6 +119,7 @@ pub(crate) fn execute(machine: &mut DosMachine, opcode: u8) {
             alu32::test_rm32_r32(machine, &full_bytes),
             alu::test_rm16_r16(machine, &full_bytes)
         ),
+        0x86 => exchange::xchg_rm8_r8(machine, &full_bytes),
         0x87 => dispatch_op32!(
             machine,
             exchange::xchg_rm32_r32(machine, &full_bytes),

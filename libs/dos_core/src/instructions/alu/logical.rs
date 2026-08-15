@@ -386,3 +386,47 @@ pub(crate) fn or_ax_imm16(machine: &mut DosMachine, prev: &[u8]) {
     machine.registers.set_flags(flags::compute_logical_flags_u16(machine.registers.flags(), result));
     machine.log_instruction(csip, &bytes).ok();
 }
+
+/// AND r8, r/m8 — опкод 0x22 /r
+/// Приёмник: регистр из reg_field (8-бит)
+/// Источник: регистр или память из rm_field (8-бит)
+/// Результат: dst = dst AND src
+pub(crate) fn and_r8_rm8(machine: &mut DosMachine, prev: &[u8]) {
+    let csip = [
+        machine.registers.cs(),
+        machine.registers.ip() - prev.len() as u16,
+    ];
+    let mut bytes = prev.to_vec();
+    let modrm_byte = machine.read_instr_u8(machine.registers.ip());
+    machine.registers.step(None);
+    bytes.push(modrm_byte);
+    let modrm = ModRm::from_byte(modrm_byte);
+
+    // Приёмник — всегда регистр (reg_field)
+    let dst_val = machine.read_reg8(modrm.reg_field);
+
+    // Источник — регистр или память (rm_field)
+    let src_val = if modrm.is_register_mode() {
+        machine.read_reg8(modrm.rm_field)
+    } else {
+        let addr = modrm
+            .resolve_address(machine, machine.has_address_size_prefix, &mut bytes)
+            .unwrap();
+        bytes.extend_from_slice(&addr.to_le_bytes());
+        machine.read_phys_u8(addr)
+    };
+
+    // Побитовое И
+    let result = dst_val & src_val;
+
+    // Флаги: CF=0, OF=0, PF/ZF/SF по результату
+    let mut flags = machine.registers.flags();
+    flags &= !(crate::flags::CF | crate::flags::OF); // CF=0, OF=0
+    flags = crate::flags::compute_flags_u8(flags, result, false, false, false);
+
+    // Записываем результат в регистр-приёмник
+    machine.write_reg8(modrm.reg_field, result);
+    machine.registers.set_flags(flags);
+
+    machine.log_instruction(csip, &bytes).ok();
+}

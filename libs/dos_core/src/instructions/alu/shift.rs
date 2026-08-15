@@ -149,9 +149,13 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
 
     let result = match op_field {
         0 => {
-            // ROL
-            let result = value.rotate_left(count as u32);
-            let cf = (value >> (16 - count)) & 1 != 0;
+            // ROL (16 бит)
+            let count = (count % 16) as u32;
+            if count == 0 {
+                return (value, flags);
+            }
+            let result = value.rotate_left(count);
+            let cf = (result & 1) != 0;
             let of = if count == 1 {
                 ((value ^ result) & 0x8000) != 0
             } else {
@@ -161,9 +165,13 @@ fn perform_shift_16(op_field: u8, value: u16, count: u8, flags: u16) -> (u16, u1
             result
         }
         1 => {
-            // ROR
-            let result = value.rotate_right(count as u32);
-            let cf = (value >> (count - 1)) & 1 != 0;
+            // ROR (16 бит)
+            let count = (count % 16) as u32;
+            if count == 0 {
+                return (value, flags);
+            }
+            let result = value.rotate_right(count);
+            let cf = (result & 0x8000) != 0;
             let of = if count == 1 {
                 ((result ^ (result >> 1)) & 0x8000) != 0
             } else {

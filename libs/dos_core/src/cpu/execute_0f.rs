@@ -149,7 +149,8 @@ pub(crate) fn execute_0f(machine: &mut DosMachine, opcode: u8 /* ,debug: Option<
                 machine.registers.cs(),
                 machine.registers.ip()
             );
-            machine.halted = true;
+            //machine.halted = true;
+            crate::instructions::system::call_interrupt(machine, 0x06);
         }
     }
 }

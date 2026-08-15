@@ -140,6 +140,6 @@ impl Cpu for X86Cpu {
     }
     fn halt(&mut self) {
         self.halted = true;
-        self.tracer.flush();
+        self.tracer.flush().ok();
     }
 }
