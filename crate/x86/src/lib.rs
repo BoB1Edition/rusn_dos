@@ -19,16 +19,7 @@ impl cpu::X86Cpu {
             _ => unreachable!(),
         }
     }
-    #[inline]
-    pub fn write_reg8(&mut self, reg: u8, val: u8) {
-        match reg {
-            0 => self.registers.set_al(val), 1 => self.registers.set_cl(val),
-            2 => self.registers.set_dl(val), 3 => self.registers.set_bl(val),
-            4 => self.registers.set_ah(val), 5 => self.registers.set_ch(val),
-            6 => self.registers.set_dh(val), 7 => self.registers.set_bh(val),
-            _ => unreachable!(),
-        }
-    }
+    
     #[inline]
     pub fn read_reg16(&self, reg: u8) -> u16 {
         match reg {
@@ -39,6 +30,33 @@ impl cpu::X86Cpu {
             _ => unreachable!(),
         }
     }
+
+    #[inline]
+    pub fn read_reg32(&self, reg: u8) -> u32 {
+        match reg {
+            0 => self.registers.eax(),
+            1 => self.registers.ecx(),
+            2 => self.registers.edx(),
+            3 => self.registers.ebx(),
+            4 => self.registers.esp(),
+            5 => self.registers.ebp(),
+            6 => self.registers.esi(),
+            7 => self.registers.edi(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    pub fn write_reg8(&mut self, reg: u8, val: u8) {
+        match reg {
+            0 => self.registers.set_al(val), 1 => self.registers.set_cl(val),
+            2 => self.registers.set_dl(val), 3 => self.registers.set_bl(val),
+            4 => self.registers.set_ah(val), 5 => self.registers.set_ch(val),
+            6 => self.registers.set_dh(val), 7 => self.registers.set_bh(val),
+            _ => unreachable!(),
+        }
+    }
+
     #[inline]
     pub fn write_reg16(&mut self, reg: u8, val: u16) {
         match reg {
