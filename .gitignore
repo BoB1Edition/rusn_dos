@@ -1,12 +1,4 @@
-/target
-.DS_Store
-/app/*
-*.txt
-/test/*
-!*.asm
-*.todo
-opcodes
-libs/dos_core/src/loader/com.rs
-memory_stage*
-run.log
-log
+```
+# Project-specific ignores
+TODO.md
+```
