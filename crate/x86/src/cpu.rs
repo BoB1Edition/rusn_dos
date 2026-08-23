@@ -24,9 +24,17 @@ pub struct X86Cpu {
     pub registers: Registers,
     pub prefixes: PrefixState,
     pub halted: bool,
+    /// Подавление прерываний на одну инструкцию (после MOV SS / POP SS)
+    pub inhibit_interrupts: bool,
     pub tracer: Box<dyn Tracer>,
     pub(crate) instruction_bytes: Vec<u8>,
     pub(crate) instruction_start_ip: u16,
+}
+
+impl Default for X86Cpu {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl X86Cpu {
@@ -36,6 +44,7 @@ impl X86Cpu {
             registers: Registers::default(),
             prefixes: PrefixState::default(),
             halted: false,
+            inhibit_interrupts: false,
             tracer: Box::new(NullTracer),
             instruction_bytes: Vec::with_capacity(16),
             instruction_start_ip: 0,
@@ -52,6 +61,30 @@ impl X86Cpu {
     #[inline(always)]
     pub(crate) fn phys_ip(&self) -> u32 {
         ((self.registers.cs() as u32) << 4) + self.registers.ip() as u32
+    }
+
+    // === Доступ для внешнего диспетчера (мост гибридного режима) ===
+
+    /// Начинает сбор байтов инструкции с указанным стартовым IP
+    /// (используется, когда опкод читает внешний цикл, а не `step`).
+    pub fn begin_trace(&mut self, start_ip: u16) {
+        self.instruction_bytes.clear();
+        self.instruction_start_ip = start_ip;
+    }
+
+    /// Дописывает байт (префикс/опкод) в буфер трассировки.
+    pub fn push_trace_byte(&mut self, b: u8) {
+        self.instruction_bytes.push(b);
+    }
+
+    /// Собранные байты последней инструкции.
+    pub fn trace_bytes(&self) -> &[u8] {
+        &self.instruction_bytes
+    }
+
+    /// IP начала последней инструкции.
+    pub fn trace_start_ip(&self) -> u16 {
+        self.instruction_start_ip
     }
 
     #[inline(always)]
@@ -102,12 +135,12 @@ impl Cpu for X86Cpu {
                 0x0F => self.prefixes.has_extended = true,
                 0x67 => self.prefixes.has_address_size = true, // Учет 0x67
                 0x66 => self.prefixes.has_operand_size = true, // Учет 0x66
-                0x26 => self.prefixes.segment_override = Some(0x26),
-                0x2E => self.prefixes.segment_override = Some(0x2E),
-                0x36 => self.prefixes.segment_override = Some(0x36),
-                0x3E => self.prefixes.segment_override = Some(0x3E),
-                0x64 => self.prefixes.segment_override = Some(0x64),
-                0x65 => self.prefixes.segment_override = Some(0x65),
+                0x26 => self.prefixes.segment_override = Some(self.registers.es()),
+                0x2E => self.prefixes.segment_override = Some(self.registers.cs()),
+                0x36 => self.prefixes.segment_override = Some(self.registers.ss()),
+                0x3E => self.prefixes.segment_override = Some(self.registers.ds()),
+                0x64 => self.prefixes.segment_override = Some(self.registers.fs()),
+                0x65 => self.prefixes.segment_override = Some(self.registers.gs()),
                 0xF0 => {
                     self.prefixes.has_lock = true;
                     self.prefixes.rep_type = Some(0xF0);

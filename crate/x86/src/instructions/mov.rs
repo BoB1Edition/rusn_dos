@@ -50,6 +50,28 @@ pub fn mov_r16_rm16(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     cpu.write_reg16(modrm.reg_field, src_val);
 }
 
+pub fn mov_rm32_r32(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
+    let src_val = cpu.read_reg32(modrm.reg_field);
+    if modrm.is_register_mode() {
+        cpu.write_reg32(modrm.rm_field, src_val);
+    } else {
+        let phys_addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.write_mem_u32(phys_addr, src_val);
+    }
+}
+
+pub fn mov_r32_rm32(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
+    let src_val = if modrm.is_register_mode() {
+        cpu.read_reg32(modrm.rm_field)
+    } else {
+        let phys_addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.read_mem_u32(phys_addr)
+    };
+    cpu.write_reg32(modrm.reg_field, src_val);
+}
+
 // === MOV сегментных регистров ===
 
 pub fn mov_rm16_sreg(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
@@ -86,7 +108,9 @@ pub fn mov_sreg_rm16(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             cpu.halted = true;
         }
         2 => {
-            cpu.registers.set_ss(src_val); /* В старом коде был inhibit_interrupts */
+            cpu.registers.set_ss(src_val);
+            // После MOV SS прерывания подавляются на одну инструкцию
+            cpu.inhibit_interrupts = true;
         }
         3 => cpu.registers.set_ds(src_val),
         4 => cpu.registers.set_fs(src_val),
