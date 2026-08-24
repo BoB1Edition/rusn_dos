@@ -1,4 +1,4 @@
-// Ver: 3 File: ./libs/dos_core/src/machine.rs
+// Ver: 1 File: ./libs/dos_core/src/machine.rs
 use std::{error::Error, fs::File, io::Write};
 
 use log::error;
@@ -44,6 +44,35 @@ pub struct DosMachine {
     pub(crate) idtr_base: u32,
     pub(crate) first_mcb_segment: u16,
     pub(crate) inhibit_interrupts: bool,
+}
+
+
+impl bus::Machine for DosMachine {
+    fn read_mem_u8(&self, addr: u32) -> u8 {
+        self.read_phys_u8(addr)
+    }
+    fn write_mem_u8(&mut self, addr: u32, val: u8) {
+        self.write_phys_u8(addr, val)
+    }
+    fn in_port(&mut self, port: u16) -> u8 {
+        // Нужно реализовать метод чтения портов (сейчас есть только out)
+        // Пока можно возвращать 0 или логировать
+        log::warn!("IN port {:#04x} not implemented in DosMachine", port);
+        0
+    }
+    fn out_port(&mut self, port: u16, val: u8) {
+        // Вызвать старую логику обработки портов
+        // (нужно будет собрать её в один метод)
+    }
+    fn trigger_irq(&mut self, irq_line: u8) {
+        // Пока заглушка, так как прерывания обрабатываются в старом run.rs
+    }
+    fn is_halted(&self) -> bool {
+        self.halted
+    }
+    fn halt(&mut self) {
+        self.halted = true;
+    }
 }
 
 impl DosMachine {

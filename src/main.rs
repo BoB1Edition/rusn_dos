@@ -1,4 +1,4 @@
-// Ver: 1 File: src/app.rs
+// Ver: 1 File: src/main.rs
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};

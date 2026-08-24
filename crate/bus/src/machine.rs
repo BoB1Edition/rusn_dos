@@ -39,6 +39,10 @@ pub trait Machine {
     /// хочет запросить прерывание (IRQ).
     fn trigger_irq(&mut self, irq_line: u8);
 
+    fn handle_software_interrupt(&mut self, _vector: u8) -> bool {
+        false
+    }
+
     // === Состояние системы ===
     fn is_halted(&self) -> bool;
     fn halt(&mut self);

@@ -309,6 +309,7 @@ version = "0.1.0"
 name = "dos_core"
 version = "0.1.0"
 dependencies = [
+ "bus",
  "env_logger",
  "hex",
  "log",

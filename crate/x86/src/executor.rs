@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/x86/src/executor.rs
+// Ver: 1 File: crate/x86/src/executor.rs
 use crate::cpu::X86Cpu;
 use crate::instructions::{mov, system};
 use bus::Machine;
@@ -54,10 +54,6 @@ pub fn execute(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
         0xFB => system::sti(cpu, machine),
 
         // MOV
-        0x88 => mov::mov_rm8_r8(cpu, machine),
-        0x8A => mov::mov_r8_rm8(cpu, machine),
-        0x89 => mov::mov_rm16_r16(cpu, machine),
-        0x8B => mov::mov_r16_rm16(cpu, machine),
         0xA4 => mov::movsb(cpu, machine),
         0xAA => mov::stosb(cpu, machine),
 

@@ -1,9 +1,49 @@
 .
+├── AGENTS.md
 ├── app
 ├── Cargo.lock
 ├── Cargo.toml
 ├── config.json
 ├── config.toml
+├── crate
+│   ├── bus
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       ├── cpu.rs
+│   │       ├── lib.rs
+│   │       ├── machine.rs
+│   │       ├── memory.rs
+│   │       ├── motherboard.rs
+│   │       ├── peripheral.rs
+│   │       └── peripherals
+│   │           ├── keyboard.rs
+│   │           ├── mod.rs
+│   │           ├── pic.rs
+│   │           └── video.rs
+│   ├── dos
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       └── lib.rs
+│   ├── gui
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       └── lib.rs
+│   └── x86
+│       ├── Cargo.toml
+│       ├── src
+│       │   ├── cpu.rs
+│       │   ├── executor.rs
+│       │   ├── flags.rs
+│       │   ├── instructions
+│       │   │   ├── mod.rs
+│       │   │   ├── mov.rs
+│       │   │   └── system.rs
+│       │   ├── lib.rs
+│       │   ├── modrm.rs
+│       │   ├── registers.rs
+│       │   └── tracer.rs
+│       └── tests
+│           └── integration_test.rs
 ├── libs
 │   └── dos_core
 │       ├── Cargo.toml
@@ -101,6 +141,7 @@
 │   └── working.asm
 ├── test.sh
 ├── tests
+├── TODO.md
 └── tree.tree
 
-19 directories, 85 files
+31 directories, 114 files

@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/bus/src/lib.rs
+// Ver: 1 File: crate/bus/src/lib.rs
 pub mod machine;
 pub mod memory;
 pub mod peripheral;
