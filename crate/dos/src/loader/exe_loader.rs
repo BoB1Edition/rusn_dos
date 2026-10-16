@@ -116,14 +116,14 @@ impl ExeLoader {
         let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16;
         let end_segment = LOAD_SEGMENT + prog_paragraphs;
 
-        sys.first_mcb_segment = PSP_SEGMENT;
+        sys.first_mcb_segment = PSP_SEGMENT - 1;
 
         let prog_mcb = MCB {
             signature: MCB_SIGNATURE_NON_LAST,
             owner: PSP_SEGMENT,
             size: prog_paragraphs,
         };
-        prog_mcb.write(&mut sys.machine, PSP_SEGMENT);
+        prog_mcb.write(&mut sys.machine, PSP_SEGMENT - 1);
 
         let free_mcb = MCB {
             signature: MCB_SIGNATURE_LAST,

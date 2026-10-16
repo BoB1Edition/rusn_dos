@@ -35,7 +35,7 @@ impl ComLoader {
         let cpu = crate::loader::make_cpu(no_log)?;
         let mut sys = DosSystem::new(machine, cpu);
 
-        sys.first_mcb_segment = PSP_SEGMENT;
+        sys.first_mcb_segment = PSP_SEGMENT - 1;
         let com_paragraphs = ((self.data.len() + 0x100 + 15) / 16) as u16; // +0x100 для PSP header
         let end_segment = PSP_SEGMENT + com_paragraphs;
         let prog_mcb = MCB {
@@ -43,7 +43,7 @@ impl ComLoader {
             owner: PSP_SEGMENT,
             size: com_paragraphs,
         };
-        prog_mcb.write(&mut sys.machine, PSP_SEGMENT);
+        prog_mcb.write(&mut sys.machine, PSP_SEGMENT - 1);
         let free_mcb = MCB {
             signature: MCB_SIGNATURE_LAST,
             owner: 0,

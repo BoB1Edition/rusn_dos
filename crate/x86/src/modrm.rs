@@ -55,7 +55,7 @@ impl ModRm {
             6 => {
                 if self.mod_field == 0 {
                     let disp = cpu.fetch_u16(machine);
-                    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+                let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ss());
                     return cpu.phys_addr(seg, disp);
                 }
                 (cpu.registers.bp(), 0)
@@ -88,6 +88,7 @@ impl ModRm {
     fn resolve_32(&self, cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u32 {
         let mut base_val = 0u32;
         let mut scaled_index = 0u32;
+        let mut ss_default = false;
 
         if self.rm_field == 4 {
             // === ПРИСУТСТВУЕТ SIB-БАЙТ ===
@@ -95,6 +96,7 @@ impl ModRm {
             let scale = ((sib >> 6) & 0x3) as u32;
             let index_field = (sib >> 3) & 0x7;
             let base_field = sib & 0x7;
+            ss_default = base_field == 4 || base_field == 5;
 
             // Индекс
             if index_field != 4 {
@@ -151,6 +153,7 @@ impl ModRm {
                 _ => unreachable!(),
             };
         }
+        ss_default = ss_default || self.rm_field == 5;
 
         // Displacement
         let disp: i32 = match self.mod_field {
@@ -165,7 +168,7 @@ impl ModRm {
             .wrapping_add(disp as u32);
 
         // Сегмент по умолчанию: SS для EBP/ESP, иначе DS
-        let default_seg = if self.rm_field == 4 || self.rm_field == 5 {
+        let default_seg = if ss_default {
             cpu.registers.ss()
         } else {
             cpu.registers.ds()
