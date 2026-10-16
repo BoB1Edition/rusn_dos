@@ -1,14 +1,16 @@
-// Ver: 3 File: src/app.rs
+// Ver: 4 File: src/app.rs
 use std::{
     error::Error,
     ffi::OsStr,
     path::{Path, PathBuf},
 };
 
+use bus::Display;
 use config::{self, Config, File};
-use dos_core::{DosMachine, loader};
-use minifb::{Window, WindowOptions};
+use dos::{loader, DiskDriver, DosSystem};
+use gui::EmuWindow;
 use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct App {
     resolution: Resolution,
@@ -46,7 +48,7 @@ impl Default for Resolution {
 impl Default for DriverConfig {
     fn default() -> Self {
         Self {
-            letter: "Z".to_string(), // "C", "Z" — преобразуем в char
+            letter: "Z".to_string(),
             path: "./".to_string(),
             read_only: true,
         }
@@ -101,7 +103,7 @@ impl App {
         None
     }
 
-    fn init_drivers(&self, dm: &mut DosMachine) -> Result<(), Box<dyn Error>> {
+    fn init_drivers(&self, ds: &mut DosSystem) -> Result<(), Box<dyn Error>> {
         for driver_cfg in &self.drivers {
             let letter = match driver_cfg
                 .letter
@@ -116,13 +118,13 @@ impl App {
                 }
             };
 
-            let driver = dos_core::DiskDriver {
-                letter: letter,
+            let driver = DiskDriver {
+                letter,
                 root_path: PathBuf::from(&driver_cfg.path),
                 read_only: driver_cfg.read_only,
             };
 
-            dm.filesystem
+            ds.filesystem
                 .add_driver(driver)
                 .map_err(|e| format!("Failed to add driver {}: {}", driver_cfg.letter, e))?;
 
@@ -138,11 +140,11 @@ impl App {
 
     fn setup_program_directory(
         &self,
-        dm: &mut DosMachine,
+        ds: &mut DosSystem,
         program: &Path,
     ) -> Result<(), Box<dyn Error>> {
         if let Some((drive, dir)) = self.determine_program_drive_and_dir(program) {
-            dm.filesystem
+            ds.filesystem
                 .set_current_directory(drive, &dir)
                 .map_err(|e| format!("Failed to set current directory: {}", e))?;
             log::info!("Program launched from {}:\\{}\\", drive, dir);
@@ -154,13 +156,8 @@ impl App {
 
     pub fn load_from_file(config: PathBuf) -> Self {
         let conf_file = File::with_name(config.to_str().unwrap_or("config.toml"));
-        //let conf = Config::builder();
 
-        let conf = match Config::builder()
-            .add_source(conf_file)
-            //.required(false)
-            .build()
-        {
+        let conf = match Config::builder().add_source(conf_file).build() {
             Ok(x) => x,
             Err(err) => {
                 log::warn!("Error config: {}", err);
@@ -174,43 +171,43 @@ impl App {
                 return Self::default();
             }
         };
-        return result;
+        result
     }
 
     pub fn run(&self, program: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
-        let mut dm = loader::load_executable(program.clone(), no_log)?;
-        self.init_drivers(&mut dm)?;
-        self.setup_program_directory(&mut dm, &program)?;
-        if program.exists() && program.is_file() {
-            self.setup_program_directory(&mut dm, &program)?;
-            dm.run(None)?;
-            return Ok(());
-        } else {
+        if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
+        let mut ds = loader::load_executable(program.clone(), no_log)?;
+        self.init_drivers(&mut ds)?;
+        self.setup_program_directory(&mut ds, &program)?;
+
+        while !ds.cpu.halted {
+            ds.step_frame(None);
+        }
+        Ok(())
     }
 
     pub fn run_with_graphics(&self, program: PathBuf, no_log: bool) -> Result<(), Box<dyn Error>> {
-        let mut dm = loader::load_executable(program.clone(), no_log)?;
-        self.init_drivers(&mut dm)?;
-        self.setup_program_directory(&mut dm, &program)?;
-        if program.exists() && program.is_file() {
-            let mut window = Window::new(
-                &self.title,
-                self.resolution.width as usize,
-                self.resolution.height as usize,
-                WindowOptions::default(),
-            )?;
-            window.set_target_fps(60);
-            //while window.is_open() && !dm.halted() {
-                // 1. Выполняем инструкции CPU
-                dm.run(Some(&mut window))?;
-            //}
-            Ok(())
-        } else {
+        if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
+        let mut ds = loader::load_executable(program.clone(), no_log)?;
+        self.init_drivers(&mut ds)?;
+        self.setup_program_directory(&mut ds, &program)?;
+
+        let mut window = EmuWindow::new(
+            &self.title,
+            self.resolution.width as usize,
+            self.resolution.height as usize,
+        )?;
+        window.set_target_fps(60);
+
+        while window.is_open() && !ds.cpu.halted {
+            ds.step_frame(Some(&mut window));
+        }
+        Ok(())
     }
 }

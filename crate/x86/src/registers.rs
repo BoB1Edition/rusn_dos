@@ -1,4 +1,4 @@
-// Ver: 1 File: ./libs/dos_core/src/registers.rs
+// Ver: 1 File: crate/x86/src/registers.rs
 
 #[derive(Debug, Clone)]
 pub struct Registers {

@@ -1,2 +1,8 @@
-pub mod system;
+pub mod alu;
+pub mod control;
+pub mod exchange;
+pub mod group;
 pub mod mov;
+pub mod shift;
+pub mod stack;
+pub mod system;

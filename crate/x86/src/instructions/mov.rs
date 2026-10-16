@@ -126,23 +126,126 @@ pub fn mov_sreg_rm16(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 pub fn mov_rm8_imm8(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
-    let imm8 = cpu.fetch_u8(machine);
+    if modrm.reg_field != 0 {
+        log::error!("MOV r/m8, imm8: reg field {:#x} is not 0", modrm.reg_field);
+        cpu.halted = true;
+        return;
+    }
     if modrm.is_register_mode() {
+        let imm8 = cpu.fetch_u8(machine);
         cpu.write_reg8(modrm.rm_field, imm8);
     } else {
         let phys_addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        let imm8 = cpu.fetch_u8(machine);
         machine.write_mem_u8(phys_addr, imm8);
     }
 }
 
-pub fn mov_rm16_imm16(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+pub fn mov_rm_imm(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
-    let imm16 = cpu.fetch_u16(machine);
-    if modrm.is_register_mode() {
-        cpu.write_reg16(modrm.rm_field, imm16);
+    if modrm.reg_field != 0 {
+        log::error!("MOV r/m, imm: reg field {:#x} is not 0", modrm.reg_field);
+        cpu.halted = true;
+        return;
+    }
+    if cpu.prefixes.has_operand_size {
+        if modrm.is_register_mode() {
+            let imm = cpu.fetch_u32(machine);
+            cpu.write_reg32(modrm.rm_field, imm);
+        } else {
+            let phys_addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+            let imm = cpu.fetch_u32(machine);
+            machine.write_mem_u32(phys_addr, imm);
+        }
+    } else if modrm.is_register_mode() {
+        let imm = cpu.fetch_u16(machine);
+        cpu.write_reg16(modrm.rm_field, imm);
     } else {
         let phys_addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-        machine.write_mem_u16(phys_addr, imm16);
+        let imm = cpu.fetch_u16(machine);
+        machine.write_mem_u16(phys_addr, imm);
+    }
+}
+
+pub fn mov_ax_moffs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let offset = if cpu.prefixes.has_address_size {
+        cpu.fetch_u32(machine) as u16
+    } else {
+        cpu.fetch_u16(machine)
+    };
+    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+    let addr = cpu.phys_addr(seg, offset);
+    if cpu.prefixes.has_operand_size {
+        cpu.registers.set_eax(machine.read_mem_u32(addr));
+    } else {
+        cpu.registers.set_ax(machine.read_mem_u16(addr));
+    }
+}
+
+pub fn mov_moffs_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let offset = if cpu.prefixes.has_address_size {
+        cpu.fetch_u32(machine) as u16
+    } else {
+        cpu.fetch_u16(machine)
+    };
+    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+    let addr = cpu.phys_addr(seg, offset);
+    if cpu.prefixes.has_operand_size {
+        machine.write_mem_u32(addr, cpu.registers.eax());
+    } else {
+        machine.write_mem_u16(addr, cpu.registers.ax());
+    }
+}
+
+pub fn lea(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
+    if modrm.is_register_mode() {
+        log::error!("LEA with register operand");
+        cpu.halted = true;
+        return;
+    }
+    let offset = modrm.resolve_offset(cpu, machine, cpu.prefixes.has_address_size);
+    if cpu.prefixes.has_operand_size {
+        cpu.write_reg32(modrm.reg_field, offset as u32);
+    } else {
+        cpu.write_reg16(modrm.reg_field, offset);
+    }
+}
+
+pub fn les(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    load_far(cpu, machine, true);
+}
+
+pub fn lds(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    load_far(cpu, machine, false);
+}
+
+fn load_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, es: bool) {
+    let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
+    if modrm.is_register_mode() {
+        log::error!("LDS/LES with register operand");
+        cpu.halted = true;
+        return;
+    }
+    let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+    if cpu.prefixes.has_operand_size {
+        let off = machine.read_mem_u32(addr);
+        let seg = machine.read_mem_u16(addr.wrapping_add(4));
+        cpu.write_reg32(modrm.reg_field, off);
+        if es {
+            cpu.registers.set_es(seg);
+        } else {
+            cpu.registers.set_ds(seg);
+        }
+    } else {
+        let off = machine.read_mem_u16(addr);
+        let seg = machine.read_mem_u16(addr.wrapping_add(2));
+        cpu.write_reg16(modrm.reg_field, off);
+        if es {
+            cpu.registers.set_es(seg);
+        } else {
+            cpu.registers.set_ds(seg);
+        }
     }
 }
 
@@ -205,177 +308,367 @@ pub fn lea_r16_rm16(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 // === Строковые операции (String Operations) ===
 
+fn df_set(cpu: &X86Cpu) -> bool {
+    (cpu.registers.flags() & flags::DF) != 0
+}
+
+fn step_index(cpu: &mut X86Cpu, si: bool, di: bool, n: u16) {
+    let down = df_set(cpu);
+    if si {
+        let v = cpu.registers.si();
+        cpu.registers
+            .set_si(if down { v.wrapping_sub(n) } else { v.wrapping_add(n) });
+    }
+    if di {
+        let v = cpu.registers.di();
+        cpu.registers
+            .set_di(if down { v.wrapping_sub(n) } else { v.wrapping_add(n) });
+    }
+}
+
+fn rep_count(cpu: &mut X86Cpu) -> Option<u32> {
+    if !cpu.prefixes.has_rep {
+        return Some(1);
+    }
+    let n = if cpu.prefixes.has_address_size {
+        cpu.registers.ecx()
+    } else {
+        cpu.registers.cx() as u32
+    };
+    if n == 0 {
+        Some(0)
+    } else {
+        Some(n)
+    }
+}
+
+fn rep_dec(cpu: &mut X86Cpu) {
+    if !cpu.prefixes.has_rep {
+        return;
+    }
+    if cpu.prefixes.has_address_size {
+        cpu.registers.set_ecx(cpu.registers.ecx().wrapping_sub(1));
+    } else {
+        cpu.registers.set_cx(cpu.registers.cx().wrapping_sub(1));
+    }
+}
+
 pub fn movsb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
     let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let (si, di) = (cpu.registers.si(), cpu.registers.di());
-    let val = machine.read_mem_u8(cpu.phys_addr(src_seg, si));
-    machine.write_mem_u8(cpu.phys_addr(cpu.registers.es(), di), val);
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_si(if df {
-        si.wrapping_sub(1)
-    } else {
-        si.wrapping_add(1)
-    });
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(1)
-    } else {
-        di.wrapping_add(1)
-    });
+    for _ in 0..count {
+        let (si, di) = (cpu.registers.si(), cpu.registers.di());
+        let val = machine.read_mem_u8(cpu.phys_addr(src_seg, si));
+        machine.write_mem_u8(cpu.phys_addr(cpu.registers.es(), di), val);
+        step_index(cpu, true, true, 1);
+        rep_dec(cpu);
+    }
 }
 
 pub fn movsw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
     let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let (si, di) = (cpu.registers.si(), cpu.registers.di());
-    let val = machine.read_mem_u16(cpu.phys_addr(src_seg, si));
-    machine.write_mem_u16(cpu.phys_addr(cpu.registers.es(), di), val);
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_si(if df {
-        si.wrapping_sub(2)
+    let (width, step) = if cpu.prefixes.has_operand_size {
+        (4u16, 4u16)
     } else {
-        si.wrapping_add(2)
-    });
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(2)
-    } else {
-        di.wrapping_add(2)
-    });
-}
-
-pub fn stosb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let di = cpu.registers.di();
-    machine.write_mem_u8(cpu.phys_addr(cpu.registers.es(), di), cpu.registers.al());
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(1)
-    } else {
-        di.wrapping_add(1)
-    });
-}
-
-pub fn stosw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let di = cpu.registers.di();
-    machine.write_mem_u16(cpu.phys_addr(cpu.registers.es(), di), cpu.registers.ax());
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(2)
-    } else {
-        di.wrapping_add(2)
-    });
-}
-
-pub fn lodsb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let si = cpu.registers.si();
-    cpu.registers
-        .set_al(machine.read_mem_u8(cpu.phys_addr(src_seg, si)));
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_si(if df {
-        si.wrapping_sub(1)
-    } else {
-        si.wrapping_add(1)
-    });
+        (2, 2)
+    };
+    for _ in 0..count {
+        let (si, di) = (cpu.registers.si(), cpu.registers.di());
+        if width == 4 {
+            let val = machine.read_mem_u32(cpu.phys_addr(src_seg, si));
+            machine.write_mem_u32(cpu.phys_addr(cpu.registers.es(), di), val);
+        } else {
+            let val = machine.read_mem_u16(cpu.phys_addr(src_seg, si));
+            machine.write_mem_u16(cpu.phys_addr(cpu.registers.es(), di), val);
+        }
+        step_index(cpu, true, true, step);
+        rep_dec(cpu);
+    }
 }
 
 pub fn cmpsb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let (si, di) = (cpu.registers.si(), cpu.registers.di());
-    let src = machine.read_mem_u8(cpu.phys_addr(src_seg, si));
-    let dst = machine.read_mem_u8(cpu.phys_addr(cpu.registers.es(), di));
-    let result = src.wrapping_sub(dst);
-    let cf = src < dst;
-    let of = ((src ^ dst) & (src ^ result) & 0x80) != 0;
-    let af = (src ^ dst ^ result) & 0x10 != 0;
-    cpu.registers.set_flags(flags::compute_flags_u8(
-        cpu.registers.flags(),
-        result,
-        cf,
-        of,
-        af,
-    ));
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_si(if df {
-        si.wrapping_sub(1)
-    } else {
-        si.wrapping_add(1)
-    });
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(1)
-    } else {
-        di.wrapping_add(1)
-    });
+    string_cmp(cpu, machine, 1);
 }
 
 pub fn cmpsw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let w = if cpu.prefixes.has_operand_size { 4 } else { 2 };
+    string_cmp(cpu, machine, w);
+}
+
+fn string_cmp(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
+    let count = match rep_count(cpu) {
+        Some(0) => return,
+        Some(n) => n,
+        None => 1,
+    };
+    let repne = cpu.prefixes.rep_type == Some(0xF2);
+    let repe = cpu.prefixes.rep_type == Some(0xF3);
     let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let (si, di) = (cpu.registers.si(), cpu.registers.di());
-    let src = machine.read_mem_u16(cpu.phys_addr(src_seg, si));
-    let dst = machine.read_mem_u16(cpu.phys_addr(cpu.registers.es(), di));
-    let result = src.wrapping_sub(dst);
-    let cf = src < dst;
-    let of = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
-    let af = (src ^ dst ^ result) & 0x10 != 0;
-    cpu.registers.set_flags(flags::compute_flags_u16(
-        cpu.registers.flags(),
-        result,
-        cf,
-        of,
-        af,
-    ));
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_si(if df {
-        si.wrapping_sub(2)
-    } else {
-        si.wrapping_add(2)
-    });
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(2)
-    } else {
-        di.wrapping_add(2)
-    });
+    for _ in 0..count {
+        let (si, di) = (cpu.registers.si(), cpu.registers.di());
+        if width == 1 {
+            let src = machine.read_mem_u8(cpu.phys_addr(src_seg, si));
+            let dst = machine.read_mem_u8(cpu.phys_addr(cpu.registers.es(), di));
+            let (result, cf, of, af) = crate::instructions::alu::sub8(src, dst);
+            cpu.registers.set_flags(flags::compute_flags_u8(
+                cpu.registers.flags(),
+                result,
+                cf,
+                of,
+                af,
+            ));
+        } else if width == 2 {
+            let src = machine.read_mem_u16(cpu.phys_addr(src_seg, si));
+            let dst = machine.read_mem_u16(cpu.phys_addr(cpu.registers.es(), di));
+            let (result, cf, of, af) = crate::instructions::alu::sub16(src, dst);
+            cpu.registers.set_flags(flags::compute_flags_u16(
+                cpu.registers.flags(),
+                result,
+                cf,
+                of,
+                af,
+            ));
+        } else {
+            let src = machine.read_mem_u32(cpu.phys_addr(src_seg, si));
+            let dst = machine.read_mem_u32(cpu.phys_addr(cpu.registers.es(), di));
+            let (result, cf, of, af) = crate::instructions::alu::sub32(src, dst);
+            cpu.registers.set_flags(flags::compute_flags_u32(
+                cpu.registers.flags(),
+                result,
+                cf,
+                of,
+                af,
+            ));
+        }
+        step_index(cpu, true, true, width);
+        rep_dec(cpu);
+        let zf = flags::test_zf(cpu.registers.flags());
+        if repe && !zf {
+            break;
+        }
+        if repne && zf {
+            break;
+        }
+    }
+}
+
+pub fn stosb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    for _ in 0..count {
+        let di = cpu.registers.di();
+        machine.write_mem_u8(cpu.phys_addr(cpu.registers.es(), di), cpu.registers.al());
+        step_index(cpu, false, true, 1);
+        rep_dec(cpu);
+    }
+}
+
+pub fn stosw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let step = if cpu.prefixes.has_operand_size { 4 } else { 2 };
+    for _ in 0..count {
+        let di = cpu.registers.di();
+        if step == 4 {
+            machine.write_mem_u32(cpu.phys_addr(cpu.registers.es(), di), cpu.registers.eax());
+        } else {
+            machine.write_mem_u16(cpu.phys_addr(cpu.registers.es(), di), cpu.registers.ax());
+        }
+        step_index(cpu, false, true, step);
+        rep_dec(cpu);
+    }
+}
+
+pub fn lodsb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+    for _ in 0..count {
+        let si = cpu.registers.si();
+        cpu.registers
+            .set_al(machine.read_mem_u8(cpu.phys_addr(src_seg, si)));
+        step_index(cpu, true, false, 1);
+        rep_dec(cpu);
+    }
+}
+
+pub fn lodsw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+    let step = if cpu.prefixes.has_operand_size { 4 } else { 2 };
+    for _ in 0..count {
+        let si = cpu.registers.si();
+        if step == 4 {
+            cpu.registers
+                .set_eax(machine.read_mem_u32(cpu.phys_addr(src_seg, si)));
+        } else {
+            cpu.registers
+                .set_ax(machine.read_mem_u16(cpu.phys_addr(src_seg, si)));
+        }
+        step_index(cpu, true, false, step);
+        rep_dec(cpu);
+    }
 }
 
 pub fn scasb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let al = cpu.registers.al();
-    let di = cpu.registers.di();
-    let src = machine.read_mem_u8(cpu.phys_addr(cpu.registers.es(), di));
-    let result = al.wrapping_sub(src);
-    let cf = al < src;
-    let of = ((al ^ src) & (al ^ result) & 0x80) != 0;
-    let af = (al ^ src ^ result) & 0x10 != 0;
-    cpu.registers.set_flags(flags::compute_flags_u8(
-        cpu.registers.flags(),
-        result,
-        cf,
-        of,
-        af,
-    ));
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(1)
-    } else {
-        di.wrapping_add(1)
-    });
+    string_scas(cpu, machine, 1);
 }
 
 pub fn scasw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let ax = cpu.registers.ax();
-    let di = cpu.registers.di();
-    let src = machine.read_mem_u16(cpu.phys_addr(cpu.registers.es(), di));
-    let result = ax.wrapping_sub(src);
-    let cf = ax < src;
-    let of = ((ax ^ src) & (ax ^ result) & 0x8000) != 0;
-    let af = (ax ^ src ^ result) & 0x10 != 0;
-    cpu.registers.set_flags(flags::compute_flags_u16(
-        cpu.registers.flags(),
-        result,
-        cf,
-        of,
-        af,
-    ));
-    let df = (cpu.registers.flags() & flags::DF) != 0;
-    cpu.registers.set_di(if df {
-        di.wrapping_sub(2)
-    } else {
-        di.wrapping_add(2)
-    });
+    let w = if cpu.prefixes.has_operand_size { 4 } else { 2 };
+    string_scas(cpu, machine, w);
+}
+
+fn string_scas(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
+    let count = match rep_count(cpu) {
+        Some(0) => return,
+        Some(n) => n,
+        None => 1,
+    };
+    let repne = cpu.prefixes.rep_type == Some(0xF2);
+    let repe = cpu.prefixes.rep_type == Some(0xF3);
+    for _ in 0..count {
+        let di = cpu.registers.di();
+        if width == 1 {
+            let src = machine.read_mem_u8(cpu.phys_addr(cpu.registers.es(), di));
+            let (result, cf, of, af) = crate::instructions::alu::sub8(cpu.registers.al(), src);
+            cpu.registers.set_flags(flags::compute_flags_u8(
+                cpu.registers.flags(),
+                result,
+                cf,
+                of,
+                af,
+            ));
+        } else if width == 2 {
+            let src = machine.read_mem_u16(cpu.phys_addr(cpu.registers.es(), di));
+            let (result, cf, of, af) = crate::instructions::alu::sub16(cpu.registers.ax(), src);
+            cpu.registers.set_flags(flags::compute_flags_u16(
+                cpu.registers.flags(),
+                result,
+                cf,
+                of,
+                af,
+            ));
+        } else {
+            let src = machine.read_mem_u32(cpu.phys_addr(cpu.registers.es(), di));
+            let (result, cf, of, af) = crate::instructions::alu::sub32(cpu.registers.eax(), src);
+            cpu.registers.set_flags(flags::compute_flags_u32(
+                cpu.registers.flags(),
+                result,
+                cf,
+                of,
+                af,
+            ));
+        }
+        step_index(cpu, false, true, width);
+        rep_dec(cpu);
+        let zf = flags::test_zf(cpu.registers.flags());
+        if repe && !zf {
+            break;
+        }
+        if repne && zf {
+            break;
+        }
+    }
+}
+
+pub fn insb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let port = cpu.registers.dx();
+    for _ in 0..count {
+        let val = machine.in_port(port);
+        let di = cpu.registers.di();
+        machine.write_mem_u8(cpu.phys_addr(cpu.registers.es(), di), val);
+        step_index(cpu, false, true, 1);
+        rep_dec(cpu);
+    }
+}
+
+pub fn insw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let port = cpu.registers.dx();
+    let step = if cpu.prefixes.has_operand_size { 4 } else { 2 };
+    for _ in 0..count {
+        let di = cpu.registers.di();
+        if step == 4 {
+            let lo = machine.in_port(port) as u32;
+            let b1 = machine.in_port(port.wrapping_add(1)) as u32;
+            let b2 = machine.in_port(port.wrapping_add(2)) as u32;
+            let b3 = machine.in_port(port.wrapping_add(3)) as u32;
+            machine.write_mem_u32(
+                cpu.phys_addr(cpu.registers.es(), di),
+                lo | (b1 << 8) | (b2 << 16) | (b3 << 24),
+            );
+        } else {
+            let lo = machine.in_port(port) as u16;
+            let hi = machine.in_port(port.wrapping_add(1)) as u16;
+            machine.write_mem_u16(cpu.phys_addr(cpu.registers.es(), di), lo | (hi << 8));
+        }
+        step_index(cpu, false, true, step);
+        rep_dec(cpu);
+    }
+}
+
+pub fn outsb(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+    let port = cpu.registers.dx();
+    for _ in 0..count {
+        let si = cpu.registers.si();
+        let val = machine.read_mem_u8(cpu.phys_addr(src_seg, si));
+        machine.out_port(port, val);
+        step_index(cpu, true, false, 1);
+        rep_dec(cpu);
+    }
+}
+
+pub fn outsw(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let count = rep_count(cpu).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let src_seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+    let port = cpu.registers.dx();
+    let step = if cpu.prefixes.has_operand_size { 4 } else { 2 };
+    for _ in 0..count {
+        let si = cpu.registers.si();
+        if step == 4 {
+            let val = machine.read_mem_u32(cpu.phys_addr(src_seg, si));
+            machine.out_port(port, val as u8);
+            machine.out_port(port.wrapping_add(1), (val >> 8) as u8);
+            machine.out_port(port.wrapping_add(2), (val >> 16) as u8);
+            machine.out_port(port.wrapping_add(3), (val >> 24) as u8);
+        } else {
+            let val = machine.read_mem_u16(cpu.phys_addr(src_seg, si));
+            machine.out_port(port, val as u8);
+            machine.out_port(port.wrapping_add(1), (val >> 8) as u8);
+        }
+        step_index(cpu, true, false, step);
+        rep_dec(cpu);
+    }
 }

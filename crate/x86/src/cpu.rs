@@ -26,6 +26,14 @@ pub struct X86Cpu {
     pub halted: bool,
     /// Подавление прерываний на одну инструкцию (после MOV SS / POP SS)
     pub inhibit_interrupts: bool,
+    /// Вектор программного прерывания, которое шина обязалась обработать
+    /// внутренне (DOS/BIOS). Обрабатывается драйвером после возврата из `step`.
+    pub pending_interrupt: Option<u8>,
+    pub gdtr_limit: u16,
+    pub gdtr_base: u32,
+    pub idtr_limit: u16,
+    pub idtr_base: u32,
+    pub cr0: u32,
     pub tracer: Box<dyn Tracer>,
     pub(crate) instruction_bytes: Vec<u8>,
     pub(crate) instruction_start_ip: u16,
@@ -45,6 +53,12 @@ impl X86Cpu {
             prefixes: PrefixState::default(),
             halted: false,
             inhibit_interrupts: false,
+            pending_interrupt: None,
+            gdtr_limit: 0,
+            gdtr_base: 0,
+            idtr_limit: 0,
+            idtr_base: 0,
+            cr0: 0,
             tracer: Box::new(NullTracer),
             instruction_bytes: Vec::with_capacity(16),
             instruction_start_ip: 0,
@@ -132,7 +146,20 @@ impl Cpu for X86Cpu {
             self.registers.step(None);
 
             match opcode {
-                0x0F => self.prefixes.has_extended = true,
+                0x0F => {
+                    let addr = self.phys_ip();
+                    let ext = machine.read_mem_u8(addr);
+                    self.instruction_bytes.push(ext);
+                    self.registers.step(None);
+                    crate::executor::execute_0f(self, machine, ext);
+                    self.tracer.log_instruction(
+                        self.registers.cs(),
+                        self.instruction_start_ip,
+                        &self.instruction_bytes,
+                    );
+                    self.prefixes.clear();
+                    break;
+                }
                 0x67 => self.prefixes.has_address_size = true, // Учет 0x67
                 0x66 => self.prefixes.has_operand_size = true, // Учет 0x66
                 0x26 => self.prefixes.segment_override = Some(self.registers.es()),

@@ -1,14 +1,19 @@
-// Ver: 1 File: crate/bus/src/motherboard.rs
+// Ver: 3 File: crate/bus/src/motherboard.rs
+
+use crate::peripherals::{
+    keyboard::Keyboard, pic::Pic, pit::Pit, video::VideoMemory,
+};
 use crate::{Machine, Memory, Peripheral};
-use crate::peripherals::{keyboard::Keyboard, video::VideoMemory, pic::Pic};
 
 pub struct Motherboard {
     pub memory: Memory,
     pub keyboard: Keyboard,
     pub video: VideoMemory,
     pub pic: Pic,
+    pub pit: Pit,
     pub halted: bool,
     pub a20_enabled: bool,
+    pub a20_command_pending: bool,
 }
 
 impl Motherboard {
@@ -18,15 +23,17 @@ impl Motherboard {
             keyboard: Keyboard::new(),
             video: VideoMemory::new(),
             pic: Pic::new(),
+            pit: Pit::new(),
             halted: false,
             a20_enabled: false,
+            a20_command_pending: false,
         }
     }
 
     #[inline(always)]
     fn apply_a20_mask(&self, addr: u32) -> u32 {
         if !self.a20_enabled {
-            addr & 0xFFFFF // Wrap-around на 1MB
+            addr & 0xFFFFF
         } else {
             addr
         }
@@ -36,33 +43,39 @@ impl Motherboard {
 impl Machine for Motherboard {
     fn read_mem_u8(&self, addr: u32) -> u8 {
         let masked = self.apply_a20_mask(addr);
-        
-        // MMIO: Видеопамять (0xA0000 - 0xBFFFF)
         if masked >= 0xA0000 && masked < 0xC0000 {
             let offset = masked - 0xA0000;
+            // VideoMemory не может меняться при чтении,
+            // но трейт требует &mut. Используем unsafe или
+            // делаем read через &-метод. Пока оставим как есть.
             return self.video.read_mmio(offset);
         }
-        
         self.memory.read_u8(masked)
     }
 
     fn write_mem_u8(&mut self, addr: u32, val: u8) {
         let masked = self.apply_a20_mask(addr);
-        
-        // MMIO: Видеопамять (0xA0000 - 0xBFFFF)
         if masked >= 0xA0000 && masked < 0xC0000 {
             let offset = masked - 0xA0000;
             self.video.write_mmio(offset, val);
             return;
         }
-        
         self.memory.write_u8(masked, val);
     }
 
     fn in_port(&mut self, port: u16) -> u8 {
         match port {
             0x60 | 0x64 => self.keyboard.port_read(port),
-            0x20 | 0x21 => self.pic.port_read(port),
+            0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_read(port),
+            0x40..=0x43 => self.pit.port_read(port),
+            0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF => self.video.port_read(port),
+            0x92 => {
+                if self.a20_enabled {
+                    0x02
+                } else {
+                    0x00
+                }
+            }
             _ => {
                 log::trace!("IN port {:#04x} not implemented", port);
                 0
@@ -72,14 +85,28 @@ impl Machine for Motherboard {
 
     fn out_port(&mut self, port: u16, val: u8) {
         match port {
-            0x60 | 0x64 => self.keyboard.port_write(port, val),
-            0x20 | 0x21 => self.pic.port_write(port, val),
+            0x60 => {
+                if self.a20_command_pending {
+                    self.a20_enabled = (val & 0x02) != 0;
+                    self.a20_command_pending = false;
+                } else {
+                    self.keyboard.port_write(port, val);
+                }
+            }
+            0x64 => {
+                if val == 0xD1 {
+                    self.a20_command_pending = true;
+                }
+                self.keyboard.port_write(port, val);
+            }
+            0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_write(port, val),
+            0x40..=0x43 => self.pit.port_write(port, val),
+            0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF => self.video.port_write(port, val),
             0x92 => {
-                // Fast A20 Gate
                 self.a20_enabled = (val & 0x02) != 0;
             }
             _ => {
-                log::trace!("OUT port {:#04x} with {:#04x} not implemented", port, val);
+                log::trace!("OUT port {:#04x} = {:#04x} not impl", port, val);
             }
         }
     }
