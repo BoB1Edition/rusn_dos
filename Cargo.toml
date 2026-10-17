@@ -17,5 +17,16 @@ gui = { path = "crate/gui" }
 config = "0.15.23"
 
 [workspace]
-members = ['crate/*']
+members = [
+    'crate/bus',
+    'crate/x86',
+    'crate/dos',
+    'crate/gui',
+    'crate/nes',
+    'crate/megadrive',
+    'crate/snes',
+    'crate/jvm',
+    'crate/saturn',
+    'crate/dreamcast',
+]
 resolver = "2"

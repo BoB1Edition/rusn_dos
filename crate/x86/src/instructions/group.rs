@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/x86/src/instructions/group.rs
+// Ver: 1 File: ./crate/x86/src/instructions/group.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -51,7 +51,12 @@ pub fn group_f6(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
                 return;
             }
             let ax = cpu.registers.ax();
-            cpu.registers.set_al((ax / value as u16) as u8);
+            let quotient = ax / value as u16;
+            if quotient > 0xFF {
+                crate::instructions::system::software_interrupt(cpu, machine, 0);
+                return;
+            }
+            cpu.registers.set_al(quotient as u8);
             cpu.registers.set_ah((ax % value as u16) as u8);
         }
         7 => {

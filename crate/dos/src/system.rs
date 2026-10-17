@@ -139,22 +139,14 @@ impl DosSystem {
             self.dispatch(vector);
             return;
         }
-        let ss_base = (self.cpu.registers.ss() as u32) << 4;
-        let mut sp = self.cpu.registers.sp();
-        sp = sp.wrapping_sub(2);
-        self.cpu.registers.set_sp(sp);
-        self.machine
-            .write_mem_u16(ss_base.wrapping_add(sp as u32), self.cpu.registers.flags());
-        sp = sp.wrapping_sub(2);
-        self.cpu.registers.set_sp(sp);
-        self.machine
-            .write_mem_u16(ss_base.wrapping_add(sp as u32), self.cpu.registers.cs());
-        sp = sp.wrapping_sub(2);
-        self.cpu.registers.set_sp(sp);
-        self.machine
-            .write_mem_u16(ss_base.wrapping_add(sp as u32), self.cpu.registers.ip());
+        let flags = self.cpu.registers.flags();
+        let cs = self.cpu.registers.cs();
+        let ip = self.cpu.registers.ip();
+        x86::instructions::stack::push16(&mut self.cpu, &mut self.machine, flags);
+        x86::instructions::stack::push16(&mut self.cpu, &mut self.machine, cs);
+        x86::instructions::stack::push16(&mut self.cpu, &mut self.machine, ip);
 
-        let mut f = self.cpu.registers.flags();
+        let mut f = flags;
         f &= !(flags::IF | flags::TF);
         self.cpu.registers.set_flags(f);
 

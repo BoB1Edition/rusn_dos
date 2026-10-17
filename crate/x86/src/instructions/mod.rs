@@ -1,4 +1,5 @@
 pub mod alu;
+pub mod bit;
 pub mod control;
 pub mod exchange;
 pub mod group;

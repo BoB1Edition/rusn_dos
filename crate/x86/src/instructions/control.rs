@@ -1,11 +1,11 @@
-// Ver: 1 File: crate/x86/src/instructions/control.rs
+// Ver: 1 File: ./crate/x86/src/instructions/control.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
 use crate::modrm::ModRm;
 use bus::Machine;
 
-fn cond(cpu: &X86Cpu, opcode: u8) -> bool {
+pub fn cond(cpu: &X86Cpu, opcode: u8) -> bool {
     let f = cpu.registers.flags();
     let cf = flags::test_cf(f);
     let zf = flags::test_zf(f);

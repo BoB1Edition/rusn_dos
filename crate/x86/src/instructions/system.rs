@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/x86/src/instructions/system.rs
+// Ver: 2 File: ./crate/x86/src/instructions/system.rs
 
 use bus::Machine;
 use crate::cpu::X86Cpu;
@@ -18,9 +18,6 @@ pub fn int(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 pub fn software_interrupt(cpu: &mut X86Cpu, machine: &mut dyn Machine, vector: u8) {
     if machine.handle_software_interrupt(vector) {
-        // Шина (DOS-слой) обработает прерывание сама, но ей нужен доступ к
-        // регистрам CPU. Поэтому запоминаем вектор: драйвер вызовет обработчик
-        // после возврата из `step`, когда borrow CPU уже освобождён.
         cpu.pending_interrupt = Some(vector);
         return;
     }
@@ -29,19 +26,14 @@ pub fn software_interrupt(cpu: &mut X86Cpu, machine: &mut dyn Machine, vector: u
     let handler_ip = machine.read_mem_u16(ivt_addr);
     let handler_cs = machine.read_mem_u16(ivt_addr + 2);
 
-    let ss_base = cpu.phys_addr(cpu.registers.ss(), 0);
-    let mut sp = cpu.registers.sp();
+    let flags = cpu.registers.flags();
+    let cs = cpu.registers.cs();
+    let ip = cpu.registers.ip();
+    crate::instructions::stack::push16(cpu, machine, flags);
+    crate::instructions::stack::push16(cpu, machine, cs);
+    crate::instructions::stack::push16(cpu, machine, ip);
 
-    sp = sp.wrapping_sub(2);
-    machine.write_mem_u16(ss_base.wrapping_add(sp as u32), cpu.registers.flags());
-    sp = sp.wrapping_sub(2);
-    machine.write_mem_u16(ss_base.wrapping_add(sp as u32), cpu.registers.cs());
-    sp = sp.wrapping_sub(2);
-    machine.write_mem_u16(ss_base.wrapping_add(sp as u32), cpu.registers.ip());
-
-    cpu.registers.set_sp(sp);
-
-    let mut f = cpu.registers.flags();
+    let mut f = flags;
     f &= !(flags::IF | flags::TF);
     cpu.registers.set_flags(f);
 
@@ -54,20 +46,12 @@ pub fn int3(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 pub fn iret(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let ss_base = cpu.phys_addr(cpu.registers.ss(), 0);
-    let mut sp = cpu.registers.sp();
-
-    let ip = machine.read_mem_u16(ss_base.wrapping_add(sp as u32));
-    sp = sp.wrapping_add(2);
-    let cs = machine.read_mem_u16(ss_base.wrapping_add(sp as u32));
-    sp = sp.wrapping_add(2);
-    let f = machine.read_mem_u16(ss_base.wrapping_add(sp as u32));
-    sp = sp.wrapping_add(2);
-
+    let ip = crate::instructions::stack::pop16(cpu, machine);
+    let cs = crate::instructions::stack::pop16(cpu, machine);
+    let f = crate::instructions::stack::pop16(cpu, machine);
     cpu.registers.set_ip(ip);
     cpu.registers.set_cs(cs);
     cpu.registers.set_flags(f);
-    cpu.registers.set_sp(sp);
 }
 
 pub fn in_al_dx(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
@@ -309,6 +293,21 @@ pub fn pop_fs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     cpu.registers.set_fs(v);
 }
 
+pub fn push_fs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let v = cpu.registers.fs();
+    crate::instructions::stack::push16(cpu, machine, v);
+}
+
+pub fn push_gs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let v = cpu.registers.gs();
+    crate::instructions::stack::push16(cpu, machine, v);
+}
+
+pub fn pop_gs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let v = crate::instructions::stack::pop16(cpu, machine);
+    cpu.registers.set_gs(v);
+}
+
 pub fn group_0f01(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let modrm = crate::modrm::ModRm::from_byte(cpu.fetch_u8(machine));
     if modrm.reg_field <= 3 && modrm.is_register_mode() {
@@ -340,6 +339,15 @@ pub fn group_0f01(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
                 let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
                 machine.write_mem_u16(addr, msw);
             }
+        }
+        6 => {
+            let value = if modrm.is_register_mode() {
+                cpu.read_reg16(modrm.rm_field)
+            } else {
+                let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+                machine.read_mem_u16(addr)
+            };
+            cpu.cr0 = (cpu.cr0 & 0xFFFF_0000) | value as u32;
         }
         _ => {
             log::warn!("Unhandled 0F 01 /{}", modrm.reg_field);
@@ -375,25 +383,60 @@ pub fn mov_cr_r32(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     }
 }
 
-pub fn movzx(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+pub fn movzx_b6(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let modrm = crate::modrm::ModRm::from_byte(cpu.fetch_u8(machine));
+    let src = if modrm.is_register_mode() {
+        cpu.read_reg8(modrm.rm_field) as u16
+    } else {
+        let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.read_mem_u8(addr) as u16
+    };
     if cpu.prefixes.has_operand_size {
-        let src = if modrm.is_register_mode() {
-            cpu.read_reg16(modrm.rm_field)
-        } else {
-            let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-            machine.read_mem_u16(addr)
-        };
         cpu.write_reg32(modrm.reg_field, src as u32);
     } else {
-        let src = if modrm.is_register_mode() {
-            cpu.read_reg8(modrm.rm_field)
-        } else {
-            let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-            machine.read_mem_u8(addr)
-        };
-        cpu.write_reg16(modrm.reg_field, src as u16);
+        cpu.write_reg16(modrm.reg_field, src);
     }
+}
+
+pub fn movzx_b7(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let modrm = crate::modrm::ModRm::from_byte(cpu.fetch_u8(machine));
+    let src = if modrm.is_register_mode() {
+        cpu.read_reg16(modrm.rm_field)
+    } else {
+        let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.read_mem_u16(addr)
+    };
+    if cpu.prefixes.has_operand_size {
+        cpu.write_reg32(modrm.reg_field, src as u32);
+    } else {
+        cpu.write_reg16(modrm.reg_field, src);
+    }
+}
+
+pub fn movsx_b6(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let modrm = crate::modrm::ModRm::from_byte(cpu.fetch_u8(machine));
+    let src = if modrm.is_register_mode() {
+        cpu.read_reg8(modrm.rm_field) as i8 as i16 as u16
+    } else {
+        let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.read_mem_u8(addr) as i8 as i16 as u16
+    };
+    if cpu.prefixes.has_operand_size {
+        cpu.write_reg32(modrm.reg_field, src as i16 as i32 as u32);
+    } else {
+        cpu.write_reg16(modrm.reg_field, src);
+    }
+}
+
+pub fn movsx_bf(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
+    let modrm = crate::modrm::ModRm::from_byte(cpu.fetch_u8(machine));
+    let src = if modrm.is_register_mode() {
+        cpu.read_reg16(modrm.rm_field) as i16 as i32
+    } else {
+        let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.read_mem_u16(addr) as i16 as i32
+    };
+    cpu.write_reg32(modrm.reg_field, src as u32);
 }
 
 pub fn int1(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
@@ -433,4 +476,44 @@ pub fn sti(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
     let mut f = cpu.registers.flags();
     f |= flags::IF;
     cpu.registers.set_flags(f);
+}
+
+pub fn cpuid(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
+    match cpu.registers.eax() {
+        0 => {
+            cpu.registers.set_eax(1);
+            cpu.registers.set_ebx(0x756e6547);
+            cpu.registers.set_ecx(0x6c65746e);
+            cpu.registers.set_edx(0x49656e69);
+        }
+        1 => {
+            cpu.registers.set_eax(0x00000400);
+            cpu.registers.set_ebx(0);
+            cpu.registers.set_ecx(0);
+            cpu.registers.set_edx(0x00000001);
+        }
+        _ => {
+            cpu.registers.set_eax(0);
+            cpu.registers.set_ebx(0);
+            cpu.registers.set_ecx(0);
+            cpu.registers.set_edx(0);
+        }
+    }
+}
+
+pub fn setcc(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
+    let modrm = crate::modrm::ModRm::from_byte(cpu.fetch_u8(machine));
+    let cond = super::control::cond(cpu, opcode);
+    let val = if cond { 1u8 } else { 0 };
+    if modrm.is_register_mode() {
+        cpu.write_reg8(modrm.rm_field, val);
+    } else {
+        let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+        machine.write_mem_u8(addr, val);
+    }
+}
+
+pub fn rdtsc(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
+    cpu.registers.set_eax(0);
+    cpu.registers.set_edx(0);
 }

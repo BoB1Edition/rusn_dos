@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/x86/src/modrm.rs
+// Ver: 1 File: ./crate/x86/src/modrm.rs
 use crate::cpu::X86Cpu;
 use bus::Machine;
 
@@ -24,8 +24,6 @@ impl ModRm {
         self.mod_field == 0b11
     }
 
-    /// Вычисляет физический адрес.
-    /// `addr32_mode` передается из executor на основе префикса 0x67 (cpu.prefixes.has_address_size)
     pub fn resolve_address(
         &self,
         cpu: &mut X86Cpu,
@@ -43,7 +41,6 @@ impl ModRm {
         }
     }
 
-    // === 16-битная адресация (Real Mode классика) ===
     fn resolve_16(&self, cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u32 {
         let (base, index) = match self.rm_field {
             0 => (cpu.registers.bx(), cpu.registers.si()),
@@ -84,23 +81,19 @@ impl ModRm {
         cpu.phys_addr(seg, offset)
     }
 
-    // === 32-битная адресация (Protected Mode / 386+) ===
     fn resolve_32(&self, cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u32 {
         let mut base_val = 0u32;
         let mut scaled_index = 0u32;
         let mut ss_default = false;
 
         if self.rm_field == 4 {
-            // === ПРИСУТСТВУЕТ SIB-БАЙТ ===
             let sib = cpu.fetch_u8(machine);
             let scale = ((sib >> 6) & 0x3) as u32;
             let index_field = (sib >> 3) & 0x7;
             let base_field = sib & 0x7;
             ss_default = base_field == 4 || base_field == 5;
 
-            // Индекс
             if index_field != 4 {
-                // ESP не может быть индексом
                 let idx_reg = match index_field {
                     0 => cpu.registers.eax(),
                     1 => cpu.registers.ecx(),
@@ -114,12 +107,10 @@ impl ModRm {
                 scaled_index = idx_reg.wrapping_shl(scale);
             }
 
-            // База
             if base_field == 5 && self.mod_field == 0 {
-                // Специальный случай: [scaled_index + disp32]
                 let disp = cpu.fetch_u32(machine);
                 let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-                return cpu.phys_addr(seg, scaled_index.wrapping_add(disp) as u16); // Усечение до 16 бит для Real Mode
+                return cpu.phys_addr32(seg, scaled_index.wrapping_add(disp));
             } else {
                 base_val = match base_field {
                     0 => cpu.registers.eax(),
@@ -134,12 +125,10 @@ impl ModRm {
                 };
             }
         } else {
-            // === БЕЗ SIB-БАЙТА ===
             if self.rm_field == 5 && self.mod_field == 0 {
-                // [disp32]
                 let disp = cpu.fetch_u32(machine);
                 let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-                return cpu.phys_addr(seg, disp as u16);
+                return cpu.phys_addr32(seg, disp);
             }
             base_val = match self.rm_field {
                 0 => cpu.registers.eax(),
@@ -153,9 +142,7 @@ impl ModRm {
                 _ => unreachable!(),
             };
         }
-        // ss_default = ss_default || self.rm_field == 4 || self.rm_field == 5;
 
-        // Displacement
         let disp: i32 = match self.mod_field {
             0 => 0,
             1 => cpu.fetch_u8(machine) as i8 as i32,
@@ -167,7 +154,6 @@ impl ModRm {
             .wrapping_add(scaled_index)
             .wrapping_add(disp as u32);
 
-        // Сегмент по умолчанию: SS для EBP/ESP, иначе DS
         let default_seg = if ss_default || (self.rm_field == 5 && self.mod_field != 0) {
             cpu.registers.ss()
         } else {
@@ -175,7 +161,7 @@ impl ModRm {
         };
         let seg = cpu.prefixes.segment_override.unwrap_or(default_seg);
 
-        cpu.phys_addr(seg, effective as u16)
+        cpu.phys_addr32(seg, effective)
     }
 
     pub fn resolve_offset(
@@ -183,21 +169,85 @@ impl ModRm {
         cpu: &mut X86Cpu,
         machine: &mut dyn Machine,
         addr32_mode: bool,
-    ) -> u16 {
+    ) -> u32 {
         if self.is_register_mode() {
             return 0;
         }
 
         if addr32_mode {
-            // Упрощенно для 32-бит, но по факту LEA в 32-битном режиме возвращает 32-битный регистр.
-            // Для реального режима DOS достаточно 16-битного смещения.
-            self.resolve_32(cpu, machine) as u16
+            self.resolve_32_no_seg(cpu, machine)
         } else {
-            self.resolve_16_offset(cpu, machine)
+            self.resolve_16_offset(cpu, machine) as u32
         }
     }
 
-    // Чистый 16-битный расчет смещения (копия resolve_16, но без phys_addr)
+    fn resolve_32_no_seg(&self, cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u32 {
+        let mut base_val = 0u32;
+        let mut scaled_index = 0u32;
+
+        if self.rm_field == 4 {
+            let sib = cpu.fetch_u8(machine);
+            let scale = ((sib >> 6) & 0x3) as u32;
+            let index_field = (sib >> 3) & 0x7;
+            let base_field = sib & 0x7;
+
+            if index_field != 4 {
+                let idx_reg = match index_field {
+                    0 => cpu.registers.eax(),
+                    1 => cpu.registers.ecx(),
+                    2 => cpu.registers.edx(),
+                    3 => cpu.registers.ebx(),
+                    5 => cpu.registers.ebp(),
+                    6 => cpu.registers.esi(),
+                    7 => cpu.registers.edi(),
+                    _ => unreachable!(),
+                };
+                scaled_index = idx_reg.wrapping_shl(scale);
+            }
+
+            if base_field == 5 && self.mod_field == 0 {
+                let disp = cpu.fetch_u32(machine);
+                return scaled_index.wrapping_add(disp);
+            } else {
+                base_val = match base_field {
+                    0 => cpu.registers.eax(),
+                    1 => cpu.registers.ecx(),
+                    2 => cpu.registers.edx(),
+                    3 => cpu.registers.ebx(),
+                    4 => cpu.registers.esp(),
+                    5 => cpu.registers.ebp(),
+                    6 => cpu.registers.esi(),
+                    7 => cpu.registers.edi(),
+                    _ => unreachable!(),
+                };
+            }
+        } else {
+            if self.rm_field == 5 && self.mod_field == 0 {
+                return cpu.fetch_u32(machine);
+            }
+            base_val = match self.rm_field {
+                0 => cpu.registers.eax(),
+                1 => cpu.registers.ecx(),
+                2 => cpu.registers.edx(),
+                3 => cpu.registers.ebx(),
+                4 => cpu.registers.esp(),
+                5 => cpu.registers.ebp(),
+                6 => cpu.registers.esi(),
+                7 => cpu.registers.edi(),
+                _ => unreachable!(),
+            };
+        }
+
+        let disp: i32 = match self.mod_field {
+            0 => 0,
+            1 => cpu.fetch_u8(machine) as i8 as i32,
+            2 => cpu.fetch_u32(machine) as i32,
+            _ => unreachable!(),
+        };
+
+        base_val.wrapping_add(scaled_index).wrapping_add(disp as u32)
+    }
+
     fn resolve_16_offset(&self, cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u16 {
         let (base, index) = match self.rm_field {
             0 => (cpu.registers.bx(), cpu.registers.si()),

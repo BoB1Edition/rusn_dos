@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/x86/src/cpu.rs
+// Ver: 1 File: ./crate/x86/src/cpu.rs
 use crate::tracer::{FileTracer, Tracer};
 use crate::{registers::Registers, tracer::NullTracer};
 use bus::{Cpu, Machine};
@@ -106,7 +106,11 @@ impl X86Cpu {
         ((segment as u32) << 4).wrapping_add(offset as u32)
     }
 
-    /// Читает байт, ЗАПИСЫВАЕТ ЕГО В ЛОГ-БУФЕР и сдвигает IP
+    #[inline(always)]
+    pub(crate) fn phys_addr32(&self, segment: u16, offset: u32) -> u32 {
+        ((segment as u32) << 4).wrapping_add(offset)
+    }
+
     #[inline(always)]
     pub(crate) fn fetch_u8(&mut self, machine: &mut dyn Machine) -> u8 {
         let addr = self.phys_ip();
@@ -170,7 +174,6 @@ impl Cpu for X86Cpu {
                 0x65 => self.prefixes.segment_override = Some(self.registers.gs()),
                 0xF0 => {
                     self.prefixes.has_lock = true;
-                    self.prefixes.rep_type = Some(0xF0);
                 }
                 0xF2 => {
                     self.prefixes.has_rep = true;

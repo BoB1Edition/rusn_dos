@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/x86/src/instructions/mov.rs
+// Ver: 1 File: ./crate/x86/src/instructions/mov.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::modrm::ModRm;
@@ -206,9 +206,9 @@ pub fn lea(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     }
     let offset = modrm.resolve_offset(cpu, machine, cpu.prefixes.has_address_size);
     if cpu.prefixes.has_operand_size {
-        cpu.write_reg32(modrm.reg_field, offset as u32);
+        cpu.write_reg32(modrm.reg_field, offset);
     } else {
-        cpu.write_reg16(modrm.reg_field, offset);
+        cpu.write_reg16(modrm.reg_field, offset as u16);
     }
 }
 
@@ -294,17 +294,6 @@ pub fn mov_address_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 // === LEA (Load Effective Address) ===
-
-pub fn lea_r16_rm16(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
-    if modrm.is_register_mode() {
-        log::warn!("LEA with register mode (mod=11) — emulating as MOV");
-        cpu.write_reg16(modrm.reg_field, cpu.read_reg16(modrm.rm_field));
-    } else {
-        let offset = modrm.resolve_offset(cpu, machine, cpu.prefixes.has_address_size);
-        cpu.write_reg16(modrm.reg_field, offset);
-    }
-}
 
 // === Строковые операции (String Operations) ===
 

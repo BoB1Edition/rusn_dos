@@ -1,6 +1,6 @@
-// Ver: 2 File: crate/x86/src/executor.rs
+// Ver: 1 File: ./crate/x86/src/executor.rs
 use crate::cpu::X86Cpu;
-use crate::instructions::{alu, control, exchange, group, mov, shift, stack, system};
+use crate::instructions::{alu, bit, control, exchange, group, mov, shift, stack, system};
 use bus::Machine;
 
 pub fn execute(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
@@ -370,11 +370,27 @@ pub fn execute_0f(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
         0x01 => system::group_0f01(cpu, machine),
         0x20 => system::mov_r32_cr(cpu, machine),
         0x22 => system::mov_cr_r32(cpu, machine),
-        0x82 => control::jcc_rel16(cpu, machine, 0x72),
-        0x83 => control::jcc_rel16(cpu, machine, 0x73),
-        0x84 => control::jcc_rel16(cpu, machine, 0x74),
+        0x31 => system::rdtsc(cpu, machine),
+        0x80..=0x8F => control::jcc_rel16(cpu, machine, opcode),
+        0x90..=0x9F => system::setcc(cpu, machine, opcode),
+        0xA0 => system::push_fs(cpu, machine),
         0xA1 => system::pop_fs(cpu, machine),
-        0xB7 => system::movzx(cpu, machine),
+        0xA2 => system::cpuid(cpu, machine),
+        0xA3 => bit::bt(cpu, machine),
+        0xA4 => bit::shld_imm(cpu, machine),
+        0xA5 => bit::shld_cl(cpu, machine),
+        0xA8 => system::push_gs(cpu, machine),
+        0xA9 => system::pop_gs(cpu, machine),
+        0xAB => bit::bts(cpu, machine),
+        0xAC => bit::shrd_imm(cpu, machine),
+        0xAD => bit::shrd_cl(cpu, machine),
+        0xB3 => bit::btr(cpu, machine),
+        0xB6 => system::movzx_b6(cpu, machine),
+        0xB7 => system::movzx_b7(cpu, machine),
+        0xBA => bit::bt_group(cpu, machine),
+        0xBB => bit::btc(cpu, machine),
+        0xBE => system::movsx_b6(cpu, machine),
+        0xBF => system::movsx_bf(cpu, machine),
         _ => {
             log::error!(
                 "Unsupported 0F opcode {:#04X} at CS:IP = {:04X}:{:04X}",
