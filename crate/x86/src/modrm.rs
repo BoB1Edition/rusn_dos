@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/x86/src/modrm.rs
+// Ver: 3 File: crate/x86/src/modrm.rs
 use crate::cpu::X86Cpu;
 use bus::Machine;
 
@@ -55,7 +55,7 @@ impl ModRm {
             6 => {
                 if self.mod_field == 0 {
                     let disp = cpu.fetch_u16(machine);
-                let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ss());
+                    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
                     return cpu.phys_addr(seg, disp);
                 }
                 (cpu.registers.bp(), 0)
@@ -153,7 +153,7 @@ impl ModRm {
                 _ => unreachable!(),
             };
         }
-        ss_default = ss_default || self.rm_field == 5;
+        // ss_default = ss_default || self.rm_field == 4 || self.rm_field == 5;
 
         // Displacement
         let disp: i32 = match self.mod_field {
@@ -168,7 +168,7 @@ impl ModRm {
             .wrapping_add(disp as u32);
 
         // Сегмент по умолчанию: SS для EBP/ESP, иначе DS
-        let default_seg = if ss_default {
+        let default_seg = if ss_default || (self.rm_field == 5 && self.mod_field != 0) {
             cpu.registers.ss()
         } else {
             cpu.registers.ds()

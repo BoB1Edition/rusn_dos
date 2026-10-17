@@ -1,0 +1,100 @@
+.
+├── app
+├── Cargo.lock
+├── Cargo.toml
+├── config.json
+├── config.toml
+├── crate
+│   ├── bus
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       ├── cpu.rs
+│   │       ├── display.rs
+│   │       ├── lib.rs
+│   │       ├── machine.rs
+│   │       ├── memory.rs
+│   │       ├── motherboard.rs
+│   │       ├── peripheral.rs
+│   │       └── peripherals
+│   │           ├── fonts_vga8x16.rs
+│   │           ├── keyboard.rs
+│   │           ├── mod.rs
+│   │           ├── pic.rs
+│   │           ├── pit.rs
+│   │           └── video.rs
+│   ├── dos
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       ├── consts.rs
+│   │       ├── filesystem.rs
+│   │       ├── interrupts
+│   │       │   ├── bios.rs
+│   │       │   ├── dos.rs
+│   │       │   ├── ems.rs
+│   │       │   └── mod.rs
+│   │       ├── ivt.rs
+│   │       ├── lib.rs
+│   │       ├── loader
+│   │       │   ├── com_loader.rs
+│   │       │   ├── exe_header.rs
+│   │       │   ├── exe_loader.rs
+│   │       │   └── mod.rs
+│   │       ├── mcb.rs
+│   │       └── system.rs
+│   ├── gui
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       └── lib.rs
+│   └── x86
+│       ├── Cargo.toml
+│       ├── src
+│       │   ├── cpu.rs
+│       │   ├── executor.rs
+│       │   ├── flags.rs
+│       │   ├── instructions
+│       │   │   ├── alu.rs
+│       │   │   ├── control.rs
+│       │   │   ├── exchange.rs
+│       │   │   ├── group.rs
+│       │   │   ├── mod.rs
+│       │   │   ├── mov.rs
+│       │   │   ├── shift.rs
+│       │   │   ├── stack.rs
+│       │   │   └── system.rs
+│       │   ├── lib.rs
+│       │   ├── modrm.rs
+│       │   ├── registers.rs
+│       │   └── tracer.rs
+│       └── tests
+│           ├── alu_test.rs
+│           ├── control_test.rs
+│           ├── extended_test.rs
+│           ├── group_test.rs
+│           ├── integration_test.rs
+│           ├── mov_test.rs
+│           ├── stack_test.rs
+│           ├── string_test.rs
+│           └── system_test.rs
+├── shufled.py
+├── src
+│   ├── app.rs
+│   └── main.rs
+├── test
+│   ├── game1.asm
+│   ├── game2.asm
+│   ├── hard_emuland.asm
+│   ├── tasm_test3.asm
+│   ├── tasm_test4.asm
+│   ├── tasm_work.asm
+│   ├── tasm_work2.asm
+│   ├── test1.asm
+│   ├── test2.asm
+│   ├── test3.asm
+│   ├── test4.asm
+│   ├── ttasm.asm
+│   └── working.asm
+├── test.sh
+├── tests
+└── tree.tree
+
+19 directories, 79 files

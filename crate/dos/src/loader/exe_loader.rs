@@ -1,11 +1,13 @@
-// Ver: 2 File: crate/dos/src/loader/exe_loader.rs
-use bus::{Machine, Motherboard};
-
+// Ver: 3 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
 use crate::mcb::MCB;
 use crate::system::DosSystem;
+use bus::{Machine, Motherboard};
+
+// ✅ ДОБАВЛЕНО: Правильный импорт из крейта x86
+use x86::instructions::stack;
 
 pub struct ExeLoader {
     header: MzHeader,
@@ -72,12 +74,19 @@ impl ExeLoader {
         // 1. Создаём память
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
 
-        // 2. Создаём PSP
-        Self::create_psp(&mut machine, PSP_SEGMENT);
-
-        // 3. Загружаем код (пропускаем заголовок)
+        // 2. Заранее вычисляем размеры программы, чтобы корректно указать сегмент окружения
         let header_size = self.header.e_cparhdr as usize * 16;
         let code_data = &self.data[header_size..];
+        let loaded_bytes = code_data.len();
+        let bss_bytes = self.header.e_minep as usize * 16;
+        let total_prog_bytes = loaded_bytes + bss_bytes;
+        let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16;
+        let end_segment = LOAD_SEGMENT + prog_paragraphs;
+
+        // ✅ ИСПРАВЛЕНО: Передаем end_segment как сегмент окружения
+        Self::create_psp(&mut machine, PSP_SEGMENT, end_segment);
+
+        // 3. Загружаем код (пропускаем заголовок)
         let code_base = LOAD_SEGMENT as u32 * 16;
         if code_base as usize + code_data.len() > machine.memory.len() {
             return Err("EXE file too large".into());
@@ -86,17 +95,16 @@ impl ExeLoader {
             machine.write_mem_u8(code_base + i as u32, byte);
         }
 
-        let loaded_len = code_data.len();
-        let bss_paragraphs = self.header.e_minep as usize; // или e_maxep
-        if bss_paragraphs > 0 {
-            let bss_start = code_base + loaded_len as u32;
-            let bss_size = bss_paragraphs * 16;
-            for i in 0..bss_size {
+        // Очищаем BSS
+        if bss_bytes > 0 {
+            let bss_start = code_base + loaded_bytes as u32;
+            for i in 0..bss_bytes {
                 if (bss_start as usize + i) < machine.memory.len() {
                     machine.write_mem_u8(bss_start + i as u32, 0);
                 }
             }
         }
+
         log::info!(
             "EXE load: file_size={}, header_size={}, code_data_len={}",
             self.data.len(),
@@ -110,18 +118,12 @@ impl ExeLoader {
         let cpu = crate::loader::make_cpu(no_log)?;
         let mut sys = DosSystem::new(machine, cpu);
 
-        let loaded_bytes = code_data.len();
-        let bss_bytes = self.header.e_minep as usize * 16;
-        let total_prog_bytes = loaded_bytes + bss_bytes;
-        let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16;
-        let end_segment = LOAD_SEGMENT + prog_paragraphs;
-
+        // Настройка MCB
         sys.first_mcb_segment = PSP_SEGMENT - 1;
-
         let prog_mcb = MCB {
             signature: MCB_SIGNATURE_NON_LAST,
             owner: PSP_SEGMENT,
-            size: prog_paragraphs,
+            size: 0x10 + prog_paragraphs,
         };
         prog_mcb.write(&mut sys.machine, PSP_SEGMENT - 1);
 
@@ -132,9 +134,11 @@ impl ExeLoader {
         };
         free_mcb.write(&mut sys.machine, end_segment);
 
-        sys.write_phys_u16((PSP_SEGMENT as u32 * 16) + 0x02, end_segment);
+        let mem_block_size = 0x10 + prog_paragraphs;
+        sys.write_phys_u16((PSP_SEGMENT as u32 * 16) + 0x02, mem_block_size);
         init_ivt(&mut sys.machine);
 
+        // Инициализация регистров из заголовка EXE
         let cs = LOAD_SEGMENT.wrapping_add(self.header.cs);
         let ip = self.header.ip;
         let ss = LOAD_SEGMENT.wrapping_add(self.header.ss);
@@ -143,19 +147,16 @@ impl ExeLoader {
         sys.cpu.registers.set_cs(cs);
         sys.cpu.registers.set_ds(PSP_SEGMENT);
         sys.cpu.registers.set_es(PSP_SEGMENT);
+        sys.cpu.registers.set_fs(PSP_SEGMENT);
         sys.cpu.registers.set_ss(ss);
         sys.cpu.registers.set_ip(ip);
         sys.cpu.registers.set_sp(sp);
 
-        let stack_top_phys = (ss as u32 * 16) + (sp as u32);
-        if stack_top_phys >= 4 {
-            // 1. Сохраняем CS = PSP_SEGMENT (сегмент PSP)
-            sys.write_phys_u16(stack_top_phys - 4, PSP_SEGMENT);
-            // 2. Сохраняем IP = 0x0000 (там лежит CD 20h - INT 20h в PSP)
-            sys.write_phys_u16(stack_top_phys - 2, 0x0000);
-            // 3. Корректируем SP, чтобы он указывал на "вершину" стека
-            sys.cpu.registers.set_sp(sp.wrapping_sub(4));
-        }
+        // ✅ ИСПРАВЛЕНО: Корректная эмуляция начального PUSH адреса возврата в PSP.
+        // Используем штатные функции стека из крейта x86, чтобы избежать ошибок
+        // с ручным расчетом физ. адреса и переносом SP через 0.
+        stack::push16(&mut sys.cpu, &mut sys.machine, 0x0000); // IP (указывает на INT 20h в PSP)
+        stack::push16(&mut sys.cpu, &mut sys.machine, PSP_SEGMENT); // CS
 
         log::info!(
             "Loaded .EXE file: CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X}, DS={:04X}",
@@ -172,30 +173,24 @@ impl ExeLoader {
     fn apply_relocations(&self, machine: &mut dyn Machine, load_segment: u16) {
         let reloc_table_offset = self.header.e_lfarlc as usize;
         let reloc_count = self.header.e_relc as usize;
-
         log::debug!(
             "Applying {} relocations at offset {:#x}",
             reloc_count,
             reloc_table_offset
         );
-
         for i in 0..reloc_count {
             let entry_offset = reloc_table_offset + i * 4;
             if entry_offset + 4 > self.data.len() {
                 log::warn!("Relocation table truncated at entry {}", i);
                 break;
             }
-
             let offset = u16::from_le_bytes([self.data[entry_offset], self.data[entry_offset + 1]]);
             let segment =
                 u16::from_le_bytes([self.data[entry_offset + 2], self.data[entry_offset + 3]]);
-
             let fixup_addr = ((load_segment as u32 + segment as u32) << 4) + offset as u32;
-
             let current = machine.read_mem_u16(fixup_addr);
             let corrected = current.wrapping_add(load_segment);
             machine.write_mem_u16(fixup_addr, corrected);
-
             log::trace!(
                 "Reloc #{i}: {:#04x}:{:#04x} → {:#06x}: {:#04x}→{:#04x}",
                 segment,
@@ -207,7 +202,8 @@ impl ExeLoader {
         }
     }
 
-    fn create_psp(machine: &mut Motherboard, segment: u16) {
+    // ✅ ИСПРАВЛЕНО: Добавлен параметр env_segment
+    fn create_psp(machine: &mut Motherboard, segment: u16, env_segment: u16) {
         let psp_base = segment as u32 * 16;
         machine.memory.write_u8(psp_base, 0xCD);
         machine.memory.write_u8(psp_base + 1, 0x20);
@@ -217,7 +213,8 @@ impl ExeLoader {
         machine.memory.write_u8(psp_base + 8, 0x00);
         machine.memory.write_u8(psp_base + 9, 0x00);
 
-        // 0x2C: Сегмент окружения (Environment) - обычно PSP + 16
-        machine.write_mem_u16(psp_base + 0x2C, segment.wrapping_add(0x10));
+        // 0x2C: Сегмент окружения (Environment).
+        // Теперь указывает на память ПОСЛЕ программы, а не на её код (LOAD_SEGMENT).
+        machine.write_mem_u16(psp_base + 0x2C, env_segment);
     }
 }
