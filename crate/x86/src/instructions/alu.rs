@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/instructions/alu.rs
+// Ver: 3 File: ./crate/x86/src/instructions/alu.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::modrm::ModRm;
@@ -95,7 +95,7 @@ pub fn sbb8(dst: u8, src: u8, carry: bool) -> (u8, bool, bool, bool) {
     let total = src as u16 + c;
     let result = (dst as u16).wrapping_sub(total) as u8;
     let cf = (dst as u16) < total;
-    let af = (dst as u16 & 0x0F) < (src as u16 & 0x0F) + c;
+    let af = ((dst ^ src ^ result) & 0x10) != 0;
     let of = ((dst ^ src) & 0x80) != 0 && ((dst ^ result) & 0x80) != 0;
     (result, cf, of, af)
 }
@@ -105,7 +105,7 @@ pub fn sbb16(dst: u16, src: u16, carry: bool) -> (u16, bool, bool, bool) {
     let total = src as u32 + c;
     let result = (dst as u32).wrapping_sub(total) as u16;
     let cf = (dst as u32) < total;
-    let af = (dst as u32 & 0x0F) < (src as u32 & 0x0F) + c;
+    let af = ((dst ^ src ^ result) & 0x10) != 0;
     let of = ((dst ^ src) & 0x8000) != 0 && ((dst ^ result) & 0x8000) != 0;
     (result, cf, of, af)
 }
@@ -115,7 +115,7 @@ pub fn sbb32(dst: u32, src: u32, carry: bool) -> (u32, bool, bool, bool) {
     let total = src as u64 + c;
     let result = (dst as u64).wrapping_sub(total) as u32;
     let cf = (dst as u64) < total;
-    let af = (dst as u64 & 0x0F) < (src as u64 & 0x0F) + c;
+    let af = ((dst ^ src ^ result) & 0x10) != 0;
     let of = ((dst ^ src) & 0x8000_0000) != 0 && ((dst ^ result) & 0x8000_0000) != 0;
     (result, cf, of, af)
 }
@@ -787,11 +787,8 @@ pub fn daa(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
     if (old_al & 0x0F) > 9 || old_af {
         al = al.wrapping_add(6);
         af = true;
-        if old_al > 0xF9 || old_cf {
-            cf = true;
-        }
     }
-    if old_al > 0x99 || old_cf {
+    if al > 0x9F || old_cf {
         al = al.wrapping_add(0x60);
         cf = true;
     }
@@ -811,11 +808,8 @@ pub fn das(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
     if (old_al & 0x0F) > 9 || old_af {
         al = al.wrapping_sub(6);
         af = true;
-        if old_al < 6 || old_cf {
-            cf = true;
-        }
     }
-    if old_al > 0x99 || old_cf {
+    if al > 0x9F || old_cf {
         al = al.wrapping_sub(0x60);
         cf = true;
     }

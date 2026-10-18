@@ -1,4 +1,4 @@
-// Ver: 4 File: src/app.rs
+// Ver: 1 File: ./src/app.rs
 use std::{
     error::Error,
     ffi::OsStr,

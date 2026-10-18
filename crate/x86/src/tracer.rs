@@ -5,7 +5,7 @@ use std::io::{self, BufWriter, Write};
 /// Трейт для трассировки выполнения инструкций.
 pub trait Tracer {
     /// Логирует одну инструкцию (CS:IP и байты опкодов).
-    fn log_instruction(&mut self, cs: u16, ip: u16, bytes: &[u8]);
+    fn log_instruction(&mut self, cs: u16, ip: u32, bytes: &[u8]);
     /// Принудительный сброс буфера на диск (нужно вызывать при HLT или краше).
     fn flush(&mut self) -> io::Result<()>;
 }
@@ -28,7 +28,7 @@ impl FileTracer {
 
 impl Tracer for FileTracer {
     #[inline]
-    fn log_instruction(&mut self, cs: u16, ip: u16, bytes: &[u8]) {
+    fn log_instruction(&mut self, cs: u16, ip: u32, bytes: &[u8]) {
         // Форматируем байты в hex-строку
         let hex_bytes: Vec<String> = bytes.iter().map(|b| format!("{:02X}", b)).collect();
         
@@ -61,7 +61,7 @@ pub struct NullTracer;
 
 impl Tracer for NullTracer {
     #[inline(always)]
-    fn log_instruction(&mut self, _cs: u16, _ip: u16, _bytes: &[u8]) {
+    fn log_instruction(&mut self, _cs: u16, _ip: u32, _bytes: &[u8]) {
         // Ничего не делаем
     }
     

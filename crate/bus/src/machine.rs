@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/bus/src/machine.rs
+// Ver: 1 File: crate/bus/src/machine.rs
 
 /// Трейт Machine (Системная шина / Материнская плата).
 /// CPU не должен знать о том, как устроена память или периферия.

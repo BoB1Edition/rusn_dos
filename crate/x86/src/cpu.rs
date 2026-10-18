@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/cpu.rs
+// Ver: 3 File: ./crate/x86/src/cpu.rs
 use crate::tracer::{FileTracer, Tracer};
 use crate::{registers::Registers, tracer::NullTracer};
 use bus::{Cpu, Machine};
@@ -36,7 +36,7 @@ pub struct X86Cpu {
     pub cr0: u32,
     pub tracer: Box<dyn Tracer>,
     pub(crate) instruction_bytes: Vec<u8>,
-    pub(crate) instruction_start_ip: u16,
+    pub(crate) instruction_start_ip: u32,
 }
 
 impl Default for X86Cpu {
@@ -74,14 +74,14 @@ impl X86Cpu {
 
     #[inline(always)]
     pub(crate) fn phys_ip(&self) -> u32 {
-        ((self.registers.cs() as u32) << 4) + self.registers.ip() as u32
+        ((self.registers.cs() as u32) << 4) + (self.registers.eip() & 0xFFFF)
     }
 
     // === Доступ для внешнего диспетчера (мост гибридного режима) ===
 
     /// Начинает сбор байтов инструкции с указанным стартовым IP
     /// (используется, когда опкод читает внешний цикл, а не `step`).
-    pub fn begin_trace(&mut self, start_ip: u16) {
+    pub fn begin_trace(&mut self, start_ip: u32) {
         self.instruction_bytes.clear();
         self.instruction_start_ip = start_ip;
     }
@@ -97,7 +97,7 @@ impl X86Cpu {
     }
 
     /// IP начала последней инструкции.
-    pub fn trace_start_ip(&self) -> u16 {
+    pub fn trace_start_ip(&self) -> u32 {
         self.instruction_start_ip
     }
 
@@ -141,7 +141,7 @@ impl Cpu for X86Cpu {
             return;
         }
         self.instruction_bytes.clear();
-        self.instruction_start_ip = self.registers.ip();
+        self.instruction_start_ip = self.registers.eip();
 
         loop {
             let addr = self.phys_ip();

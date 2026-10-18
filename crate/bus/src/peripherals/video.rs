@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/bus/src/peripherals/video.rs
+// Ver: 1 File: crate/bus/src/peripherals/video.rs
 
 use crate::peripheral::Peripheral;
 use crate::peripherals::fonts_vga8x16::VGA_FONT_8X16;

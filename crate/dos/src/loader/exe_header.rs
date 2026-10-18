@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/loader/exe_header.rs
+// Ver: 1 File: crate/dos/src/loader/exe_header.rs
 #[derive(Debug, Clone, Default)]
 pub struct MzHeader {
     // Стандартная (повсеместная) часть заголовка

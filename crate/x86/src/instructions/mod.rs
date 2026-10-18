@@ -1,3 +1,4 @@
+// Ver: 1 File: ./crate/x86/src/instructions/mod.rs
 pub mod alu;
 pub mod bit;
 pub mod control;

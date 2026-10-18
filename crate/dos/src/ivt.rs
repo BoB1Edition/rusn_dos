@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/ivt.rs
+// Ver: 1 File: crate/dos/src/ivt.rs
 use bus::Machine;
 
 /// Базовый адрес IVT в физической памяти

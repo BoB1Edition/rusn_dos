@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/bus/src/peripherals/pic.rs
+// Ver: 1 File: crate/bus/src/peripherals/pic.rs
 use crate::peripheral::Peripheral;
 
 /// Эмуляция пары каскадных контроллеров прерываний 8259A.

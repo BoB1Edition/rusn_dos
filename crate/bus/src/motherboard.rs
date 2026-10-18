@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/bus/src/motherboard.rs
+// Ver: 1 File: crate/bus/src/motherboard.rs
 
 use crate::peripherals::{
     keyboard::Keyboard, pic::Pic, pit::Pit, video::VideoMemory,

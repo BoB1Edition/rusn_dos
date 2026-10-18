@@ -1,35 +1,35 @@
-// Ver: 1 File: ./crate/x86/src/instructions/stack.rs
+// Ver: 2 File: ./crate/x86/src/instructions/stack.rs
 use crate::cpu::X86Cpu;
 use crate::modrm::ModRm;
 use bus::Machine;
 
 #[inline]
-fn ss_addr(cpu: &X86Cpu, sp: u16) -> u32 {
-    cpu.phys_addr(cpu.registers.ss(), sp)
+fn ss_addr(cpu: &X86Cpu, sp: u32) -> u32 {
+    cpu.phys_addr32(cpu.registers.ss(), sp)
 }
 
 pub fn push16(cpu: &mut X86Cpu, machine: &mut dyn Machine, val: u16) {
     let sp = cpu.registers.sp().wrapping_sub(2);
-    machine.write_mem_u16(ss_addr(cpu, sp), val);
+    machine.write_mem_u16(ss_addr(cpu, sp as u32), val);
     cpu.registers.set_sp(sp);
 }
 
 pub fn pop16(cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u16 {
     let sp = cpu.registers.sp();
-    let val = machine.read_mem_u16(ss_addr(cpu, sp));
+    let val = machine.read_mem_u16(ss_addr(cpu, sp as u32));
     cpu.registers.set_sp(sp.wrapping_add(2));
     val
 }
 
 pub fn push32(cpu: &mut X86Cpu, machine: &mut dyn Machine, val: u32) {
     let esp = cpu.registers.esp().wrapping_sub(4);
-    machine.write_mem_u32(ss_addr(cpu, esp as u16), val);
+    machine.write_mem_u32(ss_addr(cpu, esp), val);
     cpu.registers.set_esp(esp);
 }
 
 pub fn pop32(cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u32 {
     let esp = cpu.registers.esp();
-    let val = machine.read_mem_u32(ss_addr(cpu, esp as u16));
+    let val = machine.read_mem_u32(ss_addr(cpu, esp));
     cpu.registers.set_esp(esp.wrapping_add(4));
     val
 }

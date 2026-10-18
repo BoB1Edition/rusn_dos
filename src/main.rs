@@ -1,4 +1,4 @@
-// Ver: 1 File: src/main.rs
+// Ver: 1 File: ./src/main.rs
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};
@@ -76,5 +76,6 @@ fn run_program(program: PathBuf, config: PathBuf, no_log: bool, graphics: bool) 
 }
 
 fn run_window(config: PathBuf) -> Result<(), Box<dyn Error>> {
-    todo!("run_window")
+    todo!("run_window");
+    Ok(())
 }

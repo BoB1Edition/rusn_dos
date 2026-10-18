@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/dos/src/loader/exe_loader.rs
+// Ver: 1 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;

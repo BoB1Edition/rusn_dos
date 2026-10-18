@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/instructions/group.rs
+// Ver: 2 File: ./crate/x86/src/instructions/group.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -319,9 +319,9 @@ fn incdec_wide(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm, inc: b
 fn call_near(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
     if cpu.prefixes.has_operand_size {
         let (target, _) = read32(cpu, machine, modrm);
-        let ret = cpu.registers.ip();
-        stack::push32(cpu, machine, ret as u32);
-        cpu.registers.set_ip(target as u16);
+        let ret = cpu.registers.eip();
+        stack::push32(cpu, machine, ret);
+        cpu.registers.set_eip(target);
     } else {
         let (target, _) = read16(cpu, machine, modrm);
         let ret = cpu.registers.ip();
@@ -349,7 +349,7 @@ fn call_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
 fn jmp_near(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
     if cpu.prefixes.has_operand_size {
         let (target, _) = read32(cpu, machine, modrm);
-        cpu.registers.set_ip(target as u16);
+        cpu.registers.set_eip(target);
     } else {
         let (target, _) = read16(cpu, machine, modrm);
         cpu.registers.set_ip(target);

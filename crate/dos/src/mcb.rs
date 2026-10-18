@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/mcb.rs
+// Ver: 1 File: crate/dos/src/mcb.rs
 //! DOS Memory Control Block (MCB) allocator.
 //! Real-mode paragraph-based memory manager.
 

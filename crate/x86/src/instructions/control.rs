@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/instructions/control.rs
+// Ver: 2 File: ./crate/x86/src/instructions/control.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -36,8 +36,8 @@ pub fn cond(cpu: &X86Cpu, opcode: u8) -> bool {
 pub fn jcc_rel8(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
     let rel = cpu.fetch_u8(machine) as i8;
     if cond(cpu, opcode) {
-        let ip = cpu.registers.ip().wrapping_add(rel as u16);
-        cpu.registers.set_ip(ip);
+        let eip = cpu.registers.eip().wrapping_add(rel as u32);
+        cpu.registers.set_eip(eip);
     }
 }
 
@@ -48,8 +48,8 @@ pub fn jcc_rel16(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
         cpu.fetch_u16(machine) as i16 as i32
     };
     if cond(cpu, opcode) {
-        let ip = (cpu.registers.ip() as i32).wrapping_add(rel) as u16;
-        cpu.registers.set_ip(ip);
+        let new_eip = (cpu.registers.eip() as i32).wrapping_add(rel) as u32;
+        cpu.registers.set_eip(new_eip);
     }
 }
 
@@ -82,8 +82,8 @@ fn loop_cc(cpu: &mut X86Cpu, machine: &mut dyn Machine, zf_must: Option<bool>) {
         None => true,
     };
     if cx != 0 && zf_ok {
-        let ip = cpu.registers.ip().wrapping_add(rel as u16);
-        cpu.registers.set_ip(ip);
+        let eip = cpu.registers.eip().wrapping_add(rel as u32);
+        cpu.registers.set_eip(eip);
     }
 }
 
@@ -95,17 +95,18 @@ pub fn jcxz(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
         cpu.registers.cx() == 0
     };
     if zero {
-        let ip = cpu.registers.ip().wrapping_add(rel as u16);
-        cpu.registers.set_ip(ip);
+        let eip = cpu.registers.eip().wrapping_add(rel as u32);
+        cpu.registers.set_eip(eip);
     }
 }
 
 pub fn call_rel(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     if cpu.prefixes.has_operand_size {
         let rel = cpu.fetch_u32(machine) as i32;
-        let ret = cpu.registers.ip();
-        stack::push32(cpu, machine, ret as u32);
-        cpu.registers.set_ip((ret as i32).wrapping_add(rel) as u16);
+        let ret = cpu.registers.eip();
+        stack::push32(cpu, machine, ret);
+        let new_eip = (ret as i32).wrapping_add(rel) as u32;
+        cpu.registers.set_eip(new_eip);
     } else {
         let rel = cpu.fetch_u16(machine) as i16;
         let ret = cpu.registers.ip();
@@ -118,8 +119,8 @@ pub fn call_rel(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 pub fn jmp_rel(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     if cpu.prefixes.has_operand_size {
         let rel = cpu.fetch_u32(machine) as i32;
-        let ip = (cpu.registers.ip() as i32).wrapping_add(rel) as u16;
-        cpu.registers.set_ip(ip);
+        let eip = (cpu.registers.eip() as i32).wrapping_add(rel) as u32;
+        cpu.registers.set_eip(eip);
     } else {
         let rel = cpu.fetch_u16(machine) as i16;
         let ip = (cpu.registers.ip() as i32).wrapping_add(rel as i32) as u16;
@@ -136,8 +137,8 @@ pub fn jmp_far(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 pub fn jmp_rel8(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let rel = cpu.fetch_u8(machine) as i8;
-    let ip = cpu.registers.ip().wrapping_add(rel as u16);
-    cpu.registers.set_ip(ip);
+    let eip = cpu.registers.eip().wrapping_add(rel as u32);
+    cpu.registers.set_eip(eip);
 }
 
 pub fn call_far(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
@@ -162,15 +163,13 @@ pub fn ret_near0(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 fn ret_near(cpu: &mut X86Cpu, machine: &mut dyn Machine, extra: u16) {
     if cpu.prefixes.has_operand_size {
-        let ip = stack::pop32(cpu, machine) as u16;
-        cpu.registers.set_ip(ip);
-        cpu.registers
-            .set_sp(cpu.registers.sp().wrapping_add(extra));
+        let eip = stack::pop32(cpu, machine);
+        cpu.registers.set_eip(eip);
+        cpu.registers.set_sp(cpu.registers.sp().wrapping_add(extra));
     } else {
         let ip = stack::pop16(cpu, machine);
         cpu.registers.set_ip(ip);
-        cpu.registers
-            .set_sp(cpu.registers.sp().wrapping_add(extra));
+        cpu.registers.set_sp(cpu.registers.sp().wrapping_add(extra));
     }
 }
 
@@ -188,8 +187,7 @@ fn ret_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, extra: u16) {
     let cs = stack::pop16(cpu, machine);
     cpu.registers.set_ip(ip);
     cpu.registers.set_cs(cs);
-    cpu.registers
-        .set_sp(cpu.registers.sp().wrapping_add(extra));
+    cpu.registers.set_sp(cpu.registers.sp().wrapping_add(extra));
 }
 
 pub fn enter(cpu: &mut X86Cpu, machine: &mut dyn Machine) {

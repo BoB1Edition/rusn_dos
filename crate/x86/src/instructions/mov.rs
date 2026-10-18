@@ -1,10 +1,20 @@
-// Ver: 1 File: ./crate/x86/src/instructions/mov.rs
+// Ver: 2 File: ./crate/x86/src/instructions/mov.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::modrm::ModRm;
 use bus::Machine;
 
-// === Базовые MOV регистр-регистр и регистр-память ===
+fn moffs_addr(cpu: &mut X86Cpu, machine: &mut dyn Machine) -> u32 {
+    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
+
+    if cpu.prefixes.has_address_size {
+        let offset = cpu.fetch_u32(machine);
+        cpu.phys_addr32(seg, offset)
+    } else {
+        let offset = cpu.fetch_u16(machine);
+        cpu.phys_addr(seg, offset)
+    }
+}
 
 pub fn mov_rm8_r8(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let modrm = ModRm::from_byte(cpu.fetch_u8(machine));
@@ -168,32 +178,24 @@ pub fn mov_rm_imm(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 pub fn mov_ax_moffs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let offset = if cpu.prefixes.has_address_size {
-        cpu.fetch_u32(machine) as u16
-    } else {
-        cpu.fetch_u16(machine)
-    };
-    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let addr = cpu.phys_addr(seg, offset);
+    let addr = moffs_addr(cpu, machine);
     if cpu.prefixes.has_operand_size {
-        cpu.registers.set_eax(machine.read_mem_u32(addr));
+        let val = machine.read_mem_u32(addr);
+        cpu.registers.set_eax(val);
     } else {
-        cpu.registers.set_ax(machine.read_mem_u16(addr));
+        let val = machine.read_mem_u16(addr);
+        cpu.registers.set_ax(val);
     }
 }
 
 pub fn mov_moffs_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let offset = if cpu.prefixes.has_address_size {
-        cpu.fetch_u32(machine) as u16
-    } else {
-        cpu.fetch_u16(machine)
-    };
-    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let addr = cpu.phys_addr(seg, offset);
+    let addr = moffs_addr(cpu, machine);
     if cpu.prefixes.has_operand_size {
-        machine.write_mem_u32(addr, cpu.registers.eax());
+        let val = cpu.registers.eax();
+        machine.write_mem_u32(addr, val);
     } else {
-        machine.write_mem_u16(addr, cpu.registers.ax());
+        let val = cpu.registers.ax();
+        machine.write_mem_u16(addr, val);
     }
 }
 
@@ -249,53 +251,39 @@ fn load_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, es: bool) {
     }
 }
 
-// === MOV по прямым адресам (Direct Addressing) ===
-
 pub fn mov_al_address(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let offset = if cpu.prefixes.has_address_size {
-        cpu.fetch_u32(machine) as u16
-    } else {
-        cpu.fetch_u16(machine)
-    };
-    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    cpu.registers
-        .set_al(machine.read_mem_u8(cpu.phys_addr(seg, offset)));
+    let addr = moffs_addr(cpu, machine);
+    let val = machine.read_mem_u8(addr);
+    cpu.registers.set_al(val);
 }
 
 pub fn mov_ax_address(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let offset = if cpu.prefixes.has_address_size {
-        cpu.fetch_u32(machine) as u16
+    let addr = moffs_addr(cpu, machine);
+    if cpu.prefixes.has_operand_size {
+        let val = machine.read_mem_u32(addr);
+        cpu.registers.set_eax(val);
     } else {
-        cpu.fetch_u16(machine)
-    };
-    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    cpu.registers
-        .set_ax(machine.read_mem_u16(cpu.phys_addr(seg, offset)));
+        let val = machine.read_mem_u16(addr);
+        cpu.registers.set_ax(val);
+    }
 }
 
 pub fn mov_address_al(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let offset = if cpu.prefixes.has_address_size {
-        cpu.fetch_u32(machine) as u16
-    } else {
-        cpu.fetch_u16(machine)
-    };
-    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    machine.write_mem_u8(cpu.phys_addr(seg, offset), cpu.registers.al());
+    let addr = moffs_addr(cpu, machine);
+    let val = cpu.registers.al();
+    machine.write_mem_u8(addr, val);
 }
 
 pub fn mov_address_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let offset = if cpu.prefixes.has_address_size {
-        cpu.fetch_u32(machine) as u16
+    let addr = moffs_addr(cpu, machine);
+    if cpu.prefixes.has_operand_size {
+        let val = cpu.registers.eax();
+        machine.write_mem_u32(addr, val);
     } else {
-        cpu.fetch_u16(machine)
-    };
-    let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    machine.write_mem_u16(cpu.phys_addr(seg, offset), cpu.registers.ax());
+        let val = cpu.registers.ax();
+        machine.write_mem_u16(addr, val);
+    }
 }
-
-// === LEA (Load Effective Address) ===
-
-// === Строковые операции (String Operations) ===
 
 fn df_set(cpu: &X86Cpu) -> bool {
     (cpu.registers.flags() & flags::DF) != 0
@@ -305,13 +293,19 @@ fn step_index(cpu: &mut X86Cpu, si: bool, di: bool, n: u16) {
     let down = df_set(cpu);
     if si {
         let v = cpu.registers.si();
-        cpu.registers
-            .set_si(if down { v.wrapping_sub(n) } else { v.wrapping_add(n) });
+        cpu.registers.set_si(if down {
+            v.wrapping_sub(n)
+        } else {
+            v.wrapping_add(n)
+        });
     }
     if di {
         let v = cpu.registers.di();
-        cpu.registers
-            .set_di(if down { v.wrapping_sub(n) } else { v.wrapping_add(n) });
+        cpu.registers.set_di(if down {
+            v.wrapping_sub(n)
+        } else {
+            v.wrapping_add(n)
+        });
     }
 }
 
@@ -324,11 +318,7 @@ fn rep_count(cpu: &mut X86Cpu) -> Option<u32> {
     } else {
         cpu.registers.cx() as u32
     };
-    if n == 0 {
-        Some(0)
-    } else {
-        Some(n)
-    }
+    if n == 0 { Some(0) } else { Some(n) }
 }
 
 fn rep_dec(cpu: &mut X86Cpu) {

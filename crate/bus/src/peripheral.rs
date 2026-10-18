@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/bus/src/peripheral.rs
+// Ver: 1 File: crate/bus/src/peripheral.rs
 
 /// Трейт для периферийных устройств (Keyboard, Video, PIC, Timer).
 /// Позволяет "Материнской плате" опрашивать устройства и передавать им данные.

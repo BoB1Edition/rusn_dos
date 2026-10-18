@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/registers.rs
+// Ver: 2 File: ./crate/x86/src/registers.rs
 
 #[derive(Debug, Clone)]
 pub struct Registers {
@@ -10,7 +10,7 @@ pub struct Registers {
     edi: u32,
     ebp: u32,
     esp: u32,
-    ip: u16,
+    eip: u32,
     cs: u16,
     ds: u16,
     es: u16,
@@ -23,9 +23,9 @@ pub struct Registers {
 impl Registers {
     pub fn step(&mut self, step: Option<u16>) {
         if let Some(step) = step {
-            self.ip = self.ip.wrapping_add(step);
+            self.eip = self.eip.wrapping_add(step as u32);
         } else {
-            self.ip = self.ip.wrapping_add(1);
+            self.eip = self.eip.wrapping_add(1);
         }
     }
 }
@@ -41,7 +41,7 @@ impl Default for Registers {
             edi: 0,
             ebp: 0,
             esp: 0,
-            ip: 0,
+            eip: 0,
             cs: 0,
             ds: 0,
             es: 0,
@@ -256,19 +256,19 @@ impl Registers {
 
 impl Registers {
     pub fn ip(&self) -> u16 {
-        self.ip as u16
+        self.eip as u16
     }
 
-    /*pub fn eip(&self) -> u32 {
+    pub fn eip(&self) -> u32 {
         self.eip
     }
 
     pub fn set_eip(&mut self, eip: u32) {
         self.eip = eip;
     }
-    */
+
     pub fn set_ip(&mut self, ip: u16) {
-        self.ip = ip;
+        self.eip = ip as u32;
     }
 }
 

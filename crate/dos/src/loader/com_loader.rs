@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/dos/src/loader/com_loader.rs
+// Ver: 1 File: crate/dos/src/loader/com_loader.rs
 use bus::{Machine, Motherboard};
 
 use crate::consts::{DOS_MEMORY_SIZE, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
