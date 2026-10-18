@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/x86/src/instructions/control.rs
+// Ver: 3 File: ./crate/x86/src/instructions/control.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -165,7 +165,7 @@ fn ret_near(cpu: &mut X86Cpu, machine: &mut dyn Machine, extra: u16) {
     if cpu.prefixes.has_operand_size {
         let eip = stack::pop32(cpu, machine);
         cpu.registers.set_eip(eip);
-        cpu.registers.set_sp(cpu.registers.sp().wrapping_add(extra));
+        cpu.registers.set_esp(cpu.registers.esp().wrapping_add(extra as u32));
     } else {
         let ip = stack::pop16(cpu, machine);
         cpu.registers.set_ip(ip);
