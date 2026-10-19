@@ -1,8 +1,8 @@
-// Ver: 2 File: ./crate/x86/src/instructions/system.rs
+// Ver: 3 File: ./crate/x86/src/instructions/system.rs
 
-use bus::Machine;
 use crate::cpu::X86Cpu;
 use crate::flags;
+use bus::Machine;
 
 pub fn nop(_cpu: &mut X86Cpu, _machine: &mut dyn Machine) {}
 
@@ -150,28 +150,21 @@ pub fn out_dx_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 fn read_port_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine, port: u16) {
     if cpu.prefixes.has_operand_size {
-        let mut v = 0u32;
-        for i in 0..4 {
-            v |= (machine.in_port(port.wrapping_add(i)) as u32) << (8 * i);
-        }
+        let v = machine.in_port32(port);
         cpu.registers.set_eax(v);
     } else {
-        let lo = machine.in_port(port) as u16;
-        let hi = machine.in_port(port.wrapping_add(1)) as u16;
-        cpu.registers.set_ax(lo | (hi << 8));
+        let v = machine.in_port16(port);
+        cpu.registers.set_ax(v);
     }
 }
 
 fn write_port_ax(cpu: &mut X86Cpu, machine: &mut dyn Machine, port: u16) {
     if cpu.prefixes.has_operand_size {
         let v = cpu.registers.eax();
-        for i in 0..4 {
-            machine.out_port(port.wrapping_add(i), (v >> (8 * i)) as u8);
-        }
+        machine.out_port32(port, v);
     } else {
         let v = cpu.registers.ax();
-        machine.out_port(port, v as u8);
-        machine.out_port(port.wrapping_add(1), (v >> 8) as u8);
+        machine.out_port16(port, v);
     }
 }
 
@@ -269,23 +262,40 @@ pub fn aam(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 
 pub fn aad(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let base = cpu.fetch_u8(machine);
-    let al = cpu.registers.ah().wrapping_mul(base).wrapping_add(cpu.registers.al());
+    let al = cpu
+        .registers
+        .ah()
+        .wrapping_mul(base)
+        .wrapping_add(cpu.registers.al());
     cpu.registers.set_ax(al as u16);
     let f = flags::compute_flags_u8(cpu.registers.flags(), al, false, false, false);
     let kept = cpu.registers.flags() & (flags::CF | flags::OF | flags::AF);
-    cpu.registers.set_flags((f & !(flags::CF | flags::OF | flags::AF)) | kept);
+    cpu.registers
+        .set_flags((f & !(flags::CF | flags::OF | flags::AF)) | kept);
 }
 
 pub fn salc(cpu: &mut X86Cpu, _machine: &mut dyn Machine) {
     cpu.registers
-        .set_al(if flags::test_cf(cpu.registers.flags()) { 0xFF } else { 0 });
+        .set_al(if flags::test_cf(cpu.registers.flags()) {
+            0xFF
+        } else {
+            0
+        });
 }
 
 pub fn xlat(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let seg = cpu.prefixes.segment_override.unwrap_or(cpu.registers.ds());
-    let offset = cpu.registers.bx().wrapping_add(cpu.registers.al() as u16);
-    cpu.registers
-        .set_al(machine.read_mem_u8(cpu.phys_addr(seg, offset)));
+    if cpu.prefixes.has_address_size {
+        // 32-битная адресация (префикс 0x67)
+        let offset = cpu.registers.ebx().wrapping_add(cpu.registers.al() as u32);
+        cpu.registers
+            .set_al(machine.read_mem_u8(cpu.phys_addr32(seg, offset)));
+    } else {
+        // 16-битная адресация (по умолчанию)
+        let offset = cpu.registers.bx().wrapping_add(cpu.registers.al() as u16);
+        cpu.registers
+            .set_al(machine.read_mem_u8(cpu.phys_addr(seg, offset)));
+    }
 }
 
 pub fn pop_fs(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
@@ -316,10 +326,17 @@ pub fn group_0f01(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
         return;
     }
     match modrm.reg_field {
-        0 | 1 => {
+        0 => {
+            // SGDT
             let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-            machine.write_mem_u16(addr, 0xFFFF);
-            machine.write_mem_u32(addr.wrapping_add(2), 0);
+            machine.write_mem_u16(addr, cpu.gdtr_limit);
+            machine.write_mem_u32(addr.wrapping_add(2), cpu.gdtr_base);
+        }
+        1 => {
+            // SIDT
+            let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
+            machine.write_mem_u16(addr, cpu.idtr_limit);
+            machine.write_mem_u32(addr.wrapping_add(2), cpu.idtr_base);
         }
         2 => {
             let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);

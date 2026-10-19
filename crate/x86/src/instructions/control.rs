@@ -1,4 +1,4 @@
-// Ver: 3 File: ./crate/x86/src/instructions/control.rs
+// Ver: 4 File: ./crate/x86/src/instructions/control.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -129,10 +129,19 @@ pub fn jmp_rel(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 pub fn jmp_far(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let ip = cpu.fetch_u16(machine);
-    let cs = cpu.fetch_u16(machine);
-    cpu.registers.set_cs(cs);
-    cpu.registers.set_ip(ip);
+    if cpu.prefixes.has_operand_size {
+        // 32-битный режим: EIP (32 бита) + CS (16 бит)
+        let eip = cpu.fetch_u32(machine);
+        let cs = cpu.fetch_u16(machine);
+        cpu.registers.set_eip(eip);
+        cpu.registers.set_cs(cs);
+    } else {
+        // 16-битный режим (по умолчанию)
+        let ip = cpu.fetch_u16(machine);
+        let cs = cpu.fetch_u16(machine);
+        cpu.registers.set_ip(ip);
+        cpu.registers.set_cs(cs);
+    }
 }
 
 pub fn jmp_rel8(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
@@ -142,14 +151,31 @@ pub fn jmp_rel8(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 pub fn call_far(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    let ip = cpu.fetch_u16(machine);
-    let cs = cpu.fetch_u16(machine);
-    let ret_cs = cpu.registers.cs();
-    let ret_ip = cpu.registers.ip();
-    stack::push16(cpu, machine, ret_cs);
-    stack::push16(cpu, machine, ret_ip);
-    cpu.registers.set_cs(cs);
-    cpu.registers.set_ip(ip);
+    if cpu.prefixes.has_operand_size {
+        // 32-битный режим: в стек пушим CS (16 бит), затем EIP (32 бита)
+        let eip = cpu.fetch_u32(machine);
+        let cs = cpu.fetch_u16(machine);
+        let ret_cs = cpu.registers.cs();
+        let ret_eip = cpu.registers.eip();
+
+        stack::push16(cpu, machine, ret_cs);
+        stack::push32(cpu, machine, ret_eip);
+
+        cpu.registers.set_cs(cs);
+        cpu.registers.set_eip(eip);
+    } else {
+        // 16-битный режим
+        let ip = cpu.fetch_u16(machine);
+        let cs = cpu.fetch_u16(machine);
+        let ret_cs = cpu.registers.cs();
+        let ret_ip = cpu.registers.ip();
+
+        stack::push16(cpu, machine, ret_cs);
+        stack::push16(cpu, machine, ret_ip);
+
+        cpu.registers.set_cs(cs);
+        cpu.registers.set_ip(ip);
+    }
 }
 
 pub fn ret_imm(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
@@ -165,7 +191,8 @@ fn ret_near(cpu: &mut X86Cpu, machine: &mut dyn Machine, extra: u16) {
     if cpu.prefixes.has_operand_size {
         let eip = stack::pop32(cpu, machine);
         cpu.registers.set_eip(eip);
-        cpu.registers.set_esp(cpu.registers.esp().wrapping_add(extra as u32));
+        cpu.registers
+            .set_esp(cpu.registers.esp().wrapping_add(extra as u32));
     } else {
         let ip = stack::pop16(cpu, machine);
         cpu.registers.set_ip(ip);
@@ -183,29 +210,60 @@ pub fn retf(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 fn ret_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, extra: u16) {
-    let ip = stack::pop16(cpu, machine);
-    let cs = stack::pop16(cpu, machine);
-    cpu.registers.set_ip(ip);
-    cpu.registers.set_cs(cs);
-    cpu.registers.set_sp(cpu.registers.sp().wrapping_add(extra));
+    if cpu.prefixes.has_operand_size {
+        // 32-битный режим: достаем EIP (32 бита), затем CS (16 бит), корректируем ESP
+        let eip = stack::pop32(cpu, machine);
+        let cs = stack::pop16(cpu, machine);
+        cpu.registers.set_eip(eip);
+        cpu.registers.set_cs(cs);
+        cpu.registers.set_esp(cpu.registers.esp().wrapping_add(extra as u32));
+    } else {
+        // 16-битный режим
+        let ip = stack::pop16(cpu, machine);
+        let cs = stack::pop16(cpu, machine);
+        cpu.registers.set_ip(ip);
+        cpu.registers.set_cs(cs);
+        cpu.registers.set_sp(cpu.registers.sp().wrapping_add(extra));
+    }
 }
 
 pub fn enter(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     let alloc = cpu.fetch_u16(machine);
     let level = cpu.fetch_u8(machine) & 0x1F;
-    let frame = cpu.registers.bp();
-    stack::push16(cpu, machine, frame);
-    let frame_sp = cpu.registers.sp();
-    if level > 0 {
-        for i in 1..level {
-            let bp = cpu.registers.bp().wrapping_sub((i as u16) * 2);
-            let val = machine.read_mem_u16(cpu.phys_addr(cpu.registers.ss(), bp));
-            stack::push16(cpu, machine, val);
+    
+    if cpu.prefixes.has_operand_size {
+        // 32-битный режим: используем EBP и ESP
+        let frame = cpu.registers.ebp();
+        stack::push32(cpu, machine, frame);
+        let frame_esp = cpu.registers.esp();
+        
+        if level > 0 {
+            for i in 1..level {
+                let bp = cpu.registers.ebp().wrapping_sub((i as u32) * 4);
+                let val = machine.read_mem_u32(cpu.phys_addr32(cpu.registers.ss(), bp));
+                stack::push32(cpu, machine, val);
+            }
+            stack::push32(cpu, machine, frame_esp);
         }
-        stack::push16(cpu, machine, frame_sp);
+        cpu.registers.set_ebp(frame_esp);
+        cpu.registers.set_esp(frame_esp.wrapping_sub(alloc as u32));
+    } else {
+        // 16-битный режим (по умолчанию): используем BP и SP
+        let frame = cpu.registers.bp();
+        stack::push16(cpu, machine, frame);
+        let frame_sp = cpu.registers.sp();
+        
+        if level > 0 {
+            for i in 1..level {
+                let bp = cpu.registers.bp().wrapping_sub((i as u16) * 2);
+                let val = machine.read_mem_u16(cpu.phys_addr(cpu.registers.ss(), bp));
+                stack::push16(cpu, machine, val);
+            }
+            stack::push16(cpu, machine, frame_sp);
+        }
+        cpu.registers.set_bp(frame_sp);
+        cpu.registers.set_sp(frame_sp.wrapping_sub(alloc));
     }
-    cpu.registers.set_bp(frame_sp);
-    cpu.registers.set_sp(frame_sp.wrapping_sub(alloc));
 }
 
 pub fn leave(cpu: &mut X86Cpu, machine: &mut dyn Machine) {

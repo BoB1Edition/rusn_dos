@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/bus/src/machine.rs
+// Ver: 4 File: crate/bus/src/machine.rs
 
 /// Трейт Machine (Системная шина / Материнская плата).
 /// CPU не должен знать о том, как устроена память или периферия.
@@ -49,4 +49,26 @@ pub trait Machine {
     // === Состояние системы ===
     fn is_halted(&self) -> bool;
     fn halt(&mut self);
+
+    fn in_port16(&mut self, port: u16) -> u16 {
+        let lo = self.in_port(port) as u16;
+        let hi = self.in_port(port.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    fn in_port32(&mut self, port: u16) -> u32 {
+        let lo = self.in_port16(port) as u32;
+        let hi = self.in_port16(port.wrapping_add(2)) as u32;
+        lo | (hi << 16)
+    }
+
+    fn out_port16(&mut self, port: u16, val: u16) {
+        self.out_port(port, val as u8);
+        self.out_port(port.wrapping_add(1), (val >> 8) as u8); // Пишем в port+1
+    }
+
+    fn out_port32(&mut self, port: u16, val: u32) {
+        self.out_port16(port, val as u16);
+        self.out_port16(port.wrapping_add(2), (val >> 16) as u16);
+    }
 }

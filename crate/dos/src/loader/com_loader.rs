@@ -1,7 +1,7 @@
-// Ver: 1 File: crate/dos/src/loader/com_loader.rs
+// Ver: 2 File: crate/dos/src/loader/com_loader.rs
 use bus::{Machine, Motherboard};
 
-use crate::consts::{DOS_MEMORY_SIZE, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
+use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::mcb::MCB;
 use crate::system::DosSystem;
@@ -47,11 +47,11 @@ impl ComLoader {
         let free_mcb = MCB {
             signature: MCB_SIGNATURE_LAST,
             owner: 0,
-            size: 0xF000 - end_segment - 1,
+            size: MAX_MCB_SEGMENT - end_segment - 1,
         };
         free_mcb.write(&mut sys.machine, end_segment);
 
-        sys.write_phys_u16((PSP_SEGMENT as u32 * 16) + 0x02, end_segment);
+        sys.write_phys_u16((PSP_SEGMENT as u32 * 16) + 0x02, MAX_MCB_SEGMENT - PSP_SEGMENT);
 
         init_ivt(&mut sys.machine);
         sys.cpu.registers.set_cs(PSP_SEGMENT);

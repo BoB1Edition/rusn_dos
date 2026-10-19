@@ -1,5 +1,5 @@
-// Ver: 1 File: crate/dos/src/loader/exe_loader.rs
-use crate::consts::{DOS_MEMORY_SIZE, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
+// Ver: 2 File: crate/dos/src/loader/exe_loader.rs
+use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
 use crate::mcb::MCB;
@@ -70,8 +70,6 @@ impl ExeLoader {
     pub fn exec(&mut self, no_log: bool) -> Result<DosSystem, Box<dyn std::error::Error>> {
         const LOAD_SEGMENT: u16 = 0x1000; // Базовый сегмент загрузки
         const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10; // PSP на 256 байт ниже кода
-
-        // 1. Создаём память
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
 
         // 2. Заранее вычисляем размеры программы, чтобы корректно указать сегмент окружения
@@ -130,12 +128,13 @@ impl ExeLoader {
         let free_mcb = MCB {
             signature: MCB_SIGNATURE_LAST,
             owner: 0,
-            size: 0xF000 - end_segment - 1,
+            size: MAX_MCB_SEGMENT - end_segment - 1,
         };
         free_mcb.write(&mut sys.machine, end_segment);
 
-        let mem_block_size = 0x10 + prog_paragraphs;
+        let mem_block_size = MAX_MCB_SEGMENT - PSP_SEGMENT;
         sys.write_phys_u16((PSP_SEGMENT as u32 * 16) + 0x02, mem_block_size);
+
         init_ivt(&mut sys.machine);
 
         // Инициализация регистров из заголовка EXE
@@ -207,6 +206,10 @@ impl ExeLoader {
         let psp_base = segment as u32 * 16;
         machine.memory.write_u8(psp_base, 0xCD);
         machine.memory.write_u8(psp_base + 1, 0x20);
+        //Начальный размер в памяти - не трогать
+        machine.memory.write_u8(psp_base + 2, 0xF0);
+        machine.memory.write_u8(psp_base + 3, 0x00);
+        //========================================
         machine.memory.write_u8(psp_base + 5, 0xCD);
         machine.memory.write_u8(psp_base + 6, 0x21);
         machine.memory.write_u8(psp_base + 7, 0xCB);

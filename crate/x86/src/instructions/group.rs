@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/x86/src/instructions/group.rs
+// Ver: 3 File: ./crate/x86/src/instructions/group.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -336,14 +336,32 @@ fn call_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         return;
     }
     let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-    let ip = machine.read_mem_u16(addr);
-    let cs = machine.read_mem_u16(addr.wrapping_add(2));
-    let ret_cs = cpu.registers.cs();
-    let ret_ip = cpu.registers.ip();
-    stack::push16(cpu, machine, ret_cs);
-    stack::push16(cpu, machine, ret_ip);
-    cpu.registers.set_cs(cs);
-    cpu.registers.set_ip(ip);
+    
+    if cpu.prefixes.has_operand_size {
+        // 32-битный режим: читаем 32-битный EIP и 16-битный CS из памяти
+        let eip = machine.read_mem_u32(addr);
+        let cs = machine.read_mem_u16(addr.wrapping_add(4));
+        let ret_cs = cpu.registers.cs();
+        let ret_eip = cpu.registers.eip();
+        
+        stack::push16(cpu, machine, ret_cs);
+        stack::push32(cpu, machine, ret_eip);
+        
+        cpu.registers.set_cs(cs);
+        cpu.registers.set_eip(eip);
+    } else {
+        // 16-битный режим
+        let ip = machine.read_mem_u16(addr);
+        let cs = machine.read_mem_u16(addr.wrapping_add(2));
+        let ret_cs = cpu.registers.cs();
+        let ret_ip = cpu.registers.ip();
+        
+        stack::push16(cpu, machine, ret_cs);
+        stack::push16(cpu, machine, ret_ip);
+        
+        cpu.registers.set_cs(cs);
+        cpu.registers.set_ip(ip);
+    }
 }
 
 fn jmp_near(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
@@ -362,10 +380,20 @@ fn jmp_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         return;
     }
     let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-    let ip = machine.read_mem_u16(addr);
-    let cs = machine.read_mem_u16(addr.wrapping_add(2));
-    cpu.registers.set_cs(cs);
-    cpu.registers.set_ip(ip);
+    
+    if cpu.prefixes.has_operand_size {
+        // 32-битный режим
+        let eip = machine.read_mem_u32(addr);
+        let cs = machine.read_mem_u16(addr.wrapping_add(4));
+        cpu.registers.set_eip(eip);
+        cpu.registers.set_cs(cs);
+    } else {
+        // 16-битный режим
+        let ip = machine.read_mem_u16(addr);
+        let cs = machine.read_mem_u16(addr.wrapping_add(2));
+        cpu.registers.set_ip(ip);
+        cpu.registers.set_cs(cs);
+    }
 }
 
 fn push_rm(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {

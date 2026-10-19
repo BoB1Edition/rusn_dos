@@ -1,9 +1,7 @@
-// Ver: 1 File: crate/dos/src/mcb.rs
+// Ver: 3 File: crate/dos/src/mcb.rs
 //! DOS Memory Control Block (MCB) allocator.
 //! Real-mode paragraph-based memory manager.
-
 use bus::Machine;
-
 use crate::consts::{MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 
 /// Структура MCB (16 байт в памяти)
@@ -39,10 +37,12 @@ pub fn init_memory_map(machine: &mut dyn Machine, first_mcb_segment: u16) {
     const MAX_CONVENTIONAL_SEGMENT: u16 = 0xF000; // сразу за 640 КБ начинается видеопамять
     let available = MAX_CONVENTIONAL_SEGMENT.saturating_sub(first_mcb_segment);
     log::debug!("available: {}", available);
+    
     if available < 2 {
         log::error!("Not enough memory for MCB chain");
         return;
     }
+
     // Первый MCB — свободный, последний
     let mcb = MCB {
         signature: MCB_SIGNATURE_LAST,
@@ -58,11 +58,13 @@ pub fn allocate(machine: &mut dyn Machine, first_seg: u16, paragraphs: u16) -> O
     let mut seg = first_seg;
     loop {
         let mcb = MCB::read(machine, seg);
+        
         if mcb.owner == 0 && mcb.size >= paragraphs {
-            // если блок больше, чем нужно, и можно разрезать
+            // если блок больше, чем нужно, и можно разрезать (нужен минимум 1 параграф для нового MCB + 1 для данных)
             if mcb.size > paragraphs + 1 {
-                let rest_seg = seg + 1 + paragraphs;
-                let rest_size = mcb.size - paragraphs - 1;
+                let rest_seg = seg.wrapping_add(1).wrapping_add(paragraphs);
+                let rest_size = mcb.size.wrapping_sub(paragraphs).wrapping_sub(1);
+                
                 // обновляем текущий MCB
                 MCB {
                     signature: MCB_SIGNATURE_NON_LAST,
@@ -70,6 +72,7 @@ pub fn allocate(machine: &mut dyn Machine, first_seg: u16, paragraphs: u16) -> O
                     size: paragraphs,
                 }
                 .write(machine, seg);
+                
                 // создаём свободный остаток
                 MCB {
                     signature: mcb.signature, // наследуем флаг последнего
@@ -77,7 +80,8 @@ pub fn allocate(machine: &mut dyn Machine, first_seg: u16, paragraphs: u16) -> O
                     size: rest_size,
                 }
                 .write(machine, rest_seg);
-                return Some(seg + 1);
+                
+                return Some(seg.wrapping_add(1));
             } else {
                 // используем весь блок
                 MCB {
@@ -85,13 +89,21 @@ pub fn allocate(machine: &mut dyn Machine, first_seg: u16, paragraphs: u16) -> O
                     ..mcb
                 }
                 .write(machine, seg);
-                return Some(seg + 1);
+                return Some(seg.wrapping_add(1));
             }
         }
+        
         if mcb.signature == MCB_SIGNATURE_LAST {
             break;
         }
-        seg += 1 + mcb.size;
+        
+        // ✅ ЗАЩИТА: безопасное сложение и проверка на зацикливание
+        let next_seg = seg.wrapping_add(1).wrapping_add(mcb.size);
+        if next_seg <= seg {
+            log::warn!("MCB chain corrupted during allocate at segment {:04X}, breaking", seg);
+            break;
+        }
+        seg = next_seg;
     }
     None
 }
@@ -99,13 +111,21 @@ pub fn allocate(machine: &mut dyn Machine, first_seg: u16, paragraphs: u16) -> O
 /// Освобождает блок памяти по сегменту данных (MCB = segment - 1).
 /// Возвращает Ok(()) или Err(код ошибки DOS).
 pub fn free(machine: &mut dyn Machine, first_seg: u16, data_segment: u16) -> Result<(), u16> {
+    // ✅ ЗАЩИТА: сегмент 0 не может иметь MCB
+    if data_segment == 0 {
+        return Err(0x09);
+    }
+    
     let mcb_seg = data_segment - 1;
     let mut mcb = MCB::read(machine, mcb_seg);
+    
     if mcb.owner == 0 {
         return Err(0x09); // уже свободен или повреждён
     }
+    
     mcb.owner = 0;
     mcb.write(machine, mcb_seg);
+    
     coalesce(machine, first_seg);
     Ok(())
 }
@@ -118,32 +138,40 @@ pub fn modify(
     data_segment: u16,
     new_paragraphs: u16,
 ) -> Result<u16, u16> {
+    if data_segment == 0 {
+        return Err(0x09);
+    }
+    
     let mcb_seg = data_segment - 1;
     let mcb = MCB::read(machine, mcb_seg);
+    
     if mcb.owner == 0 {
         return Err(0x09);
     }
-
+    
     if mcb.size >= new_paragraphs {
         // уменьшение
-        let excess = mcb.size - new_paragraphs;
-        if excess > 0 {
-            // создаём новый свободный MCB после уменьшенного блока
-            let next_seg = mcb_seg + 1 + new_paragraphs;
+        let excess = mcb.size.wrapping_sub(new_paragraphs);
+        
+        // ✅ ИСПРАВЛЕНО: разбиваем блок только если остатка хватает на новый MCB (1) + данные (>=1)
+        if excess > 1 {
+            let next_seg = mcb_seg.wrapping_add(1).wrapping_add(new_paragraphs);
             let next_sig = if mcb.signature == MCB_SIGNATURE_LAST {
                 MCB_SIGNATURE_LAST
             } else {
                 MCB_SIGNATURE_NON_LAST
             };
+            
             MCB {
                 size: new_paragraphs,
                 ..mcb
             }
             .write(machine, mcb_seg);
+            
             MCB {
                 signature: next_sig,
                 owner: 0,
-                size: excess - 1,
+                size: excess.wrapping_sub(1),
             }
             .write(machine, next_seg);
         }
@@ -151,28 +179,37 @@ pub fn modify(
         Ok(0) // успех
     } else {
         // попытка увеличить
-        let next_seg = mcb_seg + 1 + mcb.size;
+        let next_seg = mcb_seg.wrapping_add(1).wrapping_add(mcb.size);
+        
+        // ✅ ЗАЩИТА: если next_seg <= mcb_seg, значит переполнение или повреждение
+        if next_seg <= mcb_seg {
+            return Err(mcb.size); 
+        }
+        
         let next = MCB::read(machine, next_seg);
-        if next.owner == 0 && (mcb.size + 1 + next.size) >= new_paragraphs {
-            let combined = mcb.size + 1 + next.size;
-            let rest = combined - new_paragraphs;
+        let combined = mcb.size.wrapping_add(1).wrapping_add(next.size);
+        
+        if next.owner == 0 && combined >= new_paragraphs {
+            let rest = combined.wrapping_sub(new_paragraphs);
             let new_sig = if rest > 0 {
                 MCB_SIGNATURE_NON_LAST
             } else {
                 mcb.signature
             };
+            
             MCB {
                 size: new_paragraphs,
                 signature: new_sig,
                 ..mcb
             }
             .write(machine, mcb_seg);
+            
             if rest > 0 {
-                let new_next = mcb_seg + 1 + new_paragraphs;
+                let new_next = mcb_seg.wrapping_add(1).wrapping_add(new_paragraphs);
                 MCB {
                     signature: mcb.signature,
                     owner: 0,
-                    size: rest - 1,
+                    size: rest.wrapping_sub(1),
                 }
                 .write(machine, new_next);
             }
@@ -198,7 +235,12 @@ pub fn max_available(machine: &dyn Machine, first_seg: u16) -> u16 {
         if mcb.signature == MCB_SIGNATURE_LAST {
             break;
         }
-        seg += 1 + mcb.size;
+        
+        let next_seg = seg.wrapping_add(1).wrapping_add(mcb.size);
+        if next_seg <= seg {
+            break; // защита от зацикливания
+        }
+        seg = next_seg;
     }
     max
 }
@@ -206,12 +248,20 @@ pub fn max_available(machine: &dyn Machine, first_seg: u16) -> u16 {
 /// Возвращает максимальный размер, до которого можно увеличить блок (включая следующий свободный).
 pub fn max_available_at(machine: &dyn Machine, first_seg: u16, data_segment: u16) -> u16 {
     let _ = first_seg;
+    if data_segment == 0 {
+        return 0;
+        }
     let mcb_seg = data_segment - 1;
     let mcb = MCB::read(machine, mcb_seg);
-    let next_seg = mcb_seg + 1 + mcb.size;
+    
+    let next_seg = mcb_seg.wrapping_add(1).wrapping_add(mcb.size);
+    if next_seg <= mcb_seg {
+        return mcb.size;
+    }
+    
     let next = MCB::read(machine, next_seg);
     if next.owner == 0 {
-        mcb.size + 1 + next.size
+        mcb.size.wrapping_add(1).wrapping_add(next.size)
     } else {
         mcb.size
     }
@@ -225,11 +275,21 @@ fn coalesce(machine: &mut dyn Machine, first_seg: u16) {
         if mcb.signature == MCB_SIGNATURE_LAST {
             break;
         }
-        let next_seg = seg + 1 + mcb.size;
+        
+        // ✅ ЗАЩИТА: безопасное сложение
+        let next_seg = seg.wrapping_add(1).wrapping_add(mcb.size);
+        
+        // Если сегмент "переполнился" и стал меньше или равен текущему, цепочка повреждена
+        if next_seg <= seg {
+            log::warn!("MCB chain corrupted at segment {:04X}, breaking coalesce", seg);
+            break;
+        }
+        
         let next = MCB::read(machine, next_seg);
+        
         if mcb.owner == 0 && next.owner == 0 {
             // объединяем
-            let new_size = mcb.size + 1 + next.size;
+            let new_size = mcb.size.wrapping_add(1).wrapping_add(next.size);
             MCB {
                 size: new_size,
                 signature: next.signature,
