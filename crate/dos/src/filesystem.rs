@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/filesystem.rs
+// Ver: 4 File: crate/dos/src/filesystem.rs
 use bus::Machine;
 use std::{
     collections::HashMap,
@@ -35,20 +35,34 @@ pub struct FileSystem {
     drivers: HashMap<char, DiskDriver>,
     current_directories: HashMap<char, String>,
     current_drive: char,
-    open_files: HashMap<u16, StdFile>,
+    open_files: HashMap<u16, FileHandle>,
     next_handle: u16,
-    search_contexts: HashMap<u32, SearchContext>, // Ключ = физический адрес DTA
+    search_contexts: HashMap<u32, SearchContext>,
 }
 
 impl FileSystem {
     pub fn new() -> Self {
-        Self {
+        let mut fs = Self {
             drivers: HashMap::new(),
             open_files: HashMap::new(),
             next_handle: 5,
             current_directories: HashMap::new(),
             current_drive: 'C',
             search_contexts: HashMap::new(),
+        };
+        fs.open_files.insert(0, FileHandle::Device(DeviceKind::Con)); // stdin
+        fs.open_files.insert(1, FileHandle::Device(DeviceKind::Con)); // stdout
+        fs.open_files.insert(2, FileHandle::Device(DeviceKind::Con)); // stderr
+        fs.open_files.insert(3, FileHandle::Device(DeviceKind::Com(1))); // aux
+        fs.open_files.insert(4, FileHandle::Device(DeviceKind::Lpt(1))); // prn
+
+        fs
+    }
+
+    pub fn device_of(&self, handle: u16) -> Option<DeviceKind> {
+        match self.open_files.get(&handle) {
+            Some(FileHandle::Device(kind)) => Some(*kind),
+            _ => None,
         }
     }
 
@@ -172,6 +186,14 @@ impl FileSystem {
     }
 
     pub fn open_file(&mut self, dos_path: &str, access_mode: u8) -> Result<u16, String> {
+        if let Some(device) = resolve_device(dos_path) {
+            let handle = self.next_handle;
+            self.next_handle = self.next_handle.wrapping_add(1);
+            if self.next_handle < 5 { self.next_handle = 5; }
+            self.open_files.insert(handle, FileHandle::Device(device));
+            log::info!("Opened virtual device: {:?}", device);
+            return Ok(handle);
+        }
         let local_path = self.resolve_path(dos_path)?;
         if access_mode == 0 && !local_path.exists() {
             return Err(format!("File not found: {}", dos_path));
@@ -212,11 +234,18 @@ impl FileSystem {
         if self.next_handle < 5 {
             self.next_handle = 5;
         }
-        self.open_files.insert(handle, file);
+        self.open_files.insert(handle, FileHandle::Disk(file));
         Ok(handle)
     }
 
     pub fn create_file(&mut self, dos_path: &str, _attributes: u16) -> Result<u16, String> {
+        if let Some(device) = resolve_device(dos_path) {
+            let handle = self.next_handle;
+            self.next_handle = self.next_handle.wrapping_add(1);
+            if self.next_handle < 5 { self.next_handle = 5; }
+            self.open_files.insert(handle, FileHandle::Device(device));
+            return Ok(handle);
+        }
         let local_path = self.resolve_path(dos_path)?;
         let file = OpenOptions::new()
             .write(true)
@@ -230,11 +259,15 @@ impl FileSystem {
         if self.next_handle < 5 {
             self.next_handle = 5;
         }
-        self.open_files.insert(handle, file);
+        self.open_files.insert(handle, FileHandle::Disk(file));
         Ok(handle)
     }
 
     pub fn delete_file(&mut self, dos_path: &str) -> Result<(), String> {
+        if resolve_device(dos_path).is_some() {
+            return Err("Access denied: Cannot delete a device".to_string());
+        }
+        
         let local_path = self.resolve_path(dos_path)?;
         if local_path.is_dir() {
             return Err("Cannot delete directory with delete_file".to_string());
@@ -252,42 +285,77 @@ impl FileSystem {
     }
 
     pub fn read_file(&mut self, handle: u16, buffer: &mut [u8]) -> Result<u16, String> {
-        let file = self
-            .open_files
-            .get_mut(&handle)
+        let file = self.open_files.get_mut(&handle)
             .ok_or_else(|| format!("Invalid file handle {}", handle))?;
-        let bytes_read = file
-            .read(buffer)
-            .map_err(|e| format!("Read error: {}", e))?;
-        Ok(bytes_read as u16)
+            
+        match file {
+            FileHandle::Disk(f) => {
+                let bytes_read = f.read(buffer).map_err(|e| format!("Read error: {}", e))?;
+                Ok(bytes_read as u16)
+            }
+            FileHandle::Device(DeviceKind::Con) => {
+                Ok(0)
+            }
+            FileHandle::Device(_) => {
+                // NUL, PRN, COM, CLOCK, EMS при чтении всегда возвращают EOF (0 байт)
+                Ok(0) 
+            }
+        }
     }
 
     pub fn write_file(&mut self, handle: u16, buffer: &[u8]) -> Result<u16, String> {
-        let file = self
-            .open_files
-            .get_mut(&handle)
+        let file = self.open_files.get_mut(&handle)
             .ok_or_else(|| format!("Invalid file handle {}", handle))?;
-        let bytes_written = file
-            .write(buffer)
-            .map_err(|e| format!("Write error: {}", e))?;
-        Ok(bytes_written as u16)
+            
+        match file {
+            FileHandle::Disk(f) => {
+                let bytes_written = f.write(buffer).map_err(|e| format!("Write error: {}", e))?;
+                Ok(bytes_written as u16)
+            }
+            FileHandle::Device(DeviceKind::Con) => {
+                let bytes_written = std::io::stdout().write(buffer)
+                    .map_err(|e| format!("CON write error: {}", e))?;
+                std::io::stdout().flush().ok();
+                Ok(bytes_written as u16)
+            }
+            FileHandle::Device(DeviceKind::Nul) => {
+                Ok(buffer.len() as u16) // NUL просто "съедает" данные
+            }
+            FileHandle::Device(DeviceKind::Lpt(_)) => {
+                log::info!("[PRN/LPT OUTPUT] {}", String::from_utf8_lossy(buffer));
+                Ok(buffer.len() as u16)
+            }
+            FileHandle::Device(DeviceKind::Com(_)) => {
+                log::info!("[AUX/COM OUTPUT] {}", String::from_utf8_lossy(buffer));
+                Ok(buffer.len() as u16)
+            }
+            FileHandle::Device(DeviceKind::Clock) |
+            FileHandle::Device(DeviceKind::Ems) => {
+                log::debug!("Write to CLOCK$/EMMXXXX0 ignored");
+                Ok(buffer.len() as u16)
+            }
+        }
     }
 
     pub fn seek_file(&mut self, handle: u16, offset: i32, origin: u8) -> Result<u32, String> {
-        let file = self
-            .open_files
-            .get_mut(&handle)
+        let file = self.open_files.get_mut(&handle)
             .ok_or_else(|| format!("Invalid file handle {}", handle))?;
-        let whence = match origin {
-            0 => SeekFrom::Start(offset as u64),
-            1 => SeekFrom::Current(offset as i64),
-            2 => SeekFrom::End(offset as i64),
-            _ => return Err(format!("Invalid seek origin {}", origin)),
-        };
-        let new_pos = file
-            .seek(whence)
-            .map_err(|e| format!("Seek error: {}", e))?;
-        Ok(new_pos as u32)
+            
+        match file {
+            FileHandle::Disk(f) => {
+                let whence = match origin {
+                    0 => SeekFrom::Start(offset as u64),
+                    1 => SeekFrom::Current(offset as i64),
+                    2 => SeekFrom::End(offset as i64),
+                    _ => return Err(format!("Invalid seek origin {}", origin)),
+                };
+                let new_pos = f.seek(whence).map_err(|e| format!("Seek error: {}", e))?;
+                Ok(new_pos as u32)
+            }
+            FileHandle::Device(_) => {
+                Ok(0) // Устройства не поддерживают позиционирование
+            }
+        }
     }
 
     // === Поиск файлов (Find First / Find Next) ===
@@ -454,4 +522,68 @@ fn format_83(name: &str) -> String {
     } else {
         format!("{:<8}", name).trim().to_string()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Con,
+    Nul,
+    Com(u8),
+    Lpt(u8),
+    Clock,
+    Ems,
+}
+
+#[derive(Debug)]
+pub enum FileHandle {
+    Disk(StdFile),
+    Device(DeviceKind),
+}
+
+pub fn resolve_device(dos_path: &str) -> Option<DeviceKind> {
+    // 1. Отбрасываем префикс диска: "C:\DIR\CON.TXT" -> "\DIR\CON.TXT"
+    let path = if dos_path.len() >= 2 
+        && dos_path.as_bytes()[1] == b':' 
+        && dos_path.as_bytes()[0].is_ascii_alphabetic() 
+    {
+        &dos_path[2..]
+    } else {
+        dos_path
+    };
+
+    // 2. Последний компонент пути.
+    let name = path.rsplit(|c| c == '\\' || c == '/').next().unwrap_or("");
+
+    // 3. Расширение не имеет значения: CON.TXT == CON
+    let raw = name.split('.').next().unwrap_or("");
+
+    // 4. Нормализация: trailing spaces + upper case
+    let base = raw.trim_end().to_ascii_uppercase();
+
+    // 5. Допустимая запись "LPT1:" / "COM1:"
+    let base = base.trim_end_matches(':');
+
+    match base {
+        "CON"      => Some(DeviceKind::Con),
+        "NUL"      => Some(DeviceKind::Nul),
+        "CLOCK$"   => Some(DeviceKind::Clock),
+        "EMMXXXX0" => Some(DeviceKind::Ems),
+        "PRN"      => Some(DeviceKind::Lpt(1)),
+        "AUX"      => Some(DeviceKind::Com(1)),
+        _ => {
+            if let Some(n) = base.strip_prefix("LPT") {
+                parse_port(n).map(DeviceKind::Lpt)
+            } else if let Some(n) = base.strip_prefix("COM") {
+                parse_port(n).map(DeviceKind::Com)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn parse_port(s: &str) -> Option<u8> {
+    if s.is_empty() { return None; }
+    let n: u8 = s.parse().ok()?;
+    if (1..=4).contains(&n) { Some(n) } else { None }
 }

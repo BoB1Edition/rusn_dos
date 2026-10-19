@@ -1,4 +1,4 @@
-// Ver: 5 File: crate/dos/src/interrupts/dos.rs
+// Ver: 7 File: crate/dos/src/interrupts/dos.rs
 
 use bus::Machine;
 use std::io::{Read, Write};
@@ -8,7 +8,6 @@ use crate::filesystem::FoundFile;
 use crate::mcb;
 use crate::system::DosSystem;
 
-/// Обработчик прерывания INT 21h (основное DOS API)
 pub fn handle_int21(sys: &mut DosSystem) {
     log::info!("int 21: {:#02x}", sys.cpu.registers.ah());
     match sys.cpu.registers.ah() {
@@ -38,11 +37,12 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x3C => create_file(sys),           // CREATE FILE
         0x3D => open_file(sys),
         0x3E => close_file(sys),
-        0x3F => read_file(sys),  // Чтение из файла
-        0x40 => write_file(sys), // Запись в файл
+        0x3F => read_file(sys),   // Чтение из файла
+        0x40 => write_file(sys),  // Запись в файл
         0x41 => delete_file(sys), // DELETE FILE
-        0x42 => seek_file(sys),  // Перемещение указателя
+        0x42 => seek_file(sys),   // Перемещение указателя
         0x43 => file_attributes(sys),
+        0x44 => ioctl(sys),
         0x47 => get_current_directory(sys),
         0x48 => allocate_memory_handler(sys),
         0x49 => free_memory_handler(sys),
@@ -68,7 +68,11 @@ fn set_dta(sys: &mut DosSystem) {
     sys.dta_segment = sys.cpu.registers.ds();
     sys.dta_offset = sys.cpu.registers.dx();
     set_carry_flag(sys, false);
-    log::info!("INT 21h / AH=1Ah: Set DTA -> {:04X}:{:04X}", sys.dta_segment, sys.dta_offset);
+    log::info!(
+        "INT 21h / AH=1Ah: Set DTA -> {:04X}:{:04X}",
+        sys.dta_segment,
+        sys.dta_offset
+    );
 }
 
 /// Обработчик прерывания INT 2Fh (мультиплексное прерывание)
@@ -78,7 +82,7 @@ pub fn handle_int2f(sys: &mut DosSystem) {
     match ax {
         0x1687 => {
             let mut f = sys.cpu.registers.flags();
-            f |= flags::CF; 
+            f |= flags::CF;
             sys.cpu.registers.set_flags(f);
             log::info!("INT 2Fh / AX=1687h: DPMI Host Check -> Not Installed (CF=1)");
             return;
@@ -97,11 +101,11 @@ pub fn handle_int2f(sys: &mut DosSystem) {
             f |= flags::CF;
             sys.cpu.registers.set_flags(f);
         }
-        0x4A => sys.cpu.registers.set_al(0),      // TSR not found
-        0x12 => sys.cpu.registers.set_al(0),      // Network not found
-        0x0C => sys.cpu.registers.set_al(0),      // Mouse not found
-        0x0D => sys.cpu.registers.set_al(0),      // Printer not found
-        _ => sys.cpu.registers.set_al(0),         // Функция не поддерживается
+        0x4A => sys.cpu.registers.set_al(0), // TSR not found
+        0x12 => sys.cpu.registers.set_al(0), // Network not found
+        0x0C => sys.cpu.registers.set_al(0), // Mouse not found
+        0x0D => sys.cpu.registers.set_al(0), // Printer not found
+        _ => sys.cpu.registers.set_al(0),    // Функция не поддерживается
     }
 }
 
@@ -117,7 +121,7 @@ fn print_char(sys: &DosSystem) {
 /// AH=06h — прямой ввод/вывод консоли
 fn direct_console_io(sys: &mut DosSystem) {
     let dl = sys.cpu.registers.dl();
-    
+
     if dl == 0xFF {
         // Запрос ввода (неблокирующий)
         if let Some(key) = sys.machine.keyboard.pop_key() {
@@ -161,27 +165,19 @@ fn print_dos_string(sys: &DosSystem) {
 }
 
 fn read_char_with_echo(sys: &mut DosSystem) {
-    // Опрашиваем эмулированный буфер клавиатуры
     if let Some(key) = sys.machine.keyboard.pop_key() {
         let ascii = (key & 0xFF) as u8;
-        
-        // Эхо: выводим символ в консоль хоста, если это печатный символ
         if ascii >= 0x20 {
             print!("{}", ascii as char);
             std::io::stdout().flush().ok();
         }
-        
+
         sys.cpu.registers.set_al(ascii);
         let mut f = sys.cpu.registers.flags();
-        f &= !flags::ZF; // ZF=0: клавиша доступна
+        f &= !flags::ZF;
         sys.cpu.registers.set_flags(f);
     } else {
-        // Буфер пуст. Возвращаем 0 и устанавливаем ZF=1.
-        // DOS-программа, скорее всего, опрашивает эту функцию в цикле.
-        sys.cpu.registers.set_al(0);
-        let mut f = sys.cpu.registers.flags();
-        f |= flags::ZF; // ZF=1: клавиши нет
-        sys.cpu.registers.set_flags(f);
+        sys.suspend_for_key(0x21);
     }
 }
 
@@ -197,9 +193,11 @@ fn set_carry_flag(sys: &mut DosSystem, value: bool) {
 
 /// AH=3Dh — открытие файла
 fn open_file(sys: &mut DosSystem) {
-    let filename =
-        sys.filesystem
-            .extract_filename(sys.cpu.registers.ds(), sys.cpu.registers.dx(), &sys.machine);
+    let filename = sys.filesystem.extract_filename(
+        sys.cpu.registers.ds(),
+        sys.cpu.registers.dx(),
+        &sys.machine,
+    );
     let access_mode = sys.cpu.registers.al() & 0x07;
 
     log::info!(
@@ -247,6 +245,26 @@ fn read_file(sys: &mut DosSystem) {
     let count = sys.cpu.registers.cx();
     let buffer_seg = sys.cpu.registers.ds();
     let buffer_off = sys.cpu.registers.dx();
+
+    if sys.filesystem.device_of(handle) == Some(crate::filesystem::DeviceKind::Con) {
+        if let Some(key) = sys.machine.keyboard.pop_key() {
+            let ascii = (key & 0xFF) as u8;
+            sys.write_u8(buffer_seg, buffer_off, ascii);
+
+            // Эхо
+            if ascii >= 0x20 || ascii == 0x0D {
+                print!("{}", ascii as char);
+                std::io::stdout().flush().ok();
+            }
+
+            sys.cpu.registers.set_ax(1); // 1 байт прочитан
+            set_carry_flag(sys, false);
+        } else {
+            // Приостанавливаем вызов до появления клавиши
+            sys.suspend_for_key(0x21);
+        }
+        return;
+    }
 
     let mut buffer = vec![0u8; count as usize];
 
@@ -348,9 +366,16 @@ fn set_interrupt_vector(sys: &mut DosSystem) {
 /// AH=43h — получить/установить атрибуты файла
 fn file_attributes(sys: &mut DosSystem) {
     let al = sys.cpu.registers.al();
-    let filename =
-        sys.filesystem
-            .extract_filename(sys.cpu.registers.ds(), sys.cpu.registers.dx(), &sys.machine);
+    let filename = sys.filesystem.extract_filename(
+        sys.cpu.registers.ds(),
+        sys.cpu.registers.dx(),
+        &sys.machine,
+    );
+    if crate::filesystem::resolve_device(&filename).is_some() {
+        sys.cpu.registers.set_cx(0x20); // Archive
+        set_carry_flag(sys, false);
+        return;
+    }
 
     match al {
         0x00 => match sys.filesystem.resolve_path(&filename) {
@@ -465,9 +490,11 @@ fn modify_memory_handler(sys: &mut DosSystem) {
 
 /// AH=3Bh — CHDIR (Set Current Directory)
 fn set_current_directory(sys: &mut DosSystem) {
-    let path =
-        sys.filesystem
-            .extract_filename(sys.cpu.registers.ds(), sys.cpu.registers.dx(), &sys.machine);
+    let path = sys.filesystem.extract_filename(
+        sys.cpu.registers.ds(),
+        sys.cpu.registers.dx(),
+        &sys.machine,
+    );
 
     let (drive, dir_path) = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
         (
@@ -490,9 +517,11 @@ fn set_current_directory(sys: &mut DosSystem) {
 
 /// AH=3Ch — CREATE FILE
 fn create_file(sys: &mut DosSystem) {
-    let path =
-        sys.filesystem
-            .extract_filename(sys.cpu.registers.ds(), sys.cpu.registers.dx(), &sys.machine);
+    let path = sys.filesystem.extract_filename(
+        sys.cpu.registers.ds(),
+        sys.cpu.registers.dx(),
+        &sys.machine,
+    );
     let attrs = sys.cpu.registers.cx();
 
     match sys.filesystem.create_file(&path, attrs) {
@@ -510,25 +539,32 @@ fn create_file(sys: &mut DosSystem) {
 
 /// AH=41h — DELETE FILE
 fn delete_file(sys: &mut DosSystem) {
-    let path =
-        sys.filesystem
-            .extract_filename(sys.cpu.registers.ds(), sys.cpu.registers.dx(), &sys.machine);
-
+    let path = sys.filesystem.extract_filename(
+        sys.cpu.registers.ds(),
+        sys.cpu.registers.dx(),
+        &sys.machine,
+    );
     match sys.filesystem.delete_file(&path) {
         Ok(_) => set_carry_flag(sys, false),
         Err(e) => {
             log::error!("Delete file failed: {}", e);
             set_carry_flag(sys, true);
-            sys.cpu.registers.set_ax(2); // AX=2: File not found
+            if e.contains("Access denied") {
+                sys.cpu.registers.set_ax(5);
+            } else {
+                sys.cpu.registers.set_ax(2);
+            }
         }
     }
 }
 
 /// AH=4Eh — FIND FIRST
 fn find_first(sys: &mut DosSystem) {
-    let path =
-        sys.filesystem
-            .extract_filename(sys.cpu.registers.ds(), sys.cpu.registers.dx(), &sys.machine);
+    let path = sys.filesystem.extract_filename(
+        sys.cpu.registers.ds(),
+        sys.cpu.registers.dx(),
+        &sys.machine,
+    );
     let dta_addr = get_dta_addr(sys);
 
     match sys.filesystem.find_first(&path, dta_addr) {
@@ -585,4 +621,31 @@ fn write_dta(sys: &mut DosSystem, dta_addr: u32, found: &FoundFile) {
         sys.write_phys_u8(dta_addr + 0x1E + i as u32, b);
     }
     sys.write_phys_u8(dta_addr + 0x1E + name_bytes.len().min(12) as u32, 0);
+}
+
+fn ioctl(sys: &mut DosSystem) {
+    let al = sys.cpu.registers.al();
+    let bx = sys.cpu.registers.bx();
+
+    match al {
+        0x00 => {
+            // Get Device Information
+            if sys.filesystem.device_of(bx).is_some() {
+                // Это устройство. Бит 15 = 1.
+                // 0x80D3 = CON (stdin/stdout, not EOF, character device)
+                sys.cpu.registers.set_dx(0x80D3);
+                set_carry_flag(sys, false);
+            } else {
+                let drive = sys.filesystem.get_current_drive();
+                let drive_num = (drive as u8 - b'A') as u16;
+                sys.cpu.registers.set_dx(drive_num);
+                set_carry_flag(sys, false);
+            }
+        }
+        _ => {
+            log::warn!("Unsupported IOCTL subfunction AL={:02X}", al);
+            set_carry_flag(sys, true);
+            sys.cpu.registers.set_ax(0x0001); // Invalid function
+        }
+    }
 }

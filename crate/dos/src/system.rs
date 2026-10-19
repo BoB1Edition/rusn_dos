@@ -1,8 +1,8 @@
-// Ver: 3 File: crate/dos/src/system.rs
+// Ver: 4 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{
-    get_fonts_vga8x16, load_vga_palette, render_text_to_pixels, scale_buffer,
-    upscale_framebuffer, VideoMode,
+    VideoMode, get_fonts_vga8x16, load_vga_palette, render_text_to_pixels, scale_buffer,
+    upscale_framebuffer,
 };
 use bus::{Cpu, Display, Machine, Motherboard};
 use x86::cpu::X86Cpu;
@@ -11,7 +11,16 @@ use x86::flags;
 use crate::filesystem::FileSystem;
 use crate::ivt;
 
-/// Состояние EMS (LIM 4.0).
+#[derive(Debug, Clone)]
+pub struct SuspendedCall {
+    pub vector: u8,
+    pub cs: u16,
+    pub ip: u16,
+    pub flags: u16,
+    pub sp: u16,
+    pub ss: u16,
+}
+
 #[derive(Debug, Clone)]
 pub struct EmsState {
     pub page_frame_segment: u16,
@@ -43,6 +52,7 @@ pub struct DosSystem {
     tick_counter: u64,
     pub dta_segment: u16,
     pub dta_offset: u16,
+    pub suspended: Option<SuspendedCall>,
 }
 
 impl DosSystem {
@@ -56,6 +66,7 @@ impl DosSystem {
             tick_counter: 0,
             dta_segment: 0,
             dta_offset: 0x0080,
+            suspended: None,
         }
     }
 
@@ -82,12 +93,14 @@ impl DosSystem {
 
     #[inline(always)]
     pub fn write_u8(&mut self, segment: u16, offset: u16, value: u8) {
-        self.machine.write_mem_u8(Self::phys(segment, offset), value);
+        self.machine
+            .write_mem_u8(Self::phys(segment, offset), value);
     }
 
     #[inline(always)]
     pub fn write_u16(&mut self, segment: u16, offset: u16, value: u16) {
-        self.machine.write_mem_u16(Self::phys(segment, offset), value);
+        self.machine
+            .write_mem_u16(Self::phys(segment, offset), value);
     }
 
     #[inline(always)]
@@ -120,9 +133,6 @@ impl DosSystem {
         self.machine.write_mem_u32(addr, value);
     }
 
-    // === Исполнение ===
-
-    /// Выполняет одну инструкцию CPU и, при необходимости, внутреннее прерывание.
     pub fn step(&mut self) {
         {
             let mut bus = CpuBus {
@@ -135,13 +145,10 @@ impl DosSystem {
         }
     }
 
-    /// Передаёт управление внутреннему обработчику прерывания (CS=0xF000).
     pub fn dispatch(&mut self, vector: u8) {
         crate::interrupts::dispatch(self, vector);
     }
 
-    /// Поднимает прерывание: внутреннее обрабатывается сразу, внешнее — через
-    /// настоящий дальний вызов по адресу из IVT.
     pub fn raise_interrupt(&mut self, vector: u8) {
         if ivt::is_internal(&self.machine, vector) {
             self.dispatch(vector);
@@ -165,7 +172,6 @@ impl DosSystem {
         self.cpu.registers.set_ip(ip);
     }
 
-    /// Псевдо-таймер: каждые 65536 выполненных инструкций поднимает IRQ0 (INT 08h).
     pub fn tick_timer(&mut self) {
         self.tick_counter += 1;
         if self.tick_counter >= 65536 {
@@ -176,10 +182,6 @@ impl DosSystem {
         }
     }
 
-    // === Рендеринг ===
-
-    /// Формирует кадр из видеопамяти, если она помечена как «грязная».
-    /// Возвращает (пиксели, ширина, высота) и сбрасывает флаг dirty.
     pub fn take_frame(&mut self) -> Option<(Vec<u32>, usize, usize)> {
         if !self.machine.video.dirty {
             return None;
@@ -187,10 +189,8 @@ impl DosSystem {
         self.machine.video.dirty = false;
         let (buffer, w, h) = match self.machine.video.mode {
             VideoMode::Text80x25 => {
-                let buf = render_text_to_pixels(
-                    &self.machine.video.text_buffer,
-                    &get_fonts_vga8x16(),
-                );
+                let buf =
+                    render_text_to_pixels(&self.machine.video.text_buffer, &get_fonts_vga8x16());
                 (buf, 640, 400)
             }
             VideoMode::Mode13h => {
@@ -202,7 +202,6 @@ impl DosSystem {
         Some((buffer, w, h))
     }
 
-    /// Отображает кадр через `Display`, при необходимости масштабируя его.
     pub fn render(&mut self, display: &mut dyn Display) {
         let frame = self.take_frame();
         if let Some((buffer, w, h)) = frame {
@@ -216,13 +215,31 @@ impl DosSystem {
         }
     }
 
-    /// Один шаг эмуляции верхнего уровня: пакет инструкций, ввод, рендеринг, таймер.
     pub fn step_frame(&mut self, mut display: Option<&mut dyn Display>) {
         const INSTR_BUDGET: usize = 50_000;
         const POLL_INTERVAL: usize = 256;
-
         let mut executed = 0usize;
+
         while executed < INSTR_BUDGET && !self.cpu.halted {
+            if self.suspended.is_some() {
+                if let Some(d) = display.as_deref_mut() {
+                    if !d.is_open() {
+                        self.cpu.halted = true;
+                        return;
+                    }
+                    for (scancode, ascii) in d.poll_keys() {
+                        self.machine.keyboard.push_key(scancode, ascii);
+                    }
+                }
+                if self.machine.keyboard.has_key() {
+                    log::debug!("Key available, resuming suspended call");
+                    self.suspended = None; // Очищаем приостановку
+                }
+                self.tick_timer();
+                executed += 1;
+                continue;
+            }
+
             self.step();
             executed += 1;
             self.tick_timer();
@@ -245,7 +262,6 @@ impl DosSystem {
                 } else {
                     self.machine.video.dirty = false;
                 }
-                // Кадр отрисован — уступаем управление внешнему циклу для темпа.
                 return;
             }
         }
@@ -253,6 +269,33 @@ impl DosSystem {
 
     pub fn is_halted(&self) -> bool {
         self.cpu.halted
+    }
+
+    pub fn suspend_for_key(&mut self, vector: u8) {
+        let sp = self.cpu.registers.sp();
+        let ss = self.cpu.registers.ss();
+
+        let ip_before_int = self.read_phys_u16(Self::phys(ss, sp));
+        let cs_before_int = self.read_phys_u16(Self::phys(ss, sp.wrapping_add(2)));
+        let flags_before_int = self.read_phys_u16(Self::phys(ss, sp.wrapping_add(4)));
+        let sp_before_int = sp.wrapping_add(6);
+
+        self.suspended = Some(SuspendedCall {
+            vector,
+            cs: cs_before_int,
+            ip: ip_before_int,
+            flags: flags_before_int,
+            sp: sp_before_int,
+            ss,
+        });
+
+        self.cpu.registers.set_ip(ip_before_int);
+        self.cpu.registers.set_sp(sp_before_int);
+        self.cpu.registers.set_cs(cs_before_int);
+        self.cpu.registers.set_flags(flags_before_int);
+        self.cpu.registers.set_ss(ss);
+
+        log::debug!("Suspended INT {:02X}h for key wait", vector);
     }
 }
 
