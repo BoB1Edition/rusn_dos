@@ -62,7 +62,38 @@ impl Peripheral for Mouse {
 }
 ```
 
-### Registering a BIOS/DOS Interrupt Handler
+## Adding a DOS Device Name
+
+DOS applications reference character devices by name (CON, NUL, PRN, etc.) via INT 21h file operations. To add a new device:
+
+1. Add a variant to `DeviceKind` in `crate/dos/src/filesystem.rs`:
+   ```rust
+   pub enum DeviceKind {
+       Con,
+       Nul,
+       Com(u8),  // COM1-COM4
+       Lpt(u8),  // LPT1-LPT4
+       Clock,     // CLOCK$
+       Ems,       // EMMXXXX0
+       MyDevice,  // <-- new
+   }
+   ```
+2. Add the name to the `resolve_device()` function match block
+3. Handle reads/writes in `read_file()` / `write_file()` for the new device
+4. Handle IOCTL in `ioctl()` (INT 21h / AH=44h) if the device needs special status
+
+Device names are case-insensitive, ignore extensions (CON.TXT == CON), and strip trailing colons (LPT1: == LPT1).
+
+All file handles 0–4 are pre-registered as character devices:
+| Handle | Device | Purpose |
+|--------|--------|---------|
+| 0 | CON | stdin (read from keyboard) |
+| 1 | CON | stdout (write to host stdout) |
+| 2 | CON | stderr (write to host stdout) |
+| 3 | AUX (COM1) | auxiliary device |
+| 4 | PRN (LPT1) | printer device |
+
+## Registering a BIOS/DOS Interrupt Handler
 
 For software interrupts (INT 10h, 16h, 33h, etc.):
 
@@ -76,6 +107,22 @@ For software interrupts (INT 10h, 16h, 33h, etc.):
    mouse::handle_int33(sys);
    ```
 3. **Set IVT entry** in `crate/dos/src/ivt.rs` (CS=0xF000 + offset)
+
+### Implementing Non-Blocking Keyboard Input
+
+For functions that need to wait for a key (INT 21h / AH=01h, INT 3Fh handle=0):
+
+```rust
+// In your handler:
+if let Some(key) = sys.machine.keyboard.pop_key() {
+    // process key
+} else {
+    sys.suspend_for_key(vector_number);
+    // Execution resumes automatically when a key arrives
+}
+```
+
+The `suspend_for_key()` mechanism saves the interrupted call's state and rewinds the CPU registers. The main loop polls keys and resumes execution when a key is pressed.
 
 ## Adding a New Emulated System
 

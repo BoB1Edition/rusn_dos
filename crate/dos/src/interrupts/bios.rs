@@ -17,11 +17,10 @@ fn mode_number(mode: VideoMode) -> u8 {
 
 pub fn handle_int10(sys: &mut DosSystem) {
     match sys.cpu.registers.ah() {
-        0x00 | 0x10 => {
-            if let Some(key) = sys.machine.keyboard.pop_key() {
-                sys.cpu.registers.set_ax(key);
-            } else {
-                sys.suspend_for_key(0x16);
+        0x00 => {
+            let mode = sys.cpu.registers.al();
+            if sys.machine.video.set_mode_u8(mode) {
+                log::info!("Video mode set to {:02X}h", mode);
             }
         }
         0x0E => {

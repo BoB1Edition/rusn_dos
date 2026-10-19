@@ -31,26 +31,28 @@
 
 ## 3. DOS — Доработка API
 
-- `[!]` INT 21h / AH=01h — чтение из stdin блокирует эмулятор (исправить на буфер клавиатуры)
-- `[!]` INT 21h / AH=06h — DL=0xFF всегда возвращает "нет клавиши"
-- `[!]` INT 10h / AH=0Eh — не пишет в видеопамять в режиме 13h
+- `[x]` INT 21h / AH=01h — использует буфер клавиатуры с suspend/resume
+- `[x]` INT 21h / AH=06h — DL=0xFF проверяет буфер клавиатуры
+- `[x]` INT 10h / AH=0Eh — пишет в видеопамять через write_tty() (текстовый режим)
+- `[!]` INT 10h / AH=00h — был сломан копипастой (читал клавиатуру вместо установки режима), исправлено
 - `[!]` INT 10h / AH=02h — установка позиции курсора — заглушка
 - `[!]` INT 16h / AH=00h — должен ждать клавишу, а не возвращать 0
-- `[!]` FindFirst/FindNext — DTA всегда DS:0x0080, нет поддержки AH=1Ah (set DTA)
+- `[x]` FindFirst/FindNext — DTA настраивается через AH=1Ah
+- `[x]` INT 21h / AH=1Ah — Set DTA реализован
+- `[x]` INT 21h / AH=44h — IOCTL (AL=00h: Get Device Information)
 - `[x]` INT 21h / AH=19h — возвращает C: (OK, hardcoded для однодисковой системы)
 - `[x]` INT 21h / AH=47h — get current directory — реализован
-- `[!]` 8.3 имена в DTA — нет proper space-padding, что ломает некоторые программы
+- `[x]` 8.3 имена в DTA — правильный space-padding через format_83()
+- `[x]` stdin/stdout/stderr хендлы 0-4 как device-файлы (CON, AUX, PRN)
 - `[~]` INT 21h / AH=0Ah — buffered input
 - `[ ]` INT 21h / AH=2Ah — get system date
 - `[ ]` INT 21h / AH=2Ch — get system time
 - `[ ]` INT 21h / AH=39h — MKDIR
 - `[ ]` INT 21h / AH=3Ah — RMDIR
-- `[ ]` INT 21h / AH=44h — IOCTL (ioctl для устройств)
 - `[ ]` INT 21h / AH=59h — get extended error
 - `[ ]` INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов)
 - `[ ]` INT 21h / AH=5Ch — file locking
 - `[ ]` INT 21h / AH=71h — long filename (LFN) API
-- `[ ]` stdin/stdout/stderr хендлы 0-4 как настоящие файловые дескрипторы
 
 ## 4. Периферия — Рефакторинг в плагинную систему
 

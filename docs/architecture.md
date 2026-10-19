@@ -70,13 +70,29 @@ Connects x86 CPU to DOS environment.
 
 | Module | Contents |
 |--------|----------|
-| `system.rs` | `DosSystem` — motherboard + CPU + filesystem + EMS, `step()`, `step_frame()` |
+| `system.rs` | `DosSystem` — motherboard + CPU + filesystem + EMS, `step()`, `step_frame()`, DTA, suspend |
 | `ivt.rs` | IVT initialization (0x00000-0x003FF), internal handler routing |
 | `interrupts/` | `dos.rs` (INT 21h), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h) |
 | `loader/` | COM loader, EXE loader (MZ), executable detection |
-| `filesystem.rs` | Multi-drive filesystem, `DiskDriver`, file handles, find-first/next |
+| `filesystem.rs` | Multi-drive filesystem, `DiskDriver`, `DeviceKind`, `FileHandle`, file handles, find-first/next |
 | `mcb.rs` | DOS Memory Control Block allocator |
 | `consts.rs` | Memory size constants |
+
+#### Key Structures in `DosSystem`
+
+- **`dta_segment` / `dta_offset`** — configurable Disk Transfer Area address (set via INT 21h / AH=1Ah). Default: PSP segment, offset 0x0080.
+- **`suspended: Option<SuspendedCall>`** — non-blocking keyboard wait. When a DOS/BIOS function needs a key but the buffer is empty, the call is suspended and the main loop polls keys instead of busy-waiting.
+
+#### `FileHandle` — Disk vs Device
+
+File handles 0–4 are pre-registered as character devices:
+- 0 = CON (stdin)
+- 1 = CON (stdout)
+- 2 = CON (stderr)
+- 3 = AUX (COM1)
+- 4 = PRN (LPT1)
+
+Device names recognized: CON, NUL, COM1-4, LPT1-4, CLOCK$, EMMXXXX0, PRN, AUX. `resolve_device()` parses device names from DOS paths with path prefix and extension stripping.
 
 ### `gui` — Window and Input
 
@@ -93,17 +109,29 @@ Software Interrupt (INT n)
   │
   └─► DosSystem::dispatch() [via CpuBus]
         │
-        ├── INT 21h → dos.rs
-        ├── INT 10h → bios.rs
-        ├── INT 67h → ems.rs
-        ├── INT 2Fh → dos.rs
         ├── INT 08h → bios.rs (PIT → chains to INT 1Ch)
-        ├── INT 16h → bios.rs
-        ├── INT 15h → bios.rs
-        ├── INT 12h → bios.rs
-        ├── INT 1Ah → bios.rs
+        ├── INT 09h → EOI only
+        ├── INT 10h → bios.rs (Video)
+        ├── INT 12h → bios.rs (Memory size)
+        ├── INT 15h → bios.rs (Extensions, A20)
+        ├── INT 16h → bios.rs (Keyboard)
+        ├── INT 1Ah → bios.rs (Clock)
+        ├── INT 1Ch → logged
+        ├── INT 20h → halt
+        ├── INT 21h → dos.rs (DOS API)
+        ├── INT 2Fh → dos.rs (Multiplex)
+        ├── INT 67h → ems.rs (EMS 4.0)
         └── other → far call via IVT
 ```
+
+### Suspend/Resume for Keyboard Input
+
+INT 21h / AH=01h and AH=3Fh (handle=0) use `suspend_for_key()` when the keyboard buffer is empty:
+
+1. Save current call state (CS, IP, flags, SP, SS) in `SuspendedCall`
+2. Rewind CPU registers to the state *before* the INT was executed
+3. In `step_frame()`, detect `suspended.is_some()`, poll keyboard, and when a key arrives, clear the suspended state
+4. The original INT is re-executed and now finds a key in the buffer
 
 ## Main Loop (`DosSystem::step_frame`)
 
@@ -111,7 +139,11 @@ Software Interrupt (INT n)
 step_frame(display):
   budget = 50,000 instructions
   while budget > 0 AND not halted:
-    step()              // 1 CPU instruction + dispatch pending SWI
+    if suspended:
+      poll display for keys
+      if key available: clear suspend
+    else:
+      step()              // 1 CPU instruction + dispatch pending SWI
     tick_timer()        // every 65536 steps → IRQ0
     every 256 steps: poll display for keys
     if VRAM dirty: render frame, return early
@@ -128,3 +160,26 @@ step_frame(display):
 | 0xC0000-0xEFFFF | ROM/Expansion |
 | 0xF0000-0xFFFFF | BIOS area (internal handlers) |
 | 0x100000-0xEFFFFF | Extended Memory (XMS) |
+
+## Video System
+
+### VideoMemory (`crate/bus/src/peripherals/video.rs`)
+
+Supports two modes:
+- **Text80x25** — VGA 80×25 text mode with 8×16 font. Cursor tracked via `cursor_row`/`cursor_col`. Teletype output via `write_tty()` handles backspace (0x08), line feed (0x0A), carriage return (0x0D), and scrolling via `scroll_up()`.
+- **Mode13h** — 320×200×8 VGA graphics mode. Framebuffer at 0xA0000.
+
+Rendering pipeline:
+1. Text mode: `render_text_to_pixels()` — renders 640×400 using VGA font + color attributes
+2. Graphics: `upscale_framebuffer()` — 6× nearest-neighbor to 1920×1200
+3. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor)
+
+### File System (`crate/dos/src/filesystem.rs`)
+
+Multi-drive virtual filesystem with:
+- **`DiskDriver`**: Maps drive letter to host directory
+- **File handles**: 0–4 pre-registered as CON/CON/CON/AUX/PRN. File handles 5+ for disk files.
+- **Device I/O**: CON writes to stdout, NUL discards data, PRN/AUX logs, CLOCK$/EMMXXXX0 ignored
+- **`resolve_device()`**: Parses DOS device names with path prefix stripping, trailing colon support, extension stripping
+- **`match_pattern()`**: Recursive wildcard matcher (`*` and `?`) for FindFirst/FindNext
+- **`format_83()`**: Space-padded 8.3 filename formatting
