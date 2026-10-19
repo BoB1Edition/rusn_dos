@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/interrupts/dos.rs
+// Ver: 5 File: crate/dos/src/interrupts/dos.rs
 
 use bus::Machine;
 use std::io::{Read, Write};
@@ -24,6 +24,7 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x06 => direct_console_io(sys),
         0x09 => print_dos_string(sys),
         0x19 => get_current_drive(sys),
+        0x1A => set_dta(sys),
         0x25 => set_interrupt_vector(sys),
         0x30 => {
             // Get DOS Version (возвращаем 6.22)
@@ -63,15 +64,43 @@ pub fn handle_int21(sys: &mut DosSystem) {
     }
 }
 
+fn set_dta(sys: &mut DosSystem) {
+    sys.dta_segment = sys.cpu.registers.ds();
+    sys.dta_offset = sys.cpu.registers.dx();
+    set_carry_flag(sys, false);
+    log::info!("INT 21h / AH=1Ah: Set DTA -> {:04X}:{:04X}", sys.dta_segment, sys.dta_offset);
+}
+
 /// Обработчик прерывания INT 2Fh (мультиплексное прерывание)
 pub fn handle_int2f(sys: &mut DosSystem) {
-    let ah = (sys.cpu.registers.ax() >> 8) as u8;
+    let ax = sys.cpu.registers.ax();
+    let ah = (ax >> 8) as u8;
+    match ax {
+        0x1687 => {
+            let mut f = sys.cpu.registers.flags();
+            f |= flags::CF; 
+            sys.cpu.registers.set_flags(f);
+            log::info!("INT 2Fh / AX=1687h: DPMI Host Check -> Not Installed (CF=1)");
+            return;
+        }
+        0x0C00 => {
+            sys.cpu.registers.set_ax(0);
+            return;
+        }
+        _ => {}
+    }
     match ah {
-        0x16 => sys.cpu.registers.set_ax(0x8001), // DPMI не поддерживается
-        0x4A => sys.cpu.registers.set_al(0),      // Резидент не найден
-        0x12 => sys.cpu.registers.set_al(0),      // Сеть не обнаружена
-        0x0C => sys.cpu.registers.set_al(0),      // Мышь не обнаружена
-        0x0D => sys.cpu.registers.set_al(0),      // Принтер не обнаружен
+        0x16 => {
+            // Другие функции Windows/DPMI (кроме 1687h).
+            // Отвечаем, что функция не поддерживается (CF=1).
+            let mut f = sys.cpu.registers.flags();
+            f |= flags::CF;
+            sys.cpu.registers.set_flags(f);
+        }
+        0x4A => sys.cpu.registers.set_al(0),      // TSR not found
+        0x12 => sys.cpu.registers.set_al(0),      // Network not found
+        0x0C => sys.cpu.registers.set_al(0),      // Mouse not found
+        0x0D => sys.cpu.registers.set_al(0),      // Printer not found
         _ => sys.cpu.registers.set_al(0),         // Функция не поддерживается
     }
 }
@@ -88,13 +117,23 @@ fn print_char(sys: &DosSystem) {
 /// AH=06h — прямой ввод/вывод консоли
 fn direct_console_io(sys: &mut DosSystem) {
     let dl = sys.cpu.registers.dl();
-
+    
     if dl == 0xFF {
-        sys.cpu.registers.set_al(0);
-        let mut f = sys.cpu.registers.flags();
-        f |= flags::ZF; // ZF = 1
-        sys.cpu.registers.set_flags(f);
+        // Запрос ввода (неблокирующий)
+        if let Some(key) = sys.machine.keyboard.pop_key() {
+            let ascii = (key & 0xFF) as u8;
+            sys.cpu.registers.set_al(ascii);
+            let mut f = sys.cpu.registers.flags();
+            f &= !flags::ZF; // ZF=0: клавиша доступна
+            sys.cpu.registers.set_flags(f);
+        } else {
+            sys.cpu.registers.set_al(0);
+            let mut f = sys.cpu.registers.flags();
+            f |= flags::ZF; // ZF=1: клавиши нет
+            sys.cpu.registers.set_flags(f);
+        }
     } else {
+        // Запрос вывода
         print!("{}", dl as char);
         std::io::stdout().flush().ok();
         sys.cpu.registers.set_al(dl);
@@ -122,17 +161,28 @@ fn print_dos_string(sys: &DosSystem) {
 }
 
 fn read_char_with_echo(sys: &mut DosSystem) {
-    let mut buffer = [0u8; 1];
-    std::io::stdin().read_exact(&mut buffer).ok();
-    let ch = buffer[0];
-
-    print!("{}", ch as char);
-    std::io::stdout().flush().ok();
-
-    sys.cpu.registers.set_al(ch);
-    let mut f = sys.cpu.registers.flags();
-    f &= !flags::ZF;
-    sys.cpu.registers.set_flags(f);
+    // Опрашиваем эмулированный буфер клавиатуры
+    if let Some(key) = sys.machine.keyboard.pop_key() {
+        let ascii = (key & 0xFF) as u8;
+        
+        // Эхо: выводим символ в консоль хоста, если это печатный символ
+        if ascii >= 0x20 {
+            print!("{}", ascii as char);
+            std::io::stdout().flush().ok();
+        }
+        
+        sys.cpu.registers.set_al(ascii);
+        let mut f = sys.cpu.registers.flags();
+        f &= !flags::ZF; // ZF=0: клавиша доступна
+        sys.cpu.registers.set_flags(f);
+    } else {
+        // Буфер пуст. Возвращаем 0 и устанавливаем ZF=1.
+        // DOS-программа, скорее всего, опрашивает эту функцию в цикле.
+        sys.cpu.registers.set_al(0);
+        let mut f = sys.cpu.registers.flags();
+        f |= flags::ZF; // ZF=1: клавиши нет
+        sys.cpu.registers.set_flags(f);
+    }
 }
 
 fn set_carry_flag(sys: &mut DosSystem, value: bool) {
@@ -370,6 +420,11 @@ fn allocate_memory_handler(sys: &mut DosSystem) {
     let first = sys.first_mcb_segment;
     match mcb::allocate(&mut sys.machine, first, paragraphs) {
         Some(segment) => {
+            let mcb_seg = segment.wrapping_sub(1);
+            let mut mcb = mcb::MCB::read(&sys.machine, mcb_seg);
+            mcb.owner = sys.cpu.registers.ds(); // DS при запуске всегда указывает на PSP
+            mcb.write(&mut sys.machine, mcb_seg);
+
             sys.cpu.registers.set_ax(segment);
             set_carry_flag(sys, false);
         }
@@ -514,10 +569,8 @@ fn find_next(sys: &mut DosSystem) {
     }
 }
 
-/// Возвращает физический адрес DTA (Disk Transfer Area).
-/// По умолчанию в DOS DTA находится в PSP по смещению 0080h.
 fn get_dta_addr(sys: &DosSystem) -> u32 {
-    ((sys.cpu.registers.ds() as u32) << 4) + 0x0080
+    sys.get_dta_addr() // ✅ Используем метод из DosSystem
 }
 
 /// Записывает структуру FoundFile в DTA по стандарту DOS (43 байта).

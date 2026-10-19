@@ -29,3 +29,10 @@ echo ./app/biing/BINT.EXE
 ./target/debug/rusn_dos --graphics run ./app/biing/BINT.EXE 
 echo ./app/biing/INSTALL.EXE 
 ./target/debug/rusn_dos --graphics run ./app/biing/INSTALL.EXE 
+echo ./app/XCOM/INTRO.EXE
+./target/debug/rusn_dos --graphics run ./app/XCOM/INTRO.EXE
+echo ./app/XCOM/SETUP.EXE
+./target/debug/rusn_dos --graphics run ./app/XCOM/SETUP.EXE
+echo ./app/XCOM/GO.COM
+./target/debug/rusn_dos --graphics run ./app/XCOM/GO.COM
+

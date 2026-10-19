@@ -1,4 +1,4 @@
-// Ver: 4 File: crate/dos/src/mcb.rs
+// Ver: 5 File: crate/dos/src/mcb.rs
 //! DOS Memory Control Block (MCB) allocator.
 //! Real-mode paragraph-based memory manager.
 use bus::Machine;
@@ -194,7 +194,7 @@ pub fn modify(
             let (final_size, new_sig) = if rest > 1 {
                 let new_next = mcb_seg.wrapping_add(1).wrapping_add(new_paragraphs);
                 MCB {
-                    signature: MCB_SIGNATURE_NON_LAST,
+                    signature: next.signature, 
                     owner: 0,
                     size: rest.wrapping_sub(1),
                 }
@@ -214,8 +214,9 @@ pub fn modify(
             coalesce(machine, first_seg);
             Ok(0)
         } else {
+            // возвращаем ошибку с максимальным доступным размером
             let max = max_available_at(machine, first_seg, data_segment);
-            Err(max)
+            Err(max) 
         }
     }
 }

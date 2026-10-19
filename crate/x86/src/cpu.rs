@@ -1,4 +1,4 @@
-// Ver: 3 File: ./crate/x86/src/cpu.rs
+// Ver: 4 File: ./crate/x86/src/cpu.rs
 use crate::tracer::{FileTracer, Tracer};
 use crate::{registers::Registers, tracer::NullTracer};
 use bus::{Cpu, Machine};
@@ -142,13 +142,11 @@ impl Cpu for X86Cpu {
         }
         self.instruction_bytes.clear();
         self.instruction_start_ip = self.registers.eip();
-
         loop {
             let addr = self.phys_ip();
             let opcode = machine.read_mem_u8(addr);
             self.instruction_bytes.push(opcode);
             self.registers.step(None);
-
             match opcode {
                 0x0F => {
                     let addr = self.phys_ip();
@@ -164,17 +162,15 @@ impl Cpu for X86Cpu {
                     self.prefixes.clear();
                     break;
                 }
-                0x67 => self.prefixes.has_address_size = true, // Учет 0x67
-                0x66 => self.prefixes.has_operand_size = true, // Учет 0x66
+                0x67 => self.prefixes.has_address_size = true,
+                0x66 => self.prefixes.has_operand_size = true,
                 0x26 => self.prefixes.segment_override = Some(self.registers.es()),
                 0x2E => self.prefixes.segment_override = Some(self.registers.cs()),
                 0x36 => self.prefixes.segment_override = Some(self.registers.ss()),
                 0x3E => self.prefixes.segment_override = Some(self.registers.ds()),
                 0x64 => self.prefixes.segment_override = Some(self.registers.fs()),
                 0x65 => self.prefixes.segment_override = Some(self.registers.gs()),
-                0xF0 => {
-                    self.prefixes.has_lock = true;
-                }
+                0xF0 => { self.prefixes.has_lock = true; }
                 0xF2 => {
                     self.prefixes.has_rep = true;
                     self.prefixes.rep_type = Some(0xF2);
@@ -190,17 +186,20 @@ impl Cpu for X86Cpu {
                         self.instruction_start_ip,
                         &self.instruction_bytes,
                     );
-
                     self.prefixes.clear();
                     break;
                 }
             }
+        }
+        if self.inhibit_interrupts {
+            self.inhibit_interrupts = false;
         }
     }
 
     fn is_halted(&self) -> bool {
         self.halted
     }
+
     fn halt(&mut self) {
         self.halted = true;
         self.tracer.flush().ok();

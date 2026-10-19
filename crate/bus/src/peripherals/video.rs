@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/bus/src/peripherals/video.rs
+// Ver: 2 File: crate/bus/src/peripherals/video.rs
 
 use crate::peripheral::Peripheral;
 use crate::peripherals::fonts_vga8x16::VGA_FONT_8X16;
@@ -35,6 +35,8 @@ pub struct VideoMemory {
     pub text_buffer: [u16; 80 * 25],
     pub frame_buffer: [u8; 320 * 200],
     pub dirty: bool,
+    pub cursor_row: u8,
+    pub cursor_col: u8,
 }
 
 impl VideoMemory {
@@ -44,6 +46,8 @@ impl VideoMemory {
             text_buffer: [0x0720; 80 * 25],
             frame_buffer: [0u8; 320 * 200],
             dirty: false,
+            cursor_row: 0,
+            cursor_col: 0,
         }
     }
 
@@ -123,6 +127,67 @@ impl VideoMemory {
                 }
             }
         }
+    }
+
+    pub fn scroll_up(&mut self) {
+        // Копируем строки 1..24 на место 0..23
+        for row in 0..24 {
+            for col in 0..80 {
+                self.text_buffer[row * 80 + col] = self.text_buffer[(row + 1) * 80 + col];
+            }
+        }
+        // Очищаем последнюю (24-ю) строку пробелами
+        for col in 0..80 {
+            self.text_buffer[24 * 80 + col] = 0x0720;
+        }
+        self.dirty = true;
+    }
+
+    // ✅ НОВОЕ: Логика телетайпа (INT 10h / AH=0Eh)
+    pub fn write_tty(&mut self, ch: u8, attr: u8) {
+        if self.mode != VideoMode::Text80x25 {
+            log::debug!("INT 10h/0E in Mode13h: char {:#02x}", ch);
+            return;
+        }
+
+        match ch {
+            0x07 => { /* Bell - игнорируем */ }
+            0x08 => {
+                /* Backspace: сдвигаем курсор влево, но не стираем символ */
+                if self.cursor_col > 0 {
+                    self.cursor_col -= 1;
+                }
+            }
+            0x0A => {
+                /* Line Feed: сдвигаем курсор вниз */
+                self.cursor_row += 1;
+                if self.cursor_row >= 25 {
+                    self.scroll_up();
+                    self.cursor_row = 24;
+                }
+            }
+            0x0D => {
+                /* Carriage Return: возврат в начало строки */
+                self.cursor_col = 0;
+            }
+            _ => {
+                /* Печатный символ */
+                let idx = self.cursor_row as usize * 80 + self.cursor_col as usize;
+                self.text_buffer[idx] = ((attr as u16) << 8) | (ch as u16);
+
+                // Двигаем курсор вправо
+                self.cursor_col += 1;
+                if self.cursor_col >= 80 {
+                    self.cursor_col = 0;
+                    self.cursor_row += 1;
+                    if self.cursor_row >= 25 {
+                        self.scroll_up();
+                        self.cursor_row = 24;
+                    }
+                }
+            }
+        }
+        self.dirty = true;
     }
 }
 

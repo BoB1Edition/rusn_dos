@@ -1,4 +1,6 @@
 title = "Biing!"
+ems = true
+a20_enable = true
 [resolution]
 width = 1024
 height = 768
@@ -13,12 +15,7 @@ letter = "Z"
 path = "/tmp/mgk/"
 read_only = true
 
-[[cpus]]
-name = "486"
-type = "x86"
-feature = ["486", "mmx"]
-
-[[cpus]]
+[cpu]
 name = "x86"
 type = "x86"
-feature = ["default"]
+feature = ["default, mmx"]

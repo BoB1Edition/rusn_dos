@@ -1,8 +1,8 @@
-// Ver: 1 File: crate/dos/src/interrupts/bios.rs
+// Ver: 2 File: crate/dos/src/interrupts/bios.rs
 use std::io::Write;
 
-use bus::peripherals::video::VideoMode;
 use bus::Machine;
+use bus::peripherals::video::VideoMode;
 use x86::flags;
 
 use crate::consts;
@@ -27,28 +27,36 @@ pub fn handle_int10(sys: &mut DosSystem) {
         0x0E => {
             // AH=0Eh: телетайпный вывод символа
             let ch = sys.cpu.registers.al();
-            match ch {
-                0x08 => { // Backspace — игнорируем
+
+            if sys.machine.video.mode == VideoMode::Text80x25 {
+                // В текстовом режиме BIOS использует текущий атрибут символа под курсором
+                let idx = sys.machine.video.cursor_row as usize * 80
+                    + sys.machine.video.cursor_col as usize;
+                let attr = (sys.machine.video.text_buffer[idx] >> 8) as u8;
+
+                // Вызываем нашу новую логику телетайпа
+                sys.machine.video.write_tty(ch, attr);
+
+                // Дублируем вывод в консоль хоста (для удобства отладки)
+                match ch {
+                    0x0D => print!("\r"),
+                    0x0A => println!(),
+                    0x08 => print!("\x08"),
+                    c if c >= 0x20 => print!("{}", c as char),
+                    _ => {}
                 }
-                0x0D => { // Carriage Return
-                }
-                0x0A => { // Line Feed
-                }
-                _ => {
-                    if sys.machine.video.mode == VideoMode::Text80x25 {
-                        print!("{}", ch as char);
-                        std::io::stdout().flush().ok();
-                    } else {
-                        log::debug!("INT 10h/0E in Mode13h: char {:#02x}", ch);
-                    }
-                }
+                std::io::stdout().flush().ok();
+            } else {
+                log::debug!("INT 10h/0E in Mode13h: char {:#02x}", ch);
             }
         }
         0x02 => {
             // AH=02h: установка позиции курсора — заглушка
         }
         0x0F => {
-            sys.cpu.registers.set_al(mode_number(sys.machine.video.mode));
+            sys.cpu
+                .registers
+                .set_al(mode_number(sys.machine.video.mode));
             sys.cpu.registers.set_ah(80);
             sys.cpu.registers.set_bh(0);
         }

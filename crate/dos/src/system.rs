@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/system.rs
+// Ver: 3 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{
     get_fonts_vga8x16, load_vga_palette, render_text_to_pixels, scale_buffer,
@@ -41,6 +41,8 @@ pub struct DosSystem {
     pub ems: EmsState,
     pub first_mcb_segment: u16,
     tick_counter: u64,
+    pub dta_segment: u16,
+    pub dta_offset: u16,
 }
 
 impl DosSystem {
@@ -52,9 +54,15 @@ impl DosSystem {
             ems: EmsState::default(),
             first_mcb_segment: 0x60,
             tick_counter: 0,
+            dta_segment: 0,
+            dta_offset: 0x0080,
         }
     }
 
+    #[inline(always)]
+    pub fn get_dta_addr(&self) -> u32 {
+        ((self.dta_segment as u32) << 4) + self.dta_offset as u32
+    }
     // === Адресация памяти ===
 
     #[inline(always)]
@@ -165,9 +173,6 @@ impl DosSystem {
                 self.raise_interrupt(0x08);
             }
             self.tick_counter = 0;
-        }
-        if self.cpu.inhibit_interrupts {
-            self.cpu.inhibit_interrupts = false;
         }
     }
 
