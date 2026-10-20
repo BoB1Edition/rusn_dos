@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/loader/exe_loader.rs
+// Ver: 4 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
@@ -6,6 +6,7 @@ use crate::mcb::MCB;
 use crate::system::DosSystem;
 use bus::{Machine, Motherboard};
 
+use emu_config::MachineConfig;
 // ✅ ДОБАВЛЕНО: Правильный импорт из крейта x86
 use x86::instructions::stack;
 
@@ -67,12 +68,14 @@ impl ExeLoader {
         })
     }
 
-    pub fn exec(&mut self, no_log: bool) -> Result<DosSystem, Box<dyn std::error::Error>> {
+    pub fn exec(
+        &mut self,
+        no_log: bool,
+        config: &MachineConfig,
+    ) -> Result<DosSystem, Box<dyn std::error::Error>> {
         const LOAD_SEGMENT: u16 = 0x1000; // Базовый сегмент загрузки
         const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10; // PSP на 256 байт ниже кода
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
-
-        // 2. Заранее вычисляем размеры программы, чтобы корректно указать сегмент окружения
         let header_size = self.header.e_cparhdr as usize * 16;
         let code_data = &self.data[header_size..];
         let loaded_bytes = code_data.len();
@@ -80,11 +83,7 @@ impl ExeLoader {
         let total_prog_bytes = loaded_bytes + bss_bytes;
         let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16;
         let end_segment = LOAD_SEGMENT + prog_paragraphs;
-
-        // ✅ ИСПРАВЛЕНО: Передаем end_segment как сегмент окружения
         Self::create_psp(&mut machine, PSP_SEGMENT, end_segment);
-
-        // 3. Загружаем код (пропускаем заголовок)
         let code_base = LOAD_SEGMENT as u32 * 16;
         if code_base as usize + code_data.len() > machine.memory.len() {
             return Err("EXE file too large".into());
@@ -92,8 +91,6 @@ impl ExeLoader {
         for (i, &byte) in code_data.iter().enumerate() {
             machine.write_mem_u8(code_base + i as u32, byte);
         }
-
-        // Очищаем BSS
         if bss_bytes > 0 {
             let bss_start = code_base + loaded_bytes as u32;
             for i in 0..bss_bytes {
@@ -109,15 +106,15 @@ impl ExeLoader {
             header_size,
             code_data.len(),
         );
-
-        // 4. Применяем релокации
         self.apply_relocations(&mut machine, LOAD_SEGMENT);
 
         let cpu = crate::loader::make_cpu(no_log)?;
-        let mut sys = DosSystem::new(machine, cpu);
+        let mut sys = DosSystem::new(machine, cpu, config.clone());
 
         // Настройка MCB
         sys.first_mcb_segment = PSP_SEGMENT - 1;
+        sys.dta_segment = PSP_SEGMENT;
+        sys.dta_offset = 0x0080;
         let prog_mcb = MCB {
             signature: MCB_SIGNATURE_NON_LAST,
             owner: PSP_SEGMENT,

@@ -1,4 +1,4 @@
-// Ver: 7 File: crate/dos/src/interrupts/dos.rs
+// Ver: 8 File: crate/dos/src/interrupts/dos.rs
 
 use bus::Machine;
 use std::io::{Read, Write};
@@ -81,10 +81,18 @@ pub fn handle_int2f(sys: &mut DosSystem) {
     let ah = (ax >> 8) as u8;
     match ax {
         0x1687 => {
-            let mut f = sys.cpu.registers.flags();
-            f |= flags::CF;
-            sys.cpu.registers.set_flags(f);
-            log::info!("INT 2Fh / AX=1687h: DPMI Host Check -> Not Installed (CF=1)");
+            if sys.machine_config.dpmi {
+                let mut f = sys.cpu.registers.flags();
+                f &= !flags::CF;
+                sys.cpu.registers.set_flags(f);
+                sys.cpu.registers.set_ax(0x0001); // версия (заглушка)
+                log::info!("INT 2Fh / AX=1687h: DPMI Host Check -> Installed (config)");
+            } else {
+                let mut f = sys.cpu.registers.flags();
+                f |= flags::CF;
+                sys.cpu.registers.set_flags(f);
+                log::info!("INT 2Fh / AX=1687h: DPMI Host Check -> Not Installed (CF=1)");
+            }
             return;
         }
         0x0C00 => {

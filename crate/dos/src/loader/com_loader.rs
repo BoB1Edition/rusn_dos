@@ -1,5 +1,6 @@
-// Ver: 2 File: crate/dos/src/loader/com_loader.rs
+// Ver: 4 File: crate/dos/src/loader/com_loader.rs
 use bus::{Machine, Motherboard};
+use emu_config::MachineConfig;
 
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
@@ -17,7 +18,11 @@ impl ComLoader {
         Ok(Self { data })
     }
 
-    pub fn exec(self, no_log: bool) -> Result<DosSystem, Box<dyn std::error::Error>> {
+    pub fn exec(
+        self,
+        no_log: bool,
+        config: &MachineConfig,
+    ) -> Result<DosSystem, Box<dyn std::error::Error>> {
         const PSP_SEGMENT: u16 = 0x1000;
         const CODE_OFFSET: u16 = 0x0100;
         const STACK_TOP: u16 = 0xFFFE;
@@ -33,9 +38,11 @@ impl ComLoader {
         }
 
         let cpu = crate::loader::make_cpu(no_log)?;
-        let mut sys = DosSystem::new(machine, cpu);
+        let mut sys = DosSystem::new(machine, cpu, config.clone());
 
         sys.first_mcb_segment = PSP_SEGMENT - 1;
+        sys.dta_segment = PSP_SEGMENT; // ✅ DTA по умолчанию внутри PSP
+        sys.dta_offset = 0x0080;
         let com_paragraphs = ((self.data.len() + 0x100 + 15) / 16) as u16; // +0x100 для PSP header
         let end_segment = PSP_SEGMENT + com_paragraphs;
         let prog_mcb = MCB {
@@ -51,7 +58,10 @@ impl ComLoader {
         };
         free_mcb.write(&mut sys.machine, end_segment);
 
-        sys.write_phys_u16((PSP_SEGMENT as u32 * 16) + 0x02, MAX_MCB_SEGMENT - PSP_SEGMENT);
+        sys.write_phys_u16(
+            (PSP_SEGMENT as u32 * 16) + 0x02,
+            MAX_MCB_SEGMENT - PSP_SEGMENT,
+        );
 
         init_ivt(&mut sys.machine);
         sys.cpu.registers.set_cs(PSP_SEGMENT);

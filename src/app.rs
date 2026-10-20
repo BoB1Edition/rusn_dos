@@ -1,4 +1,4 @@
-// Ver: 1 File: ./src/app.rs
+// Ver: 3 File: ./src/app.rs
 use std::{
     error::Error,
     ffi::OsStr,
@@ -7,59 +7,39 @@ use std::{
 
 use bus::Display;
 use config::{self, Config, File};
-use dos::{loader, DiskDriver, DosSystem};
+use dos::{DiskDriver, DosSystem, loader};
+use emu_config::{DriverConfig, MachineConfig, Resolution, SoundConfig, VideoConfig};
 use gui::EmuWindow;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct App {
-    resolution: Resolution,
-    title: String,
-    drivers: Vec<DriverConfig>,
+    #[serde(default = "default_title")]
+    pub title: String,
+    #[serde(default)]
+    pub resolution: Resolution,
+    #[serde(default)]
+    pub machine: MachineConfig,
+    #[serde(default)]
+    pub video: VideoConfig,
+    #[serde(default)]
+    pub sound: SoundConfig,
+    #[serde(default)]
+    pub drivers: Vec<DriverConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DriverConfig {
-    pub letter: String, // "C", "Z" — преобразуем в char
-    pub path: String,
-    #[serde(default = "default_true")]
-    pub read_only: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-struct Resolution {
-    width: u16,
-    height: u16,
-}
-
-impl Default for Resolution {
-    fn default() -> Self {
-        Self {
-            width: 320,
-            height: 240,
-        }
-    }
-}
-
-impl Default for DriverConfig {
-    fn default() -> Self {
-        Self {
-            letter: "Z".to_string(),
-            path: "./".to_string(),
-            read_only: true,
-        }
-    }
+fn default_title() -> String {
+    "rust_dos".to_string()
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
+            title: default_title(),
             resolution: Resolution::default(),
-            title: String::from("rust_dos"),
+            machine: MachineConfig::default(),
+            video: VideoConfig::default(),
+            sound: SoundConfig::default(),
             drivers: vec![DriverConfig::default()],
         }
     }
@@ -179,7 +159,7 @@ impl App {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
-        let mut ds = loader::load_executable(program.clone(), no_log)?;
+        let mut ds = loader::load_executable(program.clone(), no_log, &self.machine)?;
         self.init_drivers(&mut ds)?;
         self.setup_program_directory(&mut ds, &program)?;
 
@@ -194,7 +174,7 @@ impl App {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
-        let mut ds = loader::load_executable(program.clone(), no_log)?;
+        let mut ds = loader::load_executable(program.clone(), no_log, &self.machine)?;
         self.init_drivers(&mut ds)?;
         self.setup_program_directory(&mut ds, &program)?;
 

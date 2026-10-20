@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/dos/src/interrupts/bios.rs
+// Ver: 5 File: crate/dos/src/interrupts/bios.rs
 use std::io::Write;
 
 use bus::Machine;
@@ -120,6 +120,15 @@ pub fn handle_int15(sys: &mut DosSystem) {
             log::info!("INT 15h/AX=2400h: A20 status query -> {}", status);
         }
         0x2401 => {
+            if sys.machine_config.is_feature_locked("a20_enable") {
+                log::warn!("INT 15h/AX=2401h: A20 enable BLOCKED by disable_change_flags");
+                let mut f = sys.cpu.registers.flags();
+                f |= flags::CF; // Возвращаем ошибку (Carry Flag = 1)
+                sys.cpu.registers.set_flags(f);
+                sys.cpu.registers.set_ah(0x86); // Функция не поддерживается / ошибка
+                return;
+            }
+            
             sys.machine.a20_enabled = true;
             let mut f = sys.cpu.registers.flags();
             f &= !flags::CF;
@@ -128,6 +137,15 @@ pub fn handle_int15(sys: &mut DosSystem) {
             log::info!("INT 15h/AX=2401h: A20 gate ENABLED via BIOS");
         }
         0x2402 => {
+            if sys.machine_config.is_feature_locked("a20_enable") {
+                log::warn!("INT 15h/AX=2402h: A20 disable BLOCKED by disable_change_flags");
+                let mut f = sys.cpu.registers.flags();
+                f |= flags::CF;
+                sys.cpu.registers.set_flags(f);
+                sys.cpu.registers.set_ah(0x86);
+                return;
+            }
+
             sys.machine.a20_enabled = false;
             let mut f = sys.cpu.registers.flags();
             f &= !flags::CF;

@@ -4,29 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.6.1", features = ["env", "derive"] }
-env_logger = "0.11.10"
-log = { version = "0.4.32", features = ["std"] }
-serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
-serde_json = "1.0.150"
-toml = "1.1.2+spec-1.1.0"
+clap = { version = "4.6.7", features = ["env", "derive"] }
+env_logger = "0.11.11"
+log = { version = "0.4.34", features = ["std"] }
+serde = { version = "1.0.229", features = ["derive", "serde_derive"] }
+serde_json = "1.0.154"
+toml = "1.1.8+spec-1.1.0"
 bus = { path = "crate/bus" }
 x86 = { path = "crate/x86" }
 dos = { path = "crate/dos" }
 gui = { path = "crate/gui" }
-config = "0.15.23"
+emu_config = { path = "crate/emu_config" }
+config = "0.15.27"
 
 [workspace]
 members = [
-    'crate/bus',
-    'crate/x86',
-    'crate/dos',
-    'crate/gui',
-    'crate/nes',
-    'crate/megadrive',
-    'crate/snes',
-    'crate/jvm',
-    'crate/saturn',
-    'crate/dreamcast',
+    'crate/*',
 ]
-resolver = "2"
+resolver = "3"

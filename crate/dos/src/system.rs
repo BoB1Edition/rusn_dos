@@ -1,10 +1,11 @@
-// Ver: 4 File: crate/dos/src/system.rs
+// Ver: 5 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{
     VideoMode, get_fonts_vga8x16, load_vga_palette, render_text_to_pixels, scale_buffer,
     upscale_framebuffer,
 };
 use bus::{Cpu, Display, Machine, Motherboard};
+use emu_config::MachineConfig;
 use x86::cpu::X86Cpu;
 use x86::flags;
 
@@ -53,10 +54,13 @@ pub struct DosSystem {
     pub dta_segment: u16,
     pub dta_offset: u16,
     pub suspended: Option<SuspendedCall>,
+    pub machine_config: MachineConfig,
 }
 
 impl DosSystem {
-    pub fn new(machine: Motherboard, cpu: X86Cpu) -> Self {
+    pub fn new(machine: Motherboard, cpu: X86Cpu, config: MachineConfig) -> Self {
+        let mut machine = machine;
+        machine.a20_enabled = config.a20_enable;
         Self {
             machine,
             cpu,
@@ -67,6 +71,7 @@ impl DosSystem {
             dta_segment: 0,
             dta_offset: 0x0080,
             suspended: None,
+            machine_config: config,
         }
     }
 

@@ -7,3 +7,4 @@ edition = "2024"
 bus = { version = "0.1.0", path = "../bus" }
 x86 = { version = "0.1.0", path = "../x86" }
 log = { version = "0.4.33", features = ["std"] }
+emu_config = { path = "../emu_config" }

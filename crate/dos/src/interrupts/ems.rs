@@ -1,9 +1,16 @@
-// Ver: 1 File: crate/dos/src/interrupts/ems.rs
+// Ver: 3 File: crate/dos/src/interrupts/ems.rs
 use x86::flags;
 
 use crate::system::DosSystem;
 
 pub fn handle_int67(sys: &mut DosSystem) {
+    if !sys.machine_config.ems {
+        let mut f = sys.cpu.registers.flags();
+        f |= flags::CF;
+        sys.cpu.registers.set_flags(f);
+        sys.cpu.registers.set_ah(0x84);
+        return;
+    }
     match sys.cpu.registers.ah() {
         0x40 => {
             // Get Status
