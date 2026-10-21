@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/gui/src/lib.rs
+// Ver: 4 File: crate/gui/src/lib.rs
 
 use std::collections::HashSet;
 
@@ -9,23 +9,31 @@ use minifb::{Key, Window, WindowOptions};
 pub struct EmuWindow {
     window: Window,
     prev_keys: HashSet<Key>,
+    last_frame: Vec<u32>,
+    last_size: (usize, usize),
+    last_update: std::time::Instant,
 }
 
 impl EmuWindow {
-    pub fn new(
-        title: &str,
-        width: usize,
-        height: usize,
-    ) -> Result<Self, minifb::Error> {
+    pub fn new(title: &str, width: usize, height: usize) -> Result<Self, minifb::Error> {
         let window = Window::new(title, width, height, WindowOptions::default())?;
         Ok(Self {
             window,
             prev_keys: HashSet::new(),
+            last_frame: vec![0u32; width * height], // чёрный кадр сразу
+            last_size: (width, height),
+            last_update: std::time::Instant::now(),
         })
     }
 
     pub fn set_target_fps(&mut self, fps: usize) {
         self.window.set_target_fps(fps);
+    }
+
+    fn pump(&mut self) {
+        let (w, h) = self.last_size;
+        self.last_update = std::time::Instant::now();
+        self.window.update_with_buffer(&self.last_frame, w, h).ok();
     }
 }
 
@@ -39,6 +47,9 @@ impl Display for EmuWindow {
     }
 
     fn poll_keys(&mut self) -> Vec<(u8, u8)> {
+        if self.last_update.elapsed() >= std::time::Duration::from_millis(50) {
+            self.pump();
+        }
         let current: HashSet<Key> = self.window.get_keys().into_iter().collect();
         let mut pressed = Vec::new();
         for key in current.difference(&self.prev_keys) {
@@ -51,9 +62,14 @@ impl Display for EmuWindow {
     }
 
     fn update(&mut self, pixels: &[u32], width: usize, height: usize) {
-        self.window
-            .update_with_buffer(pixels, width, height)
-            .ok();
+        self.last_frame = pixels.to_vec();
+        self.last_size = (width, height);
+        self.last_update = std::time::Instant::now();
+        self.window.update_with_buffer(pixels, width, height).ok();
+    }
+
+    fn pump_events(&mut self) {
+        self.pump();
     }
 }
 

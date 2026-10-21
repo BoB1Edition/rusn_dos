@@ -1,4 +1,4 @@
-// Ver: 7 File: crate/dos/src/system.rs
+// Ver: 10 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{
     VideoMode, get_fonts_vga8x16, load_vga_palette, render_text_to_pixels, scale_buffer,
@@ -75,7 +75,7 @@ impl DosSystem {
             dta_offset: 0x0080,
             suspended: None,
             machine_config: config,
-            console_input: ConsoleInputState::default()
+            console_input: ConsoleInputState::default(),
         }
     }
 
@@ -235,63 +235,76 @@ impl DosSystem {
     }
 
     pub fn step_frame(&mut self, mut display: Option<&mut dyn Display>) {
-        const INSTR_BUDGET: usize = 50_000;
-        const POLL_INTERVAL: usize = 256;
-        let mut executed = 0usize;
+    const INSTR_BUDGET: usize = 50_000;
+    const POLL_INTERVAL: usize = 256;
+    let mut executed = 0usize;
 
-        while executed < INSTR_BUDGET && !self.cpu.halted {
-            if self.suspended.is_some() {
-                if let Some(d) = display.as_deref_mut() {
-                    if !d.is_open() {
-                        self.cpu.halted = true;
-                        return;
-                    }
-                    for (scancode, ascii) in d.poll_keys() {
-                        self.machine.keyboard.push_key(scancode, ascii);
-                    }
+    while executed < INSTR_BUDGET && !self.cpu.halted {
+        if self.suspended.is_some() {
+            if let Some(d) = display.as_deref_mut() {
+                d.pump_events();
+                if !d.is_open() {
+                    self.cpu.halted = true;
+                    return;
                 }
-                if self.machine.keyboard.has_key() {
-                    log::debug!("Key available, resuming suspended call");
-                    self.suspended = None; // Очищаем приостановку
+                for (scancode, ascii) in d.poll_keys() {
+                    self.machine.keyboard.push_key(scancode, ascii);
                 }
-                self.tick_timer();
-                executed += 1;
-                continue;
-            }
-
-            self.step();
-            executed += 1;
-            self.tick_timer();
-
-            if executed % POLL_INTERVAL == 0 {
-                if let Some(d) = display.as_deref_mut() {
-                    if !d.is_open() {
-                        self.cpu.halted = true;
-                        return;
-                    }
-                    for (scancode, ascii) in d.poll_keys() {
-                        self.machine.keyboard.push_key(scancode, ascii);
-                    }
-                }
-            }
-
-            if self.machine.video.dirty {
-                if let Some(d) = display.as_deref_mut() {
+                // Во время ожидания ввода рендерим эхо сразу — это редкие кадры
+                if self.machine.video.dirty {
                     self.render(d);
-                } else {
-                    self.machine.video.dirty = false;
                 }
-                return;
+            }
+            if self.machine.keyboard.has_key() {
+                let vector = self.suspended.take().unwrap().vector;
+                log::debug!("Key available, re-dispatching INT {:02X}h", vector);
+                self.dispatch(vector);
+            }
+            self.tick_timer();
+            executed += 1;
+            continue;
+        }
+
+        self.step();
+        executed += 1;
+        self.tick_timer();
+
+        if executed % POLL_INTERVAL == 0 {
+            if let Some(d) = display.as_deref_mut() {
+                if !d.is_open() {
+                    self.cpu.halted = true;
+                    return;
+                }
+                for (scancode, ascii) in d.poll_keys() {
+                    self.machine.keyboard.push_key(scancode, ascii);
+                }
             }
         }
     }
+    if self.machine.video.dirty {
+        if let Some(d) = display.as_deref_mut() {
+            self.render(d);
+        } else {
+            self.machine.video.dirty = false;
+        }
+    }
+}
 
     pub fn is_halted(&self) -> bool {
         self.cpu.halted
     }
 
     pub fn suspend_for_key(&mut self, vector: u8) {
-        let sp = self.cpu.registers.sp();
+        self.suspended = Some(SuspendedCall {
+            vector,
+            cs: 0,
+            ip: 0,
+            flags: 0,
+            sp: 0,
+            ss: 0, // больше не используются
+        });
+        log::debug!("Suspended INT {:02X}h for key wait", vector);
+        /*let sp = self.cpu.registers.sp();
         let ss = self.cpu.registers.ss();
 
         let ip_before_int = self.read_phys_u16(Self::phys(ss, sp));
@@ -314,7 +327,7 @@ impl DosSystem {
         self.cpu.registers.set_flags(flags_before_int);
         self.cpu.registers.set_ss(ss);
 
-        log::debug!("Suspended INT {:02X}h for key wait", vector);
+        log::debug!("Suspended INT {:02X}h for key wait", vector);*/
     }
 }
 

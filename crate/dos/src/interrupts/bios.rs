@@ -1,4 +1,4 @@
-// Ver: 8 File: crate/dos/src/interrupts/bios.rs
+// Ver: 9 File: crate/dos/src/interrupts/bios.rs
 use std::io::Write;
 
 use bus::Machine;
@@ -236,4 +236,21 @@ pub fn handle_int12(sys: &mut DosSystem) {
     f &= !flags::CF;
     sys.cpu.registers.set_flags(f);
     log::info!("INT 12h: Returned low memory size = {} KB", memory_kb);
+}
+
+pub fn tty_write(sys: &mut DosSystem, ch: u8) {
+    if sys.machine.video.mode == VideoMode::Text80x25 {
+        let idx = sys.machine.video.cursor_row as usize * 80
+            + sys.machine.video.cursor_col as usize;
+        let attr = (sys.machine.video.text_buffer[idx] >> 8) as u8;
+        sys.machine.video.write_tty(ch, attr);
+    }
+    match ch {
+        0x0D => print!("\r"),
+        0x0A => print!("\n"),
+        0x08 => print!("\x08"),
+        c if c >= 0x20 => print!("{}", c as char),
+        _ => {}
+    }
+    std::io::stdout().flush().ok();
 }

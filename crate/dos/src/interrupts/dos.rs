@@ -1,10 +1,11 @@
-// Ver: 10 File: crate/dos/src/interrupts/dos.rs
+// Ver: 11 File: crate/dos/src/interrupts/dos.rs
 
 use bus::Machine;
 use std::io::Write;
 use x86::flags;
 
 use crate::filesystem::FoundFile;
+use crate::interrupts::bios::tty_write;
 use crate::mcb;
 use crate::system::DosSystem;
 
@@ -121,10 +122,8 @@ pub fn handle_int2f(sys: &mut DosSystem) {
 // === Функции INT 21h ===
 
 /// AH=02h — вывод символа из регистра DL
-fn print_char(sys: &DosSystem) {
-    let ch = sys.cpu.registers.dl() as char;
-    print!("{}", ch);
-    std::io::stdout().flush().ok();
+fn print_char(sys: &mut DosSystem) {
+    tty_write(sys, sys.cpu.registers.dl());
 }
 
 /// AH=06h — прямой ввод/вывод консоли
@@ -146,9 +145,7 @@ fn direct_console_io(sys: &mut DosSystem) {
             sys.cpu.registers.set_flags(f);
         }
     } else {
-        // Запрос вывода
-        print!("{}", dl as char);
-        std::io::stdout().flush().ok();
+        tty_write(sys, dl);
         sys.cpu.registers.set_al(dl);
         let mut f = sys.cpu.registers.flags();
         f &= !flags::ZF;
@@ -157,28 +154,21 @@ fn direct_console_io(sys: &mut DosSystem) {
 }
 
 /// AH=09h — вывод строки до '$'
-fn print_dos_string(sys: &DosSystem) {
+fn print_dos_string(sys: &mut DosSystem) {
     let mut addr = DosSystem::phys(sys.cpu.registers.ds(), sys.cpu.registers.dx());
-    let mut s = String::new();
-
     loop {
         let byte = sys.machine.read_mem_u8(addr);
-        if byte == b'$' {
-            break;
-        }
-        s.push(byte as char);
+        if byte == b'$' { break; }          // ✅ терминатор не пишем
+        tty_write(sys, byte);
         addr = addr.wrapping_add(1);
     }
-
-    print!("{}", s);
 }
 
 fn read_char_with_echo(sys: &mut DosSystem) {
     if let Some(key) = sys.machine.keyboard.pop_key() {
         let ascii = (key & 0xFF) as u8;
         if ascii >= 0x20 {
-            print!("{}", ascii as char);
-            std::io::stdout().flush().ok();
+            tty_write(sys, ascii);
         }
 
         sys.cpu.registers.set_al(ascii);
@@ -262,8 +252,7 @@ fn read_file(sys: &mut DosSystem) {
 
             // Эхо
             if ascii >= 0x20 || ascii == 0x0D {
-                print!("{}", ascii as char);
-                std::io::stdout().flush().ok();
+                tty_write(sys, ascii);
             }
 
             sys.cpu.registers.set_ax(1); // 1 байт прочитан
@@ -718,8 +707,9 @@ fn buffered_input(sys: &mut DosSystem) {
                 // Backspace — удаляем последний символ
                 if sys.console_input.current_count > 0 {
                     sys.console_input.current_count -= 1;
-                    // Эхо: сдвигаем курсор назад
-                    print!("\x08 \x08");
+                    tty_write(sys, 8);
+                    tty_write(sys, b' ');
+                    tty_write(sys, 8);
                     std::io::stdout().flush().ok();
                 }
             }
@@ -754,8 +744,7 @@ fn buffered_input(sys: &mut DosSystem) {
                     );
                     sys.console_input.current_count += 1;
                     if ascii >= 0x20 {
-                        print!("{}", ascii as char);
-                        std::io::stdout().flush().ok();
+                         tty_write(sys, ascii);
                     }
                 }
             }

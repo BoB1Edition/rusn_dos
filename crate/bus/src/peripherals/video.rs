@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/bus/src/peripherals/video.rs
+// Ver: 7 File: crate/bus/src/peripherals/video.rs
 
 use crate::peripheral::Peripheral;
 use crate::peripherals::fonts_vga8x16::VGA_FONT_8X16;
@@ -37,6 +37,8 @@ pub struct VideoMemory {
     pub dirty: bool,
     pub cursor_row: u8,
     pub cursor_col: u8,
+    retrace_epoch: std::time::Instant,
+    pub attr_flip_flop: bool,
 }
 
 impl VideoMemory {
@@ -48,7 +50,31 @@ impl VideoMemory {
             dirty: false,
             cursor_row: 0,
             cursor_col: 0,
+            retrace_epoch: std::time::Instant::now(),
+            attr_flip_flop: false,
         }
+    }
+
+    const FRAME_NS: u128 = 16_666_667; // 60 Гц
+    const VBLANK_NS: u128 = 1_400_000; // окно вертикального обратного хода
+    const HFRAME_NS: u128 = 63_500; // ~15.75 кГц
+    const HBLANK_NS: u128 = 11_000;
+
+    pub fn input_status_1(&mut self) -> u8 {
+        self.attr_flip_flop = false;
+
+        let t = self.retrace_epoch.elapsed().as_nanos();
+        let vblank = t % Self::FRAME_NS >= Self::FRAME_NS - Self::VBLANK_NS;
+        let hblank = t % Self::HFRAME_NS >= Self::HFRAME_NS - Self::HBLANK_NS;
+
+        let mut status = 0u8;
+        if hblank || vblank {
+            status |= 0x01;
+        }
+        if vblank {
+            status |= 0x08;
+        }
+        status
     }
 
     pub fn set_mode(&mut self, mode: VideoMode) {
@@ -58,6 +84,8 @@ impl VideoMemory {
         } else {
             self.frame_buffer = [0u8; 320 * 200];
         }
+        self.cursor_row = 0; // ✅ НОВОЕ
+        self.cursor_col = 0; // ✅ НОВОЕ
         self.dirty = true;
     }
 
@@ -79,56 +107,6 @@ impl VideoMemory {
         }
     }
 
-    pub fn read_mmio(&self, offset: u32) -> u8 {
-        match self.mode {
-            VideoMode::Text80x25 => {
-                let idx = (offset / 2) as usize;
-                if idx < self.text_buffer.len() {
-                    let word = self.text_buffer[idx];
-                    if offset % 2 == 0 {
-                        (word & 0xFF) as u8
-                    } else {
-                        ((word >> 8) & 0xFF) as u8
-                    }
-                } else {
-                    0
-                }
-            }
-            VideoMode::Mode13h => {
-                let idx = offset as usize;
-                if idx < self.frame_buffer.len() {
-                    self.frame_buffer[idx]
-                } else {
-                    0
-                }
-            }
-        }
-    }
-
-    pub fn write_mmio(&mut self, offset: u32, value: u8) {
-        match self.mode {
-            VideoMode::Text80x25 => {
-                let idx = (offset / 2) as usize;
-                if idx < self.text_buffer.len() {
-                    let word = self.text_buffer[idx];
-                    self.text_buffer[idx] = if offset % 2 == 0 {
-                        (word & 0xFF00) | (value as u16)
-                    } else {
-                        (word & 0x00FF) | ((value as u16) << 8)
-                    };
-                    self.dirty = true;
-                }
-            }
-            VideoMode::Mode13h => {
-                let idx = offset as usize;
-                if idx < self.frame_buffer.len() {
-                    self.frame_buffer[idx] = value;
-                    self.dirty = true;
-                }
-            }
-        }
-    }
-
     pub fn scroll_up(&mut self) {
         // Копируем строки 1..24 на место 0..23
         for row in 0..24 {
@@ -143,7 +121,6 @@ impl VideoMemory {
         self.dirty = true;
     }
 
-    // ✅ НОВОЕ: Логика телетайпа (INT 10h / AH=0Eh)
     pub fn write_tty(&mut self, ch: u8, attr: u8) {
         if self.mode != VideoMode::Text80x25 {
             log::debug!("INT 10h/0E in Mode13h: char {:#02x}", ch);
@@ -153,7 +130,6 @@ impl VideoMemory {
         match ch {
             0x07 => { /* Bell - игнорируем */ }
             0x08 => {
-                /* Backspace: сдвигаем курсор влево, но не стираем символ */
                 if self.cursor_col > 0 {
                     self.cursor_col -= 1;
                 }
@@ -189,6 +165,63 @@ impl VideoMemory {
         }
         self.dirty = true;
     }
+
+    const TEXT_BASE: u32 = 0x18000;
+    const TEXT_SIZE: u32 = 80 * 25 * 2; // 4000 байт
+
+    pub fn read_mmio(&self, offset: u32) -> u8 {
+        match self.mode {
+            VideoMode::Text80x25 => {
+                // ✅ Текст живёт в B8000, т.е. offset >= 0x18000
+                if offset < Self::TEXT_BASE || offset >= Self::TEXT_BASE + Self::TEXT_SIZE {
+                    return 0;
+                }
+                let local = offset - Self::TEXT_BASE;
+                let idx = (local / 2) as usize;
+                let word = self.text_buffer[idx];
+                if local % 2 == 0 {
+                    (word & 0xFF) as u8
+                } else {
+                    ((word >> 8) & 0xFF) as u8
+                }
+            }
+            VideoMode::Mode13h => {
+                let idx = offset as usize;
+                if idx < self.frame_buffer.len() {
+                    self.frame_buffer[idx]
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
+    pub fn write_mmio(&mut self, offset: u32, value: u8) {
+        match self.mode {
+            VideoMode::Text80x25 => {
+                // ✅ Учитываем базу B8000
+                if offset < Self::TEXT_BASE || offset >= Self::TEXT_BASE + Self::TEXT_SIZE {
+                    return;
+                }
+                let local = offset - Self::TEXT_BASE;
+                let idx = (local / 2) as usize;
+                let word = self.text_buffer[idx];
+                self.text_buffer[idx] = if local % 2 == 0 {
+                    (word & 0xFF00) | (value as u16)
+                } else {
+                    (word & 0x00FF) | ((value as u16) << 8)
+                };
+                self.dirty = true;
+            }
+            VideoMode::Mode13h => {
+                let idx = offset as usize;
+                if idx < self.frame_buffer.len() {
+                    self.frame_buffer[idx] = value;
+                    self.dirty = true;
+                }
+            }
+        }
+    }
 }
 
 impl Default for VideoMemory {
@@ -208,8 +241,8 @@ impl Peripheral for VideoMemory {
     }
 
     fn port_read(&mut self, port: u16) -> u8 {
-        // VGA-порты (заглушки для совместимости)
         match port {
+            0x3DA => self.input_status_1(), // ✅ НОВОЕ
             0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF => 0x00,
             _ => 0,
         }

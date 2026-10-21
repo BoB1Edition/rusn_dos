@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/bus/src/motherboard.rs
+// Ver: 3 File: crate/bus/src/motherboard.rs
 
 use crate::peripherals::{
     keyboard::Keyboard, pic::Pic, pit::Pit, video::VideoMemory,
@@ -45,9 +45,6 @@ impl Machine for Motherboard {
         let masked = self.apply_a20_mask(addr);
         if masked >= 0xA0000 && masked < 0xC0000 {
             let offset = masked - 0xA0000;
-            // VideoMemory не может меняться при чтении,
-            // но трейт требует &mut. Используем unsafe или
-            // делаем read через &-метод. Пока оставим как есть.
             return self.video.read_mmio(offset);
         }
         self.memory.read_u8(masked)
@@ -68,7 +65,7 @@ impl Machine for Motherboard {
             0x60 | 0x64 => self.keyboard.port_read(port),
             0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_read(port),
             0x40..=0x43 => self.pit.port_read(port),
-            0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF => self.video.port_read(port),
+            0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF | 0x3DA => self.video.port_read(port),
             0x92 => {
                 if self.a20_enabled {
                     0x02
