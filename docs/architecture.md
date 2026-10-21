@@ -5,16 +5,17 @@
 rusn_dos is a multi-system emulator written in Rust. Its primary target is IBM PC-compatible DOS emulation with an x86 (80386+) CPU core. Additional emulation targets (NES, Mega Drive, SNES, Saturn, Dreamcast, JVM) are scaffolded but not yet implemented.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   rusn_dos (binary)                  │
-│  src/main.rs  ─  src/app.rs  ─  config.toml          │
-├─────────────────────────────────────────────────────┤
-│  dos crate       DOS API, loaders, FS, EMS, MCB      │
-│  x86 crate       80386 CPU decoder/executor           │
-│  bus crate       Machine, Cpu, Peripheral, Memory     │
-│  gui crate       minifb window, keyboard input        │
-│  nes/megadrive/...  stubs                            │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    rusn_dos (binary)                       │
+│  src/main.rs  ─  src/app.rs  ─  config.toml               │
+├──────────────────────────────────────────────────────────┤
+│  dos crate       DOS API, loaders, FS, EMS, MCB           │
+│  x86 crate       80386 CPU decoder/executor                │
+│  bus crate       Machine, Cpu, Peripheral, Memory          │
+│  gui crate       minifb window, keyboard input             │
+│  emu_config      Config types (Resolution, Video, Sound…)  │
+│  nes/megadrive/…  stubs                                   │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ## Crate Layout
@@ -31,7 +32,7 @@ Defines abstract interfaces and concrete motherboard peripherals.
 | `peripheral.rs` | `Peripheral` trait — `port_read/write`, `mem_read/write`, `tick` |
 | `display.rs` | `Display` trait — window, key polling, pixel buffer |
 | `motherboard.rs` | `Motherboard` — `Memory` + `Keyboard` + `VideoMemory` + `Pic` + `Pit`, implements `Machine` |
-| `peripherals/` | `pic.rs`, `pit.rs`, `keyboard.rs`, `video.rs`, `fonts_vga8x16.rs` |
+| `peripherals/` | `pic.rs` (8259), `pit.rs` (8253), `keyboard.rs` (8042), `video.rs` (VGA), `fonts_vga8x16.rs` |
 
 **Trait `Machine`** — the system bus that CPU uses to access memory, I/O ports, and interrupts:
 
@@ -52,17 +53,17 @@ Default implementations provide `read_mem_u16/32`, `write_mem_u16/32`, `in_port1
 
 ### `x86` — CPU Core
 
-Full 80386+ real-mode CPU implementation.
+Full 80386+ real-mode CPU implementation (partial protected mode).
 
 | Module | Contents |
 |--------|----------|
-| `registers.rs` | `Registers` — EAX..EDX, ESI..EDI, EBP, ESP, EIP, CS/DS/ES/SS/FS/GS, EFLAGS |
-| `flags.rs` | Flag constants, `compute_flags_u8/16/32()`, `compute_logical_flags_*()` |
-| `cpu.rs` | `X86Cpu` struct, prefix state, instruction fetch, `Cpu` trait impl |
+| `registers.rs` | `Registers` — EAX..EDX, ESI..EDI, EBP, ESP, EIP (32-bit), CS/DS/ES/SS/FS/GS, EFLAGS |
+| `flags.rs` | Flag constants (CF, PF, AF, ZF, SF, OF, IF, DF, TF, IOPL, NT), `compute_flags_u8/16/32()`, `compute_logical_flags_*()` |
+| `cpu.rs` | `X86Cpu` struct, `PrefixState` (66/67/0F/F2/F3/F0/seg overrides), instruction fetch, `Cpu` trait impl |
 | `modrm.rs` | ModRM decoder with 16/32-bit addressing, SIB, segment defaults |
-| `executor.rs` | `execute(opcode)` and `execute_0f(opcode)` dispatch |
-| `tracer.rs` | Opcode logging to file |
-| `instructions/` | 10 instruction category modules |
+| `executor.rs` | `execute(opcode)` and `execute_0f(opcode)` dispatch (single-byte + 0F prefix) |
+| `tracer.rs` | Instruction logging via `Tracer` trait — `FileTracer` + `NullTracer` |
+| `instructions/` | 10 instruction category modules: alu, bit, control, exchange, group, mov, shift, stack, system |
 
 ### `dos` — DOS Layer
 
@@ -70,18 +71,19 @@ Connects x86 CPU to DOS environment.
 
 | Module | Contents |
 |--------|----------|
-| `system.rs` | `DosSystem` — motherboard + CPU + filesystem + EMS, `step()`, `step_frame()`, DTA, suspend |
-| `ivt.rs` | IVT initialization (0x00000-0x003FF), internal handler routing |
-| `interrupts/` | `dos.rs` (INT 21h), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h) |
-| `loader/` | COM loader, EXE loader (MZ), executable detection |
-| `filesystem.rs` | Multi-drive filesystem, `DiskDriver`, `DeviceKind`, `FileHandle`, file handles, find-first/next |
-| `mcb.rs` | DOS Memory Control Block allocator |
-| `consts.rs` | Memory size constants |
+| `system.rs` | `DosSystem` — Motherboard + X86Cpu + FileSystem + EMS + DTA + suspend + `ConsoleInputState` |
+| `ivt.rs` | IVT initialization (0x00000-0x003FF), internal handler routing via CS=0xF000 |
+| `interrupts/` | `dos.rs` (INT 21h), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h EMS 4.0) |
+| `loader/` | COM loader, EXE loader (MZ header), executable detection |
+| `filesystem.rs` | Multi-drive filesystem, `DiskDriver`, `DeviceKind`/`FileHandle`, wildcard matching, 8.3 formatting |
+| `mcb.rs` | DOS Memory Control Block allocator (allocate/free/modify/coalesce) |
+| `consts.rs` | Memory size constants (DOS_MEMORY_SIZE, MCB, MAX_MCB_SEGMENT) |
 
 #### Key Structures in `DosSystem`
 
 - **`dta_segment` / `dta_offset`** — configurable Disk Transfer Area address (set via INT 21h / AH=1Ah). Default: PSP segment, offset 0x0080.
 - **`suspended: Option<SuspendedCall>`** — non-blocking keyboard wait. When a DOS/BIOS function needs a key but the buffer is empty, the call is suspended and the main loop polls keys instead of busy-waiting.
+- **`console_input: ConsoleInputState`** — state for INT 21h / AH=0Ah (buffered input), tracks active flag, buffer address, max chars, current count.
 
 #### `FileHandle` — Disk vs Device
 
@@ -92,11 +94,21 @@ File handles 0–4 are pre-registered as character devices:
 - 3 = AUX (COM1)
 - 4 = PRN (LPT1)
 
-Device names recognized: CON, NUL, COM1-4, LPT1-4, CLOCK$, EMMXXXX0, PRN, AUX. `resolve_device()` parses device names from DOS paths with path prefix and extension stripping.
+Device names recognized: CON, NUL, COM1-4, LPT1-4, CLOCK$, EMMXXXX0, PRN, AUX. `resolve_device()` parses device names from DOS paths with path prefix and extension stripping. `match_pattern()` handles `*`/`?` wildcards. `format_83()` produces space-padded 8.3 names.
 
 ### `gui` — Window and Input
 
-minifb-based implementation of the `Display` trait. Keyboard mapping from minifb `Key` to DOS (scancode, ASCII) pairs.
+minifb-based implementation of the `Display` trait. Tracks previous frame's keys to detect new presses. Keyboard mapping from minifb `Key` to DOS (scancode, ASCII) pairs via `minifb_to_dos()`.
+
+### `emu_config` — Configuration Types
+
+Config types with serde deserialization:
+- `Resolution` — host window size
+- `MachineConfig` — A20, EMS, DPMI, disable_change_flags
+- `VideoConfig` — type + available_types
+- `SoundConfig` — type + available_types
+- `CpuConfig` — name, type, features
+- `DriverConfig` — letter, path, read_only
 
 ## Interrupt Handling Flow
 
@@ -126,7 +138,7 @@ Software Interrupt (INT n)
 
 ### Suspend/Resume for Keyboard Input
 
-INT 21h / AH=01h and AH=3Fh (handle=0) use `suspend_for_key()` when the keyboard buffer is empty:
+INT 21h / AH=01h, AH=3Fh (handle=0), AH=0Ah, and INT 16h / AH=00h use `suspend_for_key()` when the keyboard buffer is empty:
 
 1. Save current call state (CS, IP, flags, SP, SS) in `SuspendedCall`
 2. Rewind CPU registers to the state *before* the INT was executed
@@ -144,7 +156,7 @@ step_frame(display):
       if key available: clear suspend
     else:
       step()              // 1 CPU instruction + dispatch pending SWI
-    tick_timer()        // every 65536 steps → IRQ0
+    tick_timer()        // every 910 ticks → check 54ms → IRQ0
     every 256 steps: poll display for keys
     if VRAM dirty: render frame, return early
 ```
@@ -183,3 +195,10 @@ Multi-drive virtual filesystem with:
 - **`resolve_device()`**: Parses DOS device names with path prefix stripping, trailing colon support, extension stripping
 - **`match_pattern()`**: Recursive wildcard matcher (`*` and `?`) for FindFirst/FindNext
 - **`format_83()`**: Space-padded 8.3 filename formatting
+
+### Motherboard (`crate/bus/src/motherboard.rs`)
+
+Concrete `Machine` impl with:
+- **A20 gate**: `apply_a20_mask()` wraps addresses when disabled. Controlled via port 0x92 or keyboard controller 0x64/0x60 command 0xD1.
+- **Port dispatch**: Routes I/O to Keyboard, PIC, PIT, VideoMemory peripherals.
+- **Interrupts**: `trigger_irq()` delegates to PIC.

@@ -12,19 +12,15 @@
 
 ## 1. Регистры (crate/x86/src/registers.rs)
 
-### 1.1. [CRITICAL] IP — 16-битный, а должен быть 32-битным EIP
-- **Файл:** `registers.rs:13`
-- **Проблема:** `ip: u16`. В защищённом режиме и с префиксом 0x66 инструкции CALL/JMP должны адресовать до 4GB. `eip` getter/setter закомментированы.
-- **Проявление:** Любой 32-bit код с переходами за 64KB сломается.
-- `cpu.rs:110-112` — `phys_ip()` использует `ip() as u32`, обрезая до 16 бит.
-- `executor.rs` — все инструкции работают с `ip` как `u16`.
-- **Fix:** заменить `ip: u16` на `eip: u32`, включить геттер/сеттер, править `fetch_u8()` и `fetch_u16()` использовать `eip`.
-
-### 1.2. [BUG] `set_eflags()` не форсирует бит 1
+### 1.1. [BUG] `set_eflags()` не форсирует бит 1
 - **Файл:** `registers.rs:324-326`
 - **Проблема:** `set_flags()` на строке 318 устанавливает `| 0x2` (бит 1 всегда 1 на 8086). `set_eflags()` на строке 324 этого не делает, что позволяет сбросить зарезервированный бит.
 - **Fix:** добавить `| 0x2` в `set_eflags()`.
 - `0x2` — зарезервированный бит 1, должен быть всегда 1.
+
+### 1.2. [CLEANUP] `set_ss()` — debug log
+- **Файл:** `registers.rs:313`
+- `log::debug!("set sp ...")` — остаточный отладочный вывод, засоряет лог.
 
 ---
 
@@ -34,14 +30,6 @@
 - **Файл:** `modrm.rs:94`
 - **Проблема:** `ss_default = base_field == 4 || base_field == 5` устанавливается до проверки `base_field == 5 && mod_field == 0` (return early на строке 113). Для `base_field == 5 && mod_field != 0` всё корректно. Но `ss_default` также применяется через `ss_default || (rm_field == 5 && mod != 0)` на строке 157, что приводит к двойной проверке. Не ошибка, но избыточность.
 - Исправить: убрать `ss_default` в SIB-path для base_field==5, т.к. строка 157 перепроверяет.
-
-### 2.2. [BUG] 32-bit Mixed Disp Fallback 
-- **Файл:** `modrm.rs:149`
-- `resolve_32()` — для `mod_field == 2` читает `fetch_u32(machine) as i32`. Если в 16-битном режиме адреса (без 0x67), `resolve_16()` используется всегда, так что это ок. Но если `has_address_size == true`, а сегментный префикс не установлен — ожидается SS для EBP/ESP. OK.
-
-### 2.3. [BUG] `disp as i32` для `mod_field == 2` — знаковое расширение
-- **Файл:** `modrm.rs:149`
-- `cpu.fetch_u32(machine) as i32` — знаковое расширение для отрицательного disp. OK.
 
 ---
 
@@ -53,16 +41,7 @@
 - **Проявление:** Программы, проверяющие AF после сдвига, получают неверное значение.
 - **Fix:** Добавить вычисление AF для сдвигов/вращений.
 
-### 3.2. [CLEANUP] Dead code: `mov_ax_address()` и `mov_address_ax()`
-- **Файл:** `mov.rs:265-294`
-- **Проблема:** Не вызываются из `executor.rs`. Opcode 0xA1 использует `mov_ax_moffs`, opcode 0xA3 использует `mov_moffs_ax`. Функции `mov_ax_address` и `mov_address_ax` — неиспользуемые дубликаты.
-- **Fix:** Удалить, оставить только `mov_ax_moffs` и `mov_moffs_ax`.
-
-### 3.3. [BUG] `inc_width()` / `dec_width()` — регистр SP при 32-bit 
-- **Файл:** `alu.rs:828-874`
-- **Проблема:** `write_reg32(reg, new)` — при `reg == 4` (SP/ESP) записывает полный `esp`, что верно.
-
-### 3.4. [BUG] DAA/DAS — OF не меняется, но читается из старого состояния
+### 3.2. [BUG] DAA/DAS — OF не меняется, но читается из старого состояния
 - **Файл:** `alu.rs:799,824`
 - `let of = flags::test_of(cpu.registers.flags());` — OF undefined для DAA/DAS на реальном x86. Код сохраняет старое значение, что приемлемо на практике.
 
@@ -79,7 +58,7 @@
 
 ## 5. Системные инструкции (crate/x86/src/instructions/system.rs)
 
-### 5.1. [STUB] SGDT/SIDT — пишут заглушку
+### 5.1. [BUG] SGDT/SIDT — пишут заглушку
 - **Файл:** `system.rs:319-323`
 - **Проблема:** `machine.write_mem_u16(addr, 0xFFFF)` и `write_mem_u32(addr+2, 0)`. Не пишут реальные GDTR/IDTR.
 - **Fix:** Заменить на запись `cpu.gdtr_limit`, `cpu.gdtr_base` (скорректированных на 24-bit).
@@ -101,7 +80,7 @@
 
 ### 5.5. [BUG] INT1 (0xF1) — halt вместо прерывания
 - **Файл:** `system.rs:442-449`, `executor.rs:317`
-- **Проблема:** 0xF1 (INT1/ICEBP) должен вызывать software_interrupt(cpu, machine, 1), а не холдить CPU.
+- **Проблема:** 0xF1 (INT1/ICEBP) должен вызывать `software_interrupt(cpu, machine, 1)`, а не холдить CPU.
 
 ### 5.6. [BUG] IN/OUT AX — с 0x66 читает/пишет 4 отдельных порта
 - **Файл:** `system.rs:151-176`
@@ -128,16 +107,12 @@
 
 ## 7. Групповые инструкции (crate/x86/src/instructions/group.rs)
 
-### 7.1. [BUG] Grp F7 /7 (IDIV r/m16) — знаковое расширение DX:AX
-- **Файл:** `group.rs:146-160`
-- **Проблема:** `let dividend = (((cpu.registers.dx() as u32) << 16) | cpu.registers.ax() as u32) as i32;` — если DX=0xFFFF и AX=0x8000, это -32768 (правильно как 32-битное знаковое). Но если DX=0x0000 и AX=0x8000, то это 0x00008000 = +32678. Всё верно, если делимое предварительно загружено через CWD (0x99). **Работает корректно.**
-
-### 7.2. [CLEANUP] `mul_flags()` — дублирует `set_mul_overflow()` в system.rs
+### 7.1. [CLEANUP] `mul_flags()` — дублирует `set_mul_overflow()` в system.rs
 - **Файл:** `group.rs:381-389` и `system.rs:242-250`
 - **Проблема:** Две одинаковые функции, устанавливающие CF/OF для умножения.
 - **Fix:** Вынести в общий модуль или использовать одну.
 
-### 7.3. [STUB] CALL far через Grp FF /3 — не поддерживает register mode
+### 7.2. [STUB] CALL far через Grp FF /3 — не поддерживает register mode
 - **Файл:** `group.rs:333-347`
 - `if modrm.is_register_mode() { cpu.halted = true; }` — FF /3 с mod=3 это FAR CALL через регистр (невалидно на x86, но halt — не лучшее решение).
 
@@ -202,60 +177,43 @@
 
 ## 11. DOS (crate/dos/)
 
-### 11.1. [CRITICAL] INT 21h / AH=01h — блокирует эмулятор на stdin
-- **Файл:** `interrupts/dos.rs:124-136`
-- `std::io::stdin().read_exact(&mut buffer).ok();` — блокирует весь эмулятор в ожидании ввода с терминала. В графическом режиме (с `step_frame`) это заморозит всё на 50000 инструкций.
-- **Fix:** Читать из клавиатурного буфера BIOS (INT 16h), а не напрямую из stdin.
-
-### 11.2. [BUG] INT 21h / AH=06h — DL=0xFF не проверяет буфер
-- **Файл:** `interrupts/dos.rs:89-105`
-- Всегда возвращает "нет клавиши" (AL=0, ZF=1). Не читает буфер клавиатуры.
-
-### 11.3. [BUG] FindFirst DTA — всегда использует DS:0x0080
-- **Файл:** `interrupts/dos.rs:517-521`
-- `get_dta_addr()` возвращает `DS << 4 | 0x0080`. Не читает текущий DTA из PSP+0x0032.
-- INT 21h / AH=1Ah (Set DTA) не реализован.
-- **Fix:** читать DTA из PSP поля 0x32 (сегмент) и 0x34 (смещение).
-
-### 11.4. [BUG] 8.3 имена в DTA — нет space-padding
-- **Файл:** `interrupts/dos.rs:523-535`
-- `found.name_83.as_bytes()` — пишет имя как есть. DOS DTA формат требует 8 байт имени + 3 байта расширения, space-padded.
-- **Fix:** использовать `format!("{:8}{:3}", name, ext)` с DOS-style padding.
-
-### 11.5. [BUG] INT 10h / AH=0Eh — не пишет в видеопамять в Mode 13h
+### 11.1. [BUG] INT 10h / AH=0Eh — не пишет в видеопамять в Mode 13h
 - **Файл:** `interrupts/bios.rs:27-46`
 - В режиме 13h символы не выводятся на экран, только `log::debug`.
 
-### 11.6. [BUG] INT 10h / AH=02h — заглушка (установка курсора)
+### 11.2. [BUG] INT 10h / AH=02h — заглушка (установка курсора)
 - **Файл:** `interrupts/bios.rs:47-49`
 - Не сохраняет позицию курсора.
 
-### 11.7. [BUG] INT 16h / AH=00h — не ждёт клавишу
+### 11.3. [BUG] INT 16h / AH=00h — использует suspend/resume, но может подвиснуть
 - **Файл:** `interrupts/bios.rs:63-68`
-- Если буфер пуст, возвращает AX=0. Должен циклически ждать, пока не появится клавиша.
+- Использует `suspend_for_key()`, что корректно. Убедиться, что всегда есть wakeup.
 
-### 11.8. [BUG] Прерывание INT 09h (IRQ1) — не читает scancode
-- **Файл:** `interrupts/mod.rs:15-18`
-- `sys.machine.out_port(0x20, 0x20)` — только EOI. Не читает порт 0x60.
-
-### 11.9. [BUG] Загрузчик COM: BSS не чистится
-- **Файл:** `loader/com_loader.rs`
-- COM-файлы не имеют BSS, так что это ок.
-
-### 11.10. [BUG] EMS — страницы не маппятся реально
+### 11.4. [BUG] EMS — страницы не маппятся реально
 - **Файл:** `interrupts/ems.rs:17-24`
 - `AH=42h` проверяет handle, но не копирует данные в page frame (0xD000). Любая программа, использующая EMS real pages, получит мусор.
 
-### 11.11. [BUG] `run_window()` — todo!()
+### 11.5. [BUG] `run_window()` — todo!()
 - **Файл:** `main.rs:78-80`
 - Команда `Win` не реализована.
+
+### 11.6. [STUB] INT 21h / AH=00h — terminate, но не освобождает память
+- **Файл:** `interrupts/dos.rs:14-20`
+- Просто ставит `halted = true`. Не освобождает выделенные блоки MCB, не закрывает файлы.
+
+### 11.7. [MISSING] INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов)
+- **Файл:** `interrupts/dos.rs`
+- Критично для COMMAND.COM и многих программ.
+
+### 11.8. [MISSING] INT 21h / AH=2Ah (Get System Date), AH=2Ch (Get System Time)
+- Необходимы для программ, показывающих дату/время.
 
 ---
 
 ## 12. Прочее
 
 ### 12.1. [CLEANUP] `set_carry_flag()` в dos.rs дублирует set_cf из bit.rs
-- **Файл:** `interrupts/dos.rs:138-146`
+- **Файл:** `interrupts/dos.rs:193-201`
 - Локальная функция. Есть аналоги в `bit.rs:430-438` и `alu.rs` (косвенно).
 
 ### 12.2. [CLEANUP] `cpu.prefixes.has_operand_size` назван confusingly
@@ -269,7 +227,3 @@
 - Отсутствуют вектора: INT 00h (Division by zero), INT 01h (Single Step), INT 02h (NMI), INT 03h (Breakpoint), INT 04h (INTO), INT 05h (BOUND), INT 06h (Invalid Opcode), INT 07h (Coprocessor), INT 11h (Equipment Check), INT 14h (Serial), INT 17h (Printer), INT 18h (BASIC), INT 19h (Boot).
 
 Каждый отсутствующий вектор — `0xF000:0x0000`, что приведёт к `halt` в необработанном внутреннем прерывании (`interrupts/mod.rs:29-37`).
-
-### 12.5. [BUG] `set_ss()` — debug log
-- **Файл:** `registers.rs:313`
-- `log::debug!("set sp ...")` — остаточный отладочный вывод, засоряет лог.

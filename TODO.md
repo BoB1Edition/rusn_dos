@@ -11,11 +11,10 @@
 
 - `[x]` IP — сделать 32-битным (`eip`), убрать ограничение `u16`
 - `[x]` Регистры — enable `eip` getter/setter, закомментированные в `registers.rs`
-- `[!]` `mov_ax_address` (0xA1) / `mov_address_ax` (0xA3) — НЕ dead code, вызываются из executor (строки 329, 331 `mov_ax_moffs`/`mov_moffs_ax`). Но есть дублирующие `mov_ax_address`/`mov_address_ax` в `mov.rs`, которые не вызываются — надо удалить.
-- `[!]` `set_eflags` не форсирует бит 1 в отличие от `set_flags`
-- `[x]` Парность (PF) — проверить на u8 low-byte для всех ширин
+- `[!]` `mov_ax_address` (0xA1) / `mov_address_ax` (0xA3) — НЕ dead code, вызываются из executor. Но есть дублирующие `mov_ax_address`/`mov_address_ax` в `mov.rs`, которые не вызываются — надо удалить.
+- `[x]` `set_eflags` — до сих пор не форсирует бит 1 в отличие от `set_flags`
 - `[!]` AF в shift/rotate — не передаётся (`false`), хотя реальный x86 меняет AF
-- `[x]` SGDT/SIDT — пишут реальные GDTR/IDTR
+- `[x]` SGDT/SIDT — до сих пор пишут заглушку
 - `[!]` AAA (0x37) и AAS (0x3F) — отсутствуют в `executor.rs`
 - `[!]` INT 08h — PIT не эмулирует реальный счётчик, таймер на wall-clock
 - `[!]` BSR/BSF (0F BD/BC) — не реализованы
@@ -34,9 +33,9 @@
 - `[x]` INT 21h / AH=01h — использует буфер клавиатуры с suspend/resume
 - `[x]` INT 21h / AH=06h — DL=0xFF проверяет буфер клавиатуры
 - `[x]` INT 10h / AH=0Eh — пишет в видеопамять через write_tty() (текстовый режим)
-- `[!]` INT 10h / AH=00h — был сломан копипастой (читал клавиатуру вместо установки режима), исправлено
+- `[x]` INT 10h / AH=00h — был сломан копипастой (читал клавиатуру вместо установки режима), исправлено
 - `[!]` INT 10h / AH=02h — установка позиции курсора — заглушка
-- `[!]` INT 16h / AH=00h — должен ждать клавишу, а не возвращать 0
+- `[x]` INT 16h / AH=00h — использует suspend_for_key (ожидание клавиши)
 - `[x]` FindFirst/FindNext — DTA настраивается через AH=1Ah
 - `[x]` INT 21h / AH=1Ah — Set DTA реализован
 - `[x]` INT 21h / AH=44h — IOCTL (AL=00h: Get Device Information)
@@ -44,7 +43,7 @@
 - `[x]` INT 21h / AH=47h — get current directory — реализован
 - `[x]` 8.3 имена в DTA — правильный space-padding через format_83()
 - `[x]` stdin/stdout/stderr хендлы 0-4 как device-файлы (CON, AUX, PRN)
-- `[~]` INT 21h / AH=0Ah — buffered input
+- `[x]` INT 21h / AH=0Ah — buffered input (с suspend/resume)
 - `[ ]` INT 21h / AH=2Ah — get system date
 - `[ ]` INT 21h / AH=2Ch — get system time
 - `[ ]` INT 21h / AH=39h — MKDIR
@@ -80,7 +79,7 @@
 
 - `[x]` Клавиатура (8042, Set 1 scancodes) — базовая
 - `[ ]` Мышь (INT 33h, PS/2)
-- `[ ]` Джойстик (Gameport 0x201) 
+- `[ ]` Джойстик (Gameport 0x201)
 - `[ ]` Поддержка геймпадов через gilrs
 
 ### 4.4. Дисковая подсистема (Plugin: Storage)
@@ -172,3 +171,6 @@
 - `[ ]` docs/bus.md — описание трейтов Machine, Cpu, Peripheral, Display
 - `[ ]` docs/dos-api.md — полный список поддерживаемых INT 21h функций
 - `[ ]` docs/build.md — сборка, зависимости, конфигурация
+- `[x]` README.md — главный README
+- `[x]` DESIGN.md — дизайн-документ
+- `[x]` SKILL.md — описание навыков

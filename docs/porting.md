@@ -69,16 +69,10 @@ DOS applications reference character devices by name (CON, NUL, PRN, etc.) via I
 1. Add a variant to `DeviceKind` in `crate/dos/src/filesystem.rs`:
    ```rust
    pub enum DeviceKind {
-       Con,
-       Nul,
-       Com(u8),  // COM1-COM4
-       Lpt(u8),  // LPT1-LPT4
-       Clock,     // CLOCK$
-       Ems,       // EMMXXXX0
-       MyDevice,  // <-- new
+       Con, Nul, Com(u8), Lpt(u8), Clock, Ems, MyDevice,
    }
    ```
-2. Add the name to the `resolve_device()` function match block
+2. Add the name to `resolve_device()` function match block
 3. Handle reads/writes in `read_file()` / `write_file()` for the new device
 4. Handle IOCTL in `ioctl()` (INT 21h / AH=44h) if the device needs special status
 
@@ -98,19 +92,18 @@ All file handles 0–4 are pre-registered as character devices:
 For software interrupts (INT 10h, 16h, 33h, etc.):
 
 1. **Create handler** in `crate/dos/src/interrupts/`
-   - `mouse.rs` for INT 33h
-   - Or add to `bios.rs`, `dos.rs`, or `ems.rs`
+   - New file for new interrupt groups (e.g., `mouse.rs` for INT 33h)
+   - Or add to existing `bios.rs`, `dos.rs`, or `ems.rs`
 2. **Add to dispatch** in `crate/dos/src/interrupts/mod.rs`:
    ```rust
    mod mouse;
-   // ...
    mouse::handle_int33(sys);
    ```
 3. **Set IVT entry** in `crate/dos/src/ivt.rs` (CS=0xF000 + offset)
 
 ### Implementing Non-Blocking Keyboard Input
 
-For functions that need to wait for a key (INT 21h / AH=01h, INT 3Fh handle=0):
+For functions that need to wait for a key (INT 21h / AH=01h, AH=0Ah, AH=3Fh handle=0, INT 16h / AH=00h):
 
 ```rust
 // In your handler:
@@ -124,6 +117,17 @@ if let Some(key) = sys.machine.keyboard.pop_key() {
 
 The `suspend_for_key()` mechanism saves the interrupted call's state and rewinds the CPU registers. The main loop polls keys and resumes execution when a key is pressed.
 
+## Implementing Buffered Input
+
+For INT 21h / AH=0Ah (used by most text programs):
+
+1. On first call (detect via `!sys.console_input.active`), save buffer address and max chars
+2. On subsequent calls (after suspend/resume), pop a key from the keyboard buffer
+3. Handle: Enter → finalize, Backspace → delete last, Esc → clear, Ctrl+C → INT 23h
+4. Call `sys.suspend_for_key(0x21)` to wait for the next key
+
+`ConsoleInputState` in `system.rs` tracks: `active`, `buffer_seg`, `buffer_off`, `max_chars`, `current_count`.
+
 ## Adding a New Emulated System
 
 ### Structure
@@ -132,6 +136,7 @@ Each system is a separate crate in `crate/<name>/`:
 
 ```
 crate/<name>/
+├── Cargo.toml
 └── src/
     └── lib.rs        — System struct, step(), load_rom()
 ```

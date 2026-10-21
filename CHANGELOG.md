@@ -20,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`SuspendedCall` and `suspend_for_key()`**: Non-blocking keyboard wait mechanism — when a DOS API needs a key but the buffer is empty, the call state is saved and execution is suspended. The main loop polls keys and resumes the call when a key arrives.
 - **Cursor fields in VideoMemory**: `cursor_row` and `cursor_col` for text mode cursor tracking.
 - **`scroll_up()` in VideoMemory**: Scrolls text mode screen up by one line when cursor reaches bottom.
+- **Buffered input (INT 21h / AH=0Ah)**: `ConsoleInputState` tracks multi-key input with Backspace/Enter/Ctrl+C handling via suspend/resume.
+- **emu_config crate**: Configuration types (Resolution, MachineConfig, VideoConfig, SoundConfig, CpuConfig, DriverConfig) factored into their own crate.
+- **A20 gate control via port 0x92 and keyboard controller (0x64/0x60)**: `a20_command_pending` flag in Motherboard, port 0x92 read returns A20 state.
+- **FS/GS register init in COM loader**: Sets FS=GS=PSP_SEGMENT for compatibility.
+- **`match_pattern()` recursive wildcard**: Handles `*` and `?` for FindFirst/FindNext.
 
 ### Fixed
 
@@ -32,13 +37,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **FindFirst/FindNext DTA**: Uses configurable DTA address (via AH=1Ah) instead of hardcoded DS:0x0080.
 - **8.3 filename formatting**: Space-padded in DTA structure, fixing compatibility with programs that expect padding.
 - **Video mode set**: Now correctly writes to CRTC-like ports when set via motherboard dispatch.
+- **EXE loader**: Return address pushed via `stack::push16` (fixes SP calculation and wrapping).
+- **COM loader MCB**: Proper MCB chain setup with `MAX_MCB_SEGMENT` bounds.
 
 ### Changed
 
 - **`filesystem.rs`**: Major refactor — added device abstraction layer. File handles now distinguish between disk files and character devices.
-- **`dos.rs`**: INT 21h dispatch updated: AH=1Ah and AH=44h added. INT 2Fh uses full AX match for 1687h. `get_dta_addr()` delegates to `DosSystem`.
-- **`system.rs`**: Added DTA fields, suspended-call mechanism, `get_dta_addr()` method.
+- **`dos.rs`**: INT 21h dispatch updated: AH=1Ah, AH=44h, AH=0Ah added. INT 2Fh uses full AX match for 1687h.
+- **`system.rs`**: Added DTA fields, suspended-call mechanism, `get_dta_addr()`, `ConsoleInputState`.
 - **`video.rs`**: Added cursor tracking, scroll, write_tty. Version bumped to 2.
+- **`motherboard.rs`**: A20 gate now controllable via port 0x92 and keyboard 0x64/0x60 command 0xD1.
+- **`keyboard.rs`**: Added `push_key()`, `read_port_60()`, `read_port_64()`, BIOS buffer (VecDeque<u16>), scancode storage.
+- **PIT**: `tick()` implementation for both Peripheral trait method and standalone.
 
 ### Documentation
 
