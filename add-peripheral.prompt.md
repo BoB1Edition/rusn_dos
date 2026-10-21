@@ -13,7 +13,8 @@
 4. Добавить поле в `Motherboard` в `motherboard.rs`
 5. Инициализировать в `Motherboard::new()`
 6. Пробросить порты в `in_port()` / `out_port()`
-7. Вызывать `tick()` в `DosSystem::step_frame()` если нужно
+7. Для визуальных устройств, поддерживающих окно: `pump_events()` в `Display` trait (обновление кадра во время suspend)
+8. Вызывать `tick()` в `DosSystem::step_frame()` если нужно
 
 ## Проверка
 ```bash

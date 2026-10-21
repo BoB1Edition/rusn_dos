@@ -14,6 +14,8 @@ pub trait Peripheral {
 }
 ```
 
+The `Display` trait (in `crate/bus/src/display.rs`) has an optional `pump_events()` method — override it to re-display the last frame during keyboard-wait suspend (used by `EmuWindow` to keep the window alive).
+
 ### Steps
 
 1. **Create a new file** in `crate/bus/src/peripherals/`, e.g. `mouse.rs`

@@ -19,6 +19,7 @@
 ### 3. Разработка периферии
 
 - Трейт Peripheral: port_read/write, mem_read/write, tick
+- Трейт Display: update, poll_keys, pump_events (поддержание окна при suspend)
 - Интеграция с Motherboard: регистрация портов, MMIO, вызов tick()
 
 ### 4. Добавление новой эмулируемой системы

@@ -56,7 +56,8 @@ RUST_LOG=debug cargo run Run test/simple.com
 - EMS 4.0 (INT 67h) — в `crate/dos/src/interrupts/ems.rs`
 - IVT инициализируется в `crate/dos/src/ivt.rs` (вектора с CS=0xF000 — внутренние)
 - Железо: PIC (8259), PIT (8253), клавиатура (8042), VGA — в `crate/bus/src/peripherals/`
-- Механизм suspend/resume для неблокирующего ввода: `SuspendedCall` в `system.rs`
+- Устройства DOS: `tty_write()` — пишет и в VRAM и в stdout (используется INT 21h/AH=02h,06h,09h,0Ah)
+- Механизм suspend/resume для неблокирующего ввода: `SuspendedCall` в `system.rs` (re-dispatch через `dispatch(vector)`, не stack-unwind)
 - Новый крейт добавлять в `[workspace] members` в корневом `Cargo.toml`
 
 ### Приоритетные направления

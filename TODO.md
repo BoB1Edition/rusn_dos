@@ -44,6 +44,8 @@
 - `[x]` 8.3 имена в DTA — правильный space-padding через format_83()
 - `[x]` stdin/stdout/stderr хендлы 0-4 как device-файлы (CON, AUX, PRN)
 - `[x]` INT 21h / AH=0Ah — buffered input (с suspend/resume)
+- `[x]` INT 21h / AH=02h, AH=06h, AH=09h, AH=0Ah — вывод через tty_write() в VRAM + stdout
+- `[x]` INT 21h / AH=3Fh — чтение из CON (handle=0) через клавиатурный буфер
 - `[ ]` INT 21h / AH=2Ah — get system date
 - `[ ]` INT 21h / AH=2Ch — get system time
 - `[ ]` INT 21h / AH=39h — MKDIR
@@ -66,6 +68,8 @@
 
 - `[x]` Текстовый режим 80×25 — OK
 - `[x]` Mode 13h (320×200×8) — OK
+- `[x]` VGA Input Status 1 (порт 0x3DA) — эмуляция retrace тайминга
+- `[x]` Attribute Controller flip-flop — сброс при чтении 0x3DA
 - `[ ]` VGA CRTC — полная эмуляция портов 0x3D4/0x3D5
 - `[ ]` VGA DAC — полная 18-bit палитра (256 цветов)
 - `[ ]` VGA sequencer — порты 0x3C4/0x3C5

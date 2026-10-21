@@ -8,6 +8,7 @@ rusn_dos спроектирован как **модульный мультиси
 2. **Модульность через трейты**: `Cpu`, `Machine`, `Peripheral`, `Display` — абстракции для замены компонентов
 3. **Zero-cost абстракции**: `NullTracer` оптимизируется компилятором, `#[inline(always)]` на критических путях
 4. **DOS как слой, а не ядро**: DOS обёртка (DosSystem) связывает CPU + шину + файловую систему, но не встроена в CPU
+5. **Неблокирующий ввод через re-dispatch**: При suspend сохраняется только вектор; при появлении клавиши прерывание re-dispatches, а не перематывает стек
 
 ## Ключевые архитектурные решения
 
@@ -40,7 +41,7 @@ X86Cpu::step(&mut self, machine: &mut dyn Machine)
 
 Проблема: INT 21h/AH=01h должен ждать нажатия клавиши, но эмулятор не может блокироваться (в графическом режиме нужно обновлять экран и опрашивать окно).
 
-Решение: `SuspendedCall` сохраняет контекст прерывания (CS:IP, SP:SS, флаги) и откатывает регистры CPU. Основной цикл `step_frame()` при обнаружении `suspended` опрашивает клавиатуру и возобновляет выполнение при появлении клавиши.
+Решение: Механизм re-dispatch — `SuspendedCall` сохраняет только вектор прерывания (поля CS:IP:SP:SS:flags не используются). Основной цикл `step_frame()` при обнаружении `suspended` вызывает `pump_events()` для обновления окна, опрашивает клавиатуру и рендерит dirty-кадры. При появлении клавиши прерывание вызывается заново через `dispatch(vector)`. Во время ожидания окно обновляется каждые ~50ms.
 
 ### 4. Внутренние vs внешние прерывания
 
@@ -66,9 +67,10 @@ main()
   ├── setup_program_directory()
   └── Цикл: step_frame(display)
         ├── step() → execute opcode
-        ├── tick_timer() → IRQ0 каждые ~55ms
-        ├── Опрос клавиатуры каждые 256 инструкций
-        └── Рендер при VRAM dirty
+         ├── tick_timer() → IRQ0 каждые ~55ms
+         ├── Опрос клавиатуры каждые 256 инструкций
+         ├── При suspend: pump_events() + рендер dirty-кадров + re-dispatch по клавише
+         └── Рендер при VRAM dirty (после цикла, не посередине)
 ```
 
 ## Структуры данных
@@ -88,7 +90,7 @@ instruction_bytes — сбор байтов для трассировки
 ```
 Memory            — RAM (boxed-slice)
 Keyboard          — 8042 + BIOS buffer (VecDeque<u16>)
-VideoMemory       — Text80x25 / Mode13h, cursor, dirty flag
+VideoMemory       — Text80x25 / Mode13h, cursor (row/col), dirty flag, retrace_epoch, attr_flip_flop
 Pic               — 8259 (master + slave masks)
 Pit               — 8253 (3 channels, wall-clock stub)
 a20_gate          — enabled/disabled + command pending

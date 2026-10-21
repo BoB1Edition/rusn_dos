@@ -8,51 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Teletype output (INT 10h / AH=0Eh)**: Full `write_tty()` implementation in video module — writes characters to VRAM with proper backspace, line feed, carriage return, and scroll. Cursor position tracked via `cursor_row`/`cursor_col`.
-- **Keyboard buffer for DOS API**: INT 21h / AH=01h (read char with echo) and AH=06h (direct console I/O, DL=0xFF) now read from the keyboard buffer instead of blocking on stdin. Supports graphics mode.
-- **Set DTA (INT 21h / AH=1Ah)**: `dta_segment`/`dta_offset` in `DosSystem` allow programs to set the Disk Transfer Area address. FindFirst/FindNext use `get_dta_addr()`.
-- **IOCTL (INT 21h / AH=44h / AL=00h)**: Get Device Information — returns device attributes for character devices (bit 15=1) or drive number for disk files.
-- **Device file system**: `DeviceKind` (CON, NUL, COM, LPT, CLOCK$, EMMXXXX0) and `FileHandle` (Disk/Device) enums. File handles 0-4 pre-registered as CON/CON/CON/AUX/PRN.
-- **Device-aware file operations**: `open_file()` and `create_file()` accept device names (CON, NUL, etc.). `read_file()` handle=0 reads from keyboard. `write_file()` routes to stdout for CON, logs for PRN/AUX, discards for NUL.
-- **`resolve_device()`**: Parses DOS device names with path prefix stripping and trailing colon support.
-- **`match_pattern()`**: Recursive wildcard matcher for FindFirst/FindNext — handles `*` and `?` properly.
-- **`format_83()` with space-padding**: 8.3 filename formatting with proper space padding (breaks some programs without it).
-- **`SuspendedCall` and `suspend_for_key()`**: Non-blocking keyboard wait mechanism — when a DOS API needs a key but the buffer is empty, the call state is saved and execution is suspended. The main loop polls keys and resumes the call when a key arrives.
-- **Cursor fields in VideoMemory**: `cursor_row` and `cursor_col` for text mode cursor tracking.
-- **`scroll_up()` in VideoMemory**: Scrolls text mode screen up by one line when cursor reaches bottom.
-- **Buffered input (INT 21h / AH=0Ah)**: `ConsoleInputState` tracks multi-key input with Backspace/Enter/Ctrl+C handling via suspend/resume.
-- **emu_config crate**: Configuration types (Resolution, MachineConfig, VideoConfig, SoundConfig, CpuConfig, DriverConfig) factored into their own crate.
-- **A20 gate control via port 0x92 and keyboard controller (0x64/0x60)**: `a20_command_pending` flag in Motherboard, port 0x92 read returns A20 state.
-- **FS/GS register init in COM loader**: Sets FS=GS=PSP_SEGMENT for compatibility.
-- **`match_pattern()` recursive wildcard**: Handles `*` and `?` for FindFirst/FindNext.
+- **VGA Input Status 1 (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing (60 Hz frame, ~1.4ms VBLANK, ~11µs HBLANK) using `retrace_epoch`. Anti-tear register — resets `attr_flip_flop` on read.
+- **VGA Attribute Controller flip-flop**: `attr_flip_flop` field in VideoMemory toggles for VGA attribute sequencing.
+- **`pump_events()` on `Display` trait**: Default no-op method; `EmuWindow` implements it to call `window.update_with_buffer` for periodic frame refreshes during suspend.
+- **`tty_write()` in bios.rs**: Unified teletype output function — writes character to video RAM via `write_tty()` AND flushes to host stdout. Replaces raw `print!`/`println!` in DOS console functions.
+- **Frame caching in EmuWindow**: `last_frame`/`last_size`/`last_update` keep the last rendered frame. `pump()` re-displays it on timer (every 50ms) to keep the window alive during keyboard-wait suspend.
+- **`step_frame()` — suspend re-dispatch**: When a key arrives during suspend, the original INT vector is re-dispatched instead of merely clearing the suspended flag. This allows buffered input and blocking reads to resume correctly.
+- **`step_frame()` — render at end of budget**: Dirty-check rendering moved after the instruction budget loop (instead of returning mid-budget) so the frame is painted even when no VRAM write happens in the last batch.
+- **Comprehensive test suite**: `test/testvga.asm` — 20-test COM file covering DOS version, memory, drive, directory, teletype, backspace, direct B800h write, port 3DAh, video mode, A20, DPMI, FindFirst, CON device, IOCTL, keyboard polling, suspend/resume, buffered input, Mode 13h graphics, and CON read.
 
 ### Fixed
 
-- **INT 10h / AH=00h**: Restored video mode set functionality (was corrupted by copy-paste into keyboard handler).
-- **INT 10h / AH=0Eh**: Now writes to video RAM instead of only printing to host stdout. Text mode output works correctly in emulated video.
-- **INT 21h / AH=01h**: No longer blocks emulator on stdin. Uses keyboard buffer with suspend/resume.
-- **INT 21h / AH=06h (DL=0xFF)**: Now checks keyboard buffer instead of always returning "no key".
-- **INT 21h / AH=3Fh (handle=0)**: Reads from keyboard buffer for stdin (CON) instead of returning zero bytes.
-- **INT 2Fh / AX=1687h**: Proper DPMI host check returning CF=1 (Not Installed) instead of falling through to generic handler.
-- **FindFirst/FindNext DTA**: Uses configurable DTA address (via AH=1Ah) instead of hardcoded DS:0x0080.
-- **8.3 filename formatting**: Space-padded in DTA structure, fixing compatibility with programs that expect padding.
-- **Video mode set**: Now correctly writes to CRTC-like ports when set via motherboard dispatch.
-- **EXE loader**: Return address pushed via `stack::push16` (fixes SP calculation and wrapping).
-- **COM loader MCB**: Proper MCB chain setup with `MAX_MCB_SEGMENT` bounds.
+- **INT 21h / AH=02h, AH=06h, AH=09h, AH=0Ah, AH=3Fh**: All console output functions now route through `tty_write()` — writes to both video RAM and host stdout. Previously used raw `print!()` which bypassed VRAM.
+- **INT 21h / AH=0Ah (buffered input) — Backspace echo**: Now uses `tty_write()` for backspace (0x08 + space + 0x08) so video cursor moves correctly.
+- **VGA port read — added 0x3DA routing**: `Motherboard::in_port()` now dispatches port 0x3DA to `video.port_read()`, enabling programs to poll vertical retrace.
+- **`set_mode()` cursor reset**: `cursor_row`/`cursor_col` are now zeroed on mode set.
+- **`input_status_1()` resets `attr_flip_flop`**: Correct VGA behavior — reading 0x3DA resets the attribute controller flip-flop.
+- **`read_mmio`/`write_mmio` TEXT_BASE check**: Text buffer is at B8000 (offset 0x18000), not at 0. Added bounds check to prevent reading/writing outside the text region.
+- **`suspend_for_key()` simplified**: Removed complex stack-unwind logic (commented-out code). Now only stores the vector; fields cs/ip/flags/sp/ss set to 0 as unused.
 
 ### Changed
 
-- **`filesystem.rs`**: Major refactor — added device abstraction layer. File handles now distinguish between disk files and character devices.
-- **`dos.rs`**: INT 21h dispatch updated: AH=1Ah, AH=44h, AH=0Ah added. INT 2Fh uses full AX match for 1687h.
-- **`system.rs`**: Added DTA fields, suspended-call mechanism, `get_dta_addr()`, `ConsoleInputState`.
-- **`video.rs`**: Added cursor tracking, scroll, write_tty. Version bumped to 2.
-- **`motherboard.rs`**: A20 gate now controllable via port 0x92 and keyboard 0x64/0x60 command 0xD1.
-- **`keyboard.rs`**: Added `push_key()`, `read_port_60()`, `read_port_64()`, BIOS buffer (VecDeque<u16>), scancode storage.
-- **PIT**: `tick()` implementation for both Peripheral trait method and standalone.
+- **`step_frame()` — restructured**: Suspended path now calls `pump_events()` on display, renders dirty frames during wait, re-dispatches original INT on key press. Render moved to end of budget loop.
+- **`peripheral.rs` trait docs stripped**: Removed verbose doc comments. Trait methods now have no doc comments (follows project convention of minimal comments).
+- **`EmuWindow::poll_keys()` auto-pumps**: If 50ms have passed since last frame update, calls `pump()` to keep the window responsive.
+- **`gui/src/lib.rs` — major refactor**: Added frame caching (last_frame, last_size, last_update). `update()` saves frame and renders immediately. New `pump_events()` implementation.
+- **DOS console functions**: All `print!()`/`println!()` replaced with `tty_write()` for video + stdout dual output.
 
 ### Documentation
 
-- Added `docs/architecture.md` — system architecture and crate layout
-- Added `docs/x86.md` — complete instruction reference
-- Added `docs/porting.md` — guide for adding peripherals and systems
-- Updated `TODO.md` — synced with current implementation status
+- Updated `test/testvga.asm` — comprehensive 20-test suite
+
+## [Previous Releases — see git log]

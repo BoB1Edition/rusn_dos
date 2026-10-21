@@ -98,7 +98,7 @@ Device names recognized: CON, NUL, COM1-4, LPT1-4, CLOCK$, EMMXXXX0, PRN, AUX. `
 
 ### `gui` — Window and Input
 
-minifb-based implementation of the `Display` trait. Tracks previous frame's keys to detect new presses. Keyboard mapping from minifb `Key` to DOS (scancode, ASCII) pairs via `minifb_to_dos()`.
+minifb-based implementation of the `Display` trait. Tracks previous frame's keys to detect new presses. Keyboard mapping from minifb `Key` to DOS (scancode, ASCII) pairs via `minifb_to_dos()`. Implements `pump_events()` to re-display the last cached frame via `pump()` when 50ms have elapsed (keeps window alive during keyboard-wait suspend).
 
 ### `emu_config` — Configuration Types
 
@@ -140,10 +140,12 @@ Software Interrupt (INT n)
 
 INT 21h / AH=01h, AH=3Fh (handle=0), AH=0Ah, and INT 16h / AH=00h use `suspend_for_key()` when the keyboard buffer is empty:
 
-1. Save current call state (CS, IP, flags, SP, SS) in `SuspendedCall`
-2. Rewind CPU registers to the state *before* the INT was executed
-3. In `step_frame()`, detect `suspended.is_some()`, poll keyboard, and when a key arrives, clear the suspended state
-4. The original INT is re-executed and now finds a key in the buffer
+1. Save the interrupt vector in `SuspendedCall` (cs/ip/flags/sp/ss are unused — re-dispatch approach)
+2. In `step_frame()`, detect `suspended.is_some()`, call `pump_events()` to refresh the window, poll keyboard, and render dirty frames during wait
+3. When a key arrives, call `self.dispatch(vector)` to re-execute the original INT
+4. The original INT now finds a key in the buffer and completes normally
+
+Note: The previous approach (saving/rewinding CS:IP:SP:SS:flags) has been replaced with the simpler re-dispatch mechanism.
 
 ## Main Loop (`DosSystem::step_frame`)
 
@@ -152,13 +154,16 @@ step_frame(display):
   budget = 50,000 instructions
   while budget > 0 AND not halted:
     if suspended:
+      pump_events(display)
       poll display for keys
-      if key available: clear suspend
+      if key available:
+        re-dispatch suspended INT  // dispatch(vector)
+        render dirty frame
     else:
       step()              // 1 CPU instruction + dispatch pending SWI
     tick_timer()        // every 910 ticks → check 54ms → IRQ0
     every 256 steps: poll display for keys
-    if VRAM dirty: render frame, return early
+  if VRAM dirty: render frame, return
 ```
 
 ## Memory Map (Real Mode)
@@ -180,6 +185,8 @@ step_frame(display):
 Supports two modes:
 - **Text80x25** — VGA 80×25 text mode with 8×16 font. Cursor tracked via `cursor_row`/`cursor_col`. Teletype output via `write_tty()` handles backspace (0x08), line feed (0x0A), carriage return (0x0D), and scrolling via `scroll_up()`.
 - **Mode13h** — 320×200×8 VGA graphics mode. Framebuffer at 0xA0000.
+- **VGA Input Status (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing using `retrace_epoch` (wall-clock). Resets `attr_flip_flop` on read (anti-tear).
+- **TEXT_BASE checking**: MMIO reads/writes validate offset against B8000 base (0x18000) to prevent out-of-bounds access.
 
 Rendering pipeline:
 1. Text mode: `render_text_to_pixels()` — renders 640×400 using VGA font + color attributes

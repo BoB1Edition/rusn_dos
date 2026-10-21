@@ -162,7 +162,7 @@
 
 ### 10.3. [STUB] VGA — неполная эмуляция портов
 - **Файл:** `peripherals/video.rs`
-- Порты 0x3C4/3C5 (sequencer), 0x3CE/3CF (graphics controller), 0x3D4/3D5 (CRTC) — пишутся в `log::trace`, но не обрабатываются.
+- Порты 0x3C4/3C5 (sequencer), 0x3CE/3CF (graphics controller), 0x3D4/3D5 (CRTC), 0x3DA (input status) — 0x3DA реализован (`input_status_1`), остальные пишутся в `log::trace`, но не обрабатываются.
 - `load_vga_palette()` — цвета 16-255: фейковые градиенты, а не реальные VGA-цвета.
 
 ### 10.4. [BUG] A20 mask — теряет верхние биты
@@ -178,8 +178,8 @@
 ## 11. DOS (crate/dos/)
 
 ### 11.1. [BUG] INT 10h / AH=0Eh — не пишет в видеопамять в Mode 13h
-- **Файл:** `interrupts/bios.rs:27-46`
-- В режиме 13h символы не выводятся на экран, только `log::debug`.
+- **Файл:** `interrupts/bios.rs`
+- В режиме 13h символы не выводятся на экран, только `log::debug`. Замечание: существует `tty_write()` который пишет и в VRAM и в stdout, но он используется только консольными функциями DOS (INT 21h), а не напрямую INT 10h.
 
 ### 11.2. [BUG] INT 10h / AH=02h — заглушка (установка курсора)
 - **Файл:** `interrupts/bios.rs:47-49`
@@ -227,3 +227,23 @@
 - Отсутствуют вектора: INT 00h (Division by zero), INT 01h (Single Step), INT 02h (NMI), INT 03h (Breakpoint), INT 04h (INTO), INT 05h (BOUND), INT 06h (Invalid Opcode), INT 07h (Coprocessor), INT 11h (Equipment Check), INT 14h (Serial), INT 17h (Printer), INT 18h (BASIC), INT 19h (Boot).
 
 Каждый отсутствующий вектор — `0xF000:0x0000`, что приведёт к `halt` в необработанном внутреннем прерывании (`interrupts/mod.rs:29-37`).
+
+---
+
+## 13. Новые проблемы (VGA / suspend / display)
+
+### 13.1. [DEAD] `suspend_for_key()` — неиспользуемые поля SuspendedCall
+- **Файл:** `system.rs:297-331`
+- Поля `cs`, `ip`, `flags`, `sp`, `ss` в `SuspendedCall` всегда устанавливаются в 0 и не используются. Механизм перешёл на re-dispatch через `dispatch(vector)`.
+
+### 13.2. [BUG] `step_frame()` — отступы сломаны
+- **Файл:** `system.rs:237-291`
+- Тело `step_frame()` имеет неверный отступ (метод на одном уровне с impl-блоком из-за проблем с форматированием после копипасты).
+
+### 13.3. [BUG] `EmuWindow::pump_events()` — паника при закрытом окне
+- **Файл:** `gui/src/lib.rs:50-53`
+- `pump()` вызывает `window.update_with_buffer()` без проверки `is_open()`. При закрытии окна может упасть.
+
+### 13.4. [STUB] VGA Input Status — нет реального VGA-тайминга
+- **Файл:** `peripherals/video.rs:59-78`
+- `input_status_1()` эмулирует retrace через wall-clock (Instant::now()), а не через счётчик пикселей/строк. Приемлемо для игр, но не для демок с точным таймингом.
