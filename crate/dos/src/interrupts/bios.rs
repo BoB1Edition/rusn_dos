@@ -1,4 +1,4 @@
-// Ver: 5 File: crate/dos/src/interrupts/bios.rs
+// Ver: 8 File: crate/dos/src/interrupts/bios.rs
 use std::io::Write;
 
 use bus::Machine;
@@ -71,7 +71,8 @@ pub fn handle_int16(sys: &mut DosSystem) {
             if let Some(key) = sys.machine.keyboard.pop_key() {
                 sys.cpu.registers.set_ax(key);
             } else {
-                sys.cpu.registers.set_ax(0x0000);
+                //sys.cpu.registers.set_ax(0x0000);
+                sys.suspend_for_key(0x16);
             }
         }
         0x01 => {
@@ -128,7 +129,7 @@ pub fn handle_int15(sys: &mut DosSystem) {
                 sys.cpu.registers.set_ah(0x86); // Функция не поддерживается / ошибка
                 return;
             }
-            
+
             sys.machine.a20_enabled = true;
             let mut f = sys.cpu.registers.flags();
             f &= !flags::CF;
@@ -202,6 +203,20 @@ pub fn handle_int1a(sys: &mut DosSystem) {
 }
 
 pub fn handle_int08(sys: &mut DosSystem) {
+    const BDA_TICK_COUNT: u32 = 0x046C;
+    const BDA_MIDNIGHT_FLAG: u32 = 0x0470;
+    const TICKS_PER_DAY: u32 = 0x0018_00B0;
+
+    let ticks = sys.machine.read_mem_u32(BDA_TICK_COUNT);
+    let new_ticks = ticks.wrapping_add(1);
+
+    if new_ticks >= TICKS_PER_DAY {
+        sys.machine.write_mem_u32(BDA_TICK_COUNT, 0);
+        sys.machine.write_mem_u8(BDA_MIDNIGHT_FLAG, 1);
+    } else {
+        sys.machine.write_mem_u32(BDA_TICK_COUNT, new_ticks);
+    }
+
     let vector_1c = 0x1C;
     let ivt_addr = (vector_1c as u32) * 4;
     let handler_ip = sys.machine.read_mem_u16(ivt_addr);
@@ -210,7 +225,7 @@ pub fn handle_int08(sys: &mut DosSystem) {
         sys.raise_interrupt(vector_1c);
     }
     sys.machine.out_port(0x20, 0x20);
-    log::info!("INT 8h (IRQ0) handled");
+    log::trace!("INT 8h (IRQ0) handled");
 }
 
 pub fn handle_int12(sys: &mut DosSystem) {

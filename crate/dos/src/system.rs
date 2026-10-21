@@ -1,4 +1,4 @@
-// Ver: 5 File: crate/dos/src/system.rs
+// Ver: 7 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{
     VideoMode, get_fonts_vga8x16, load_vga_palette, render_text_to_pixels, scale_buffer,
@@ -51,10 +51,12 @@ pub struct DosSystem {
     pub ems: EmsState,
     pub first_mcb_segment: u16,
     tick_counter: u64,
+    last_timer_tick: std::time::Instant,
     pub dta_segment: u16,
     pub dta_offset: u16,
     pub suspended: Option<SuspendedCall>,
     pub machine_config: MachineConfig,
+    pub console_input: ConsoleInputState,
 }
 
 impl DosSystem {
@@ -68,10 +70,12 @@ impl DosSystem {
             ems: EmsState::default(),
             first_mcb_segment: 0x60,
             tick_counter: 0,
+            last_timer_tick: std::time::Instant::now(),
             dta_segment: 0,
             dta_offset: 0x0080,
             suspended: None,
             machine_config: config,
+            console_input: ConsoleInputState::default()
         }
     }
 
@@ -179,11 +183,21 @@ impl DosSystem {
 
     pub fn tick_timer(&mut self) {
         self.tick_counter += 1;
-        if self.tick_counter >= 65536 {
+        if self.tick_counter < 910 {
+            return;
+        }
+        self.tick_counter = 0;
+
+        let now = std::time::Instant::now();
+        let elapsed_ms = now.duration_since(self.last_timer_tick).as_millis();
+
+        // 1000 / 18.2 ≈ 54.9 мс. Берём 55 для простоты.
+        if elapsed_ms >= 54 {
+            self.last_timer_tick = now; // сбрасываем, даже если прерывание подавлено
+
             if !self.cpu.inhibit_interrupts && flags::test_if(self.cpu.registers.flags()) {
                 self.raise_interrupt(0x08);
             }
-            self.tick_counter = 0;
         }
     }
 
@@ -363,4 +377,13 @@ impl Machine for DosSystem {
     fn halt(&mut self) {
         self.cpu.halted = true;
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ConsoleInputState {
+    pub active: bool,
+    pub buffer_seg: u16,
+    pub buffer_off: u16,
+    pub max_chars: u8,
+    pub current_count: u8,
 }

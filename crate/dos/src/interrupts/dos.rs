@@ -1,7 +1,7 @@
-// Ver: 8 File: crate/dos/src/interrupts/dos.rs
+// Ver: 10 File: crate/dos/src/interrupts/dos.rs
 
 use bus::Machine;
-use std::io::{Read, Write};
+use std::io::Write;
 use x86::flags;
 
 use crate::filesystem::FoundFile;
@@ -22,6 +22,7 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x02 => print_char(sys),
         0x06 => direct_console_io(sys),
         0x09 => print_dos_string(sys),
+        0x0A => buffered_input(sys),
         0x19 => get_current_drive(sys),
         0x1A => set_dta(sys),
         0x25 => set_interrupt_vector(sys),
@@ -169,7 +170,7 @@ fn print_dos_string(sys: &DosSystem) {
         addr = addr.wrapping_add(1);
     }
 
-    println!("{}", s);
+    print!("{}", s);
 }
 
 fn read_char_with_echo(sys: &mut DosSystem) {
@@ -655,5 +656,114 @@ fn ioctl(sys: &mut DosSystem) {
             set_carry_flag(sys, true);
             sys.cpu.registers.set_ax(0x0001); // Invalid function
         }
+    }
+}
+
+/// AH=0Ah — буферизованный ввод строки.
+///
+/// Структура буфера по адресу DS:DX:
+///   Байт 0: максимум символов (заполняет программа)
+///   Байт 1: реальное количество (заполняет DOS, без учёта CR)
+///   Байт 2..: сами символы
+///
+/// Ввод завершается по нажатию Enter (0x0D).
+/// CR в буфер не записывается.
+fn buffered_input(sys: &mut DosSystem) {
+    let buffer_seg = sys.cpu.registers.ds();
+    let buffer_off = sys.cpu.registers.dx();
+
+    // === Фаза 1: Инициализация ввода ===
+    if !sys.console_input.active {
+        let max_chars = sys.read_u8(buffer_seg, buffer_off);
+
+        if max_chars == 0 {
+            // Ноль символов — сразу завершаем
+            sys.write_u8(buffer_seg, buffer_off.wrapping_add(1), 0);
+            set_carry_flag(sys, false);
+            return;
+        }
+
+        sys.console_input.active = true;
+        sys.console_input.buffer_seg = buffer_seg;
+        sys.console_input.buffer_off = buffer_off;
+        sys.console_input.max_chars = max_chars;
+        sys.console_input.current_count = 0;
+
+        // Записываем текущее количество = 0 (на случай если программа сразу проверяет)
+        sys.write_u8(buffer_seg, buffer_off.wrapping_add(1), 0);
+    }
+
+    // === Фаза 2: Читаем клавишу ===
+    if let Some(key) = sys.machine.keyboard.pop_key() {
+        let ascii = (key & 0xFF) as u8;
+
+        match ascii {
+            0x0D => {
+                // Enter — завершаем ввод
+                sys.console_input.active = false;
+
+                // Записываем итоговое количество символов (без учёта CR)
+                sys.write_u8(
+                    sys.console_input.buffer_seg,
+                    sys.console_input.buffer_off.wrapping_add(1),
+                    sys.console_input.current_count,
+                );
+                set_carry_flag(sys, false);
+                println!();
+                std::io::stdout().flush().ok();
+                return;
+            }
+
+            0x08 => {
+                // Backspace — удаляем последний символ
+                if sys.console_input.current_count > 0 {
+                    sys.console_input.current_count -= 1;
+                    // Эхо: сдвигаем курсор назад
+                    print!("\x08 \x08");
+                    std::io::stdout().flush().ok();
+                }
+            }
+
+            0x1B => {
+                // Esc — очищаем текущую строку
+                sys.console_input.current_count = 0;
+                // Эхо: выводим \ и переводим каретку (упрощённо)
+                log::debug!("Buffered input: Esc pressed, line cleared");
+            }
+
+            0x03 => {
+                // Ctrl+C — прерываем ввод, вызываем INT 23h
+                sys.console_input.active = false;
+                sys.console_input.current_count = 0;
+                log::info!("Buffered input: Ctrl+C, raising INT 23h");
+                sys.raise_interrupt(0x23);
+                return;
+            }
+
+            0x0A => {
+                // LF — игнорируем (часто приходит после CR)
+            }
+
+            _ => {
+                if sys.console_input.current_count < sys.console_input.max_chars {
+                    let pos = 2 + sys.console_input.current_count as u16;
+                    sys.write_u8(
+                        sys.console_input.buffer_seg,
+                        sys.console_input.buffer_off.wrapping_add(pos),
+                        ascii,
+                    );
+                    sys.console_input.current_count += 1;
+                    if ascii >= 0x20 {
+                        print!("{}", ascii as char);
+                        std::io::stdout().flush().ok();
+                    }
+                }
+            }
+        }
+        if sys.console_input.active {
+            sys.suspend_for_key(0x21);
+        }
+    } else {
+        sys.suspend_for_key(0x21);
     }
 }
