@@ -65,6 +65,9 @@ MSG_BUFIN   DB '[18] Type a line (AH=0Ah): $'
 MSG_MODE13  DB '[19] Mode 13h - press key to return...', 0Dh, 0Ah, '$'
 MSG_CONREAD DB '[20] Read from CON (AH=3Fh) - press key: $'
 MSG_DONE    DB 0Dh, 0Ah, '=== ALL TESTS COMPLETE ===', 0Dh, 0Ah, '$'
+MSG_CURSOR  DB '[21] Cursor set/get (ожид. 0A14): $'
+MSG_CELL    DB '[22] Cell write/read (ожид. 5A): $'
+MSG_SCROLL  DB '[23] Scroll/clear region: $'
 
 ; ASCIZ-строки: печатаются ТОЛЬКО через PRINT_ASCIZ, не через AH=09h!
 TTY_STR     DB 'Hello from teletype!', 0
@@ -518,6 +521,68 @@ T20_FAIL:
     INT 21h
 T20_END:
     LEA DX, MSG_CRLF
+    MOV AH, 09h
+    INT 21h
+
+    ; [21] Курсор: установить (10,20) через AH=02, прочитать AH=03
+    LEA DX, MSG_CURSOR
+    MOV AH, 09h
+    INT 21h
+    MOV AH, 02h
+    MOV DH, 10
+    MOV DL, 20
+    MOV BH, 0
+    INT 10h
+    MOV AH, 03h
+    MOV BH, 0
+    INT 10h
+    MOV AL, DH
+    CALL PRINT_AL_HEX
+    MOV AL, DL
+    CALL PRINT_AL_HEX
+    ; вернуть курсор в конец вывода: ставим на строку 24, кол 0
+    MOV AH, 02h
+    MOV DH, 24
+    MOV DL, 0
+    INT 10h
+    LEA DX, MSG_CRLF
+    MOV AH, 09h
+    INT 21h
+
+    ; [22] AH=09: записать 'Z' с атрибутом 4Ch 5 раз, прочитать AH=08
+    LEA DX, MSG_CELL
+    MOV AH, 09h
+    INT 21h
+    MOV AH, 09h
+    MOV AL, 'Z'
+    MOV BL, 4Ch
+    MOV CX, 5
+    MOV BH, 0
+    INT 10h
+    MOV AH, 08h
+    MOV BH, 0
+    INT 10h
+    CALL PRINT_AL_HEX      ; символ 'Z' = 5A
+    ; курсор на новую строку
+    MOV AH, 02h
+    MOV DH, 24
+    MOV DL, 0
+    INT 10h
+    LEA DX, MSG_CRLF
+    MOV AH, 09h
+    INT 21h
+
+    ; [23] AH=06: очистить регион (20,0)-(24,79) атрибутом 07h
+    LEA DX, MSG_SCROLL
+    MOV AH, 09h
+    INT 21h
+    MOV AH, 06h
+    MOV AL, 0          ; 0 = очистить весь регион
+    MOV BH, 07h
+    MOV CX, 2000h      ; CH=20, CL=00
+    MOV DX, 184Fh      ; DH=24, DL=79
+    INT 10h
+    LEA DX, MSG_OK
     MOV AH, 09h
     INT 21h
 

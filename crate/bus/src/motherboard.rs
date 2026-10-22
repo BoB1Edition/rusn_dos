@@ -1,8 +1,6 @@
-// Ver: 3 File: crate/bus/src/motherboard.rs
+// Ver: 4 File: crate/bus/src/motherboard.rs
 
-use crate::peripherals::{
-    keyboard::Keyboard, pic::Pic, pit::Pit, video::VideoMemory,
-};
+use crate::peripherals::{keyboard::Keyboard, pic::Pic, pit::Pit, video::VideoMemory};
 use crate::{Machine, Memory, Peripheral};
 
 pub struct Motherboard {
@@ -65,7 +63,9 @@ impl Machine for Motherboard {
             0x60 | 0x64 => self.keyboard.port_read(port),
             0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_read(port),
             0x40..=0x43 => self.pit.port_read(port),
-            0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF | 0x3DA => self.video.port_read(port),
+            0x3C2 | 0x3C4 | 0x3C5 | 0x3C6 | 0x3C7 | 0x3C8 | 0x3C9 | 0x3CE | 0x3CF | 0x3DA => {
+                self.video.port_read(port)
+            }
             0x92 => {
                 if self.a20_enabled {
                     0x02
@@ -98,7 +98,9 @@ impl Machine for Motherboard {
             }
             0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_write(port, val),
             0x40..=0x43 => self.pit.port_write(port, val),
-            0x3C2 | 0x3C4 | 0x3C5 | 0x3CE | 0x3CF => self.video.port_write(port, val),
+            0x3C2 | 0x3C4 | 0x3C5 | 0x3C6 | 0x3C7 | 0x3C8 | 0x3C9 | 0x3CE | 0x3CF | 0x3DA => {
+                self.video.port_write(port, val)
+            }
             0x92 => {
                 self.a20_enabled = (val & 0x02) != 0;
             }

@@ -22,6 +22,8 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x01 => read_char_with_echo(sys),
         0x02 => print_char(sys),
         0x06 => direct_console_io(sys),
+        0x07 => direct_char_input_no_echo(sys),
+        0x08 => char_input_no_echo(sys),
         0x09 => print_dos_string(sys),
         0x0A => buffered_input(sys),
         0x19 => get_current_drive(sys),
@@ -75,6 +77,34 @@ fn set_dta(sys: &mut DosSystem) {
         sys.dta_segment,
         sys.dta_offset
     );
+}
+
+/// AH=07h — прямой ввод символа без эха (блокирующий, БЕЗ проверки Ctrl+Break)
+fn direct_char_input_no_echo(sys: &mut DosSystem) {
+    if let Some(key) = sys.machine.keyboard.pop_key() {
+        let ascii = (key & 0xFF) as u8;
+        sys.cpu.registers.set_al(ascii);
+    } else {
+        sys.suspend_for_key(0x21);
+    }
+}
+
+/// AH=08h — ввод символа без эха (блокирующий, С проверкой Ctrl+Break)
+fn char_input_no_echo(sys: &mut DosSystem) {
+    if let Some(key) = sys.machine.keyboard.pop_key() {
+        let ascii = (key & 0xFF) as u8;
+        if ascii == 0x03 {
+            // Ctrl+C: дёргаем INT 23h; если обработчик вернул управление —
+            // продолжаем ждать следующий символ (как настоящий DOS)
+            log::info!("INT 21h/AH=08h: Ctrl+C, raising INT 23h");
+            sys.raise_interrupt(0x23);
+            sys.suspend_for_key(0x21);
+            return;
+        }
+        sys.cpu.registers.set_al(ascii);
+    } else {
+        sys.suspend_for_key(0x21);
+    }
 }
 
 /// Обработчик прерывания INT 2Fh (мультиплексное прерывание)
@@ -158,7 +188,9 @@ fn print_dos_string(sys: &mut DosSystem) {
     let mut addr = DosSystem::phys(sys.cpu.registers.ds(), sys.cpu.registers.dx());
     loop {
         let byte = sys.machine.read_mem_u8(addr);
-        if byte == b'$' { break; }          // ✅ терминатор не пишем
+        if byte == b'$' {
+            break;
+        } // ✅ терминатор не пишем
         tty_write(sys, byte);
         addr = addr.wrapping_add(1);
     }
@@ -744,7 +776,7 @@ fn buffered_input(sys: &mut DosSystem) {
                     );
                     sys.console_input.current_count += 1;
                     if ascii >= 0x20 {
-                         tty_write(sys, ascii);
+                        tty_write(sys, ascii);
                     }
                 }
             }

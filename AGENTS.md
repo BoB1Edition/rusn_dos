@@ -11,16 +11,20 @@
 - `crate/gui` — графическое окно (minifb), клавиатура (scancode → DOS)
 - `crate/emu_config` — типы конфигурации (Resolution, MachineConfig, VideoConfig, SoundConfig, DriverConfig)
 - `src/` — точка входа (clap CLI), конфигурация (config.toml), монтирование дисков
+- максимальное избегание длинных более 300 строк файлов исходников, длинные файлы допустимы только на время беты, группировка по логике в отдельный каталогах
+- максимальное избегание god object где только можно
+- использование макросов для избегания дублирования кода приветствуется
+- переход на альфу предполагает перевод кахдого процессора\сопроцессора на свой поток, то есть видео карта - поток, аудио - отдельный поток, таймер отдельный поток....  
 
 ### Стиль кода
 
 - rustfmt с настройками по умолчанию (edition 2024)
 - `clippy` — все предупреждения должны быть устранены
-- Комментарии только где необходимо объяснить нетривиальную логику
+- Комментарии случайны
 - Все ошибки обрабатывать через `Result<T, Box<dyn Error>>` или логи
 - `todo!()` и `unreachable!()` допустимы только как заглушки на время разработки
 - Вектора с capacity: `Vec::with_capacity(n)` при известном размере
-- Для каждого файла — комментарий `// Ver: N File: <path>` в первой строке
+
 
 ### Разработка инструкций x86
 
@@ -51,20 +55,18 @@ RUST_LOG=debug cargo run Run test/simple.com
 
 ### Соглашения
 
-- DOS API (INT 21h) — все функции в `crate/dos/src/interrupts/dos.rs`, включая AH=0Ah (buffered input), AH=1Ah (Set DTA), AH=44h (IOCTL)
-- BIOS API (INT 10h/12h/15h/16h/1Ah/08h) — в `crate/dos/src/interrupts/bios.rs`
 - EMS 4.0 (INT 67h) — в `crate/dos/src/interrupts/ems.rs`
 - IVT инициализируется в `crate/dos/src/ivt.rs` (вектора с CS=0xF000 — внутренние)
 - Железо: PIC (8259), PIT (8253), клавиатура (8042), VGA — в `crate/bus/src/peripherals/`
 - Устройства DOS: `tty_write()` — пишет и в VRAM и в stdout (используется INT 21h/AH=02h,06h,09h,0Ah)
 - Механизм suspend/resume для неблокирующего ввода: `SuspendedCall` в `system.rs` (re-dispatch через `dispatch(vector)`, не stack-unwind)
-- Новый крейт добавлять в `[workspace] members` в корневом `Cargo.toml`
 
 ### Приоритетные направления
 
-1. x86 real mode — корректность опкодов и флагов (AAA, AAS, BSF, BSR)
+1. x86 real mode — корректность опкодов и флагов
 2. Загрузчики EXE/COM — полная поддержка MZ и COM
 3. DOS API — INT 21h/AH=00h-6Ch, INT 2Fh (включая AH=0Ah, 4B00h)
 4. VGA — режимы 03h, 13h, палитра, курсор (INT 10h/AH=02h)
-5. Звук — заглушки под PC Speaker, SB16
-6. Плагинная архитектура для отключаемых модулей
+5. Звук — реализация PC Speaker, SB, SB16, SB pro, UltraSound, Pro Audio Spectrum, Pro Audio Spectrum 16
+6. Поддержка nes
+6. Поддержка sega megadrive
