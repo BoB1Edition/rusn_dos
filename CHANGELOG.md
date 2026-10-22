@@ -8,10 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **VGA Input Status 1 (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing (60 Hz frame, ~1.4ms VBLANK, ~11µs HBLANK) using `retrace_epoch`. Anti-tear register — resets `attr_flip_flop` on read.
-- **VGA Attribute Controller flip-flop**: `attr_flip_flop` field in VideoMemory toggles for VGA attribute sequencing.
-- **`pump_events()` on `Display` trait**: Default no-op method; `EmuWindow` implements it to call `window.update_with_buffer` for periodic frame refreshes during suspend.
-- **`tty_write()` in bios.rs**: Unified teletype output function — writes character to video RAM via `write_tty()` AND flushes to host stdout. Replaces raw `print!`/`println!` in DOS console functions.
+- **VGA planar modes (0Dh/0Eh/10h/12h)**: `VideoMode` extended with `Mode0Dh` (320×200×16), `Mode0Eh` (640×200×16), `Mode10h` (640×350×16), `Mode12h` (640×480×16). `set_mode()` clears 4 planes on planar switch. `set_mode_u8()` handles modes 0x0D-0x12 with bit 7 mask.
+- **DAC palette (18-bit, 256 colors)**: `dac: [[u8; 3]; 256]` field with 6-bit per channel. `default_dac_palette()` — 16 standard CGA colors (6-bit), indices 16-31 mirror 0-15, 32–255 BIOS ramp. `dac_pixel_mask` (0x3C6), `dac_write_index` (0x3C8), `dac_read_index` (0x3C7), `dac_cycle`, `dac_mode_read` — full read/write via port 0x3C9 with auto-increment.
+- **VGA Sequencer registers**: `seq_index`/`seq_regs[5]` (ports 0x3C4/0x3C5). Defaults: `[0x01, 0x0F, 0x0F, 0x00, 0x02]`. Map mask (`seq_regs[2]`) used in `planar_write()`.
+- **VGA Graphics Controller registers**: `grc_index`/`grc_regs[9]` (ports 0x3CE/0x3CF). Supports read modes 0/1, write modes 0–3, bit mask, rotate, ALU function, set/reset, color compare, color don't care.
+- **Planar read/write logic**: `planar_read(offset)` loads latches from 4 planes, returns plane selected by read map. `planar_write(offset, value)` implements write modes 0-3 with map mask, bit mask, rotate, ALU ops, set/reset, and color don't care.
+- **`render_planar(w, h, palette)`**: Packs 4-bit color indices from 4 planes into RGBA pixel buffer for planar mode rendering.
+- **`scroll_window(top, left, bottom, right, lines, attr, up)`**: Scrolls/clears rectangular region of text buffer. Used by INT 10h AH=06h/07h.
+- **`write_cell_repeat(ch, attr, count)`**: Writes char+attr repeatedly from cursor position. Used by INT 10h AH=09h/0Ah.
+- **INT 10h functions (AH=01h–0Fh, 12h)**: AH=01h (cursor shape), AH=02h (set cursor position, BDA sync), AH=03h (read cursor), AH=05h (select page), AH=06h/07h (scroll up/down), AH=08h (read char+attr), AH=09h/0Ah (write char+attr), AH=0Fh (mode number), AH=12h (alternate select — stub). New helpers: `sync_cursor_bda()`, `scroll_window_int()`, `mode_number()`, `tty_write()`.
+- **INT 21h/AH=07h**: Direct character input, no echo (blocking, no Ctrl+C check).
+- **INT 21h/AH=08h**: Character input without echo (blocking, with Ctrl+C → INT 23h check).
+- **VGA DAC port I/O routing**: Ports 0x3C6–0x3C9, 0x3DA added to Motherboard `in_port()`/`out_port()` for video peripheral.
 - **Frame caching in EmuWindow**: `last_frame`/`last_size`/`last_update` keep the last rendered frame. `pump()` re-displays it on timer (every 50ms) to keep the window alive during keyboard-wait suspend.
 - **`step_frame()` — suspend re-dispatch**: When a key arrives during suspend, the original INT vector is re-dispatched instead of merely clearing the suspended flag. This allows buffered input and blocking reads to resume correctly.
 - **`step_frame()` — render at end of budget**: Dirty-check rendering moved after the instruction budget loop (instead of returning mid-budget) so the frame is painted even when no VRAM write happens in the last batch.

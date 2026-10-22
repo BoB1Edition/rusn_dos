@@ -160,10 +160,9 @@
 - **Файл:** `peripherals/pic.rs`
 - `get_next_interrupt()` не вызывается. Таймер ставит IRQ0 напрямую через `DosSystem::raise_interrupt()`, минуя PIC.
 
-### 10.3. [STUB] VGA — неполная эмуляция портов
-- **Файл:** `peripherals/video.rs`
-- Порты 0x3C4/3C5 (sequencer), 0x3CE/3CF (graphics controller), 0x3D4/3D5 (CRTC), 0x3DA (input status) — 0x3DA реализован (`input_status_1`), остальные пишутся в `log::trace`, но не обрабатываются.
-- `load_vga_palette()` — цвета 16-255: фейковые градиенты, а не реальные VGA-цвета.
+### 10.3. [FIXED] VGA — sequencer, graphics controller, DAC реализованы
+- **Статус:** Sequencer (0x3C4/3C5), graphics controller (0x3CE/3CF), DAC (0x3C6-0x3C9) полностью реализованы в commit 927706e
+- CRTC (0x3D4/0x3D5) пока не обрабатывается
 
 ### 10.4. [BUG] A20 mask — теряет верхние биты
 - **Файл:** `motherboard.rs:34-40`
@@ -181,9 +180,9 @@
 - **Файл:** `interrupts/bios.rs`
 - В режиме 13h символы не выводятся на экран, только `log::debug`. Замечание: существует `tty_write()` который пишет и в VRAM и в stdout, но он используется только консольными функциями DOS (INT 21h), а не напрямую INT 10h.
 
-### 11.2. [BUG] INT 10h / AH=02h — заглушка (установка курсора)
-- **Файл:** `interrupts/bios.rs:47-49`
-- Не сохраняет позицию курсора.
+### 11.2. [FIXED] INT 10h / AH=02h — установка курсора
+- Исправлено: `cursor_row`/`cursor_col` сохраняются, синхронизируются с BDA
+- **Статус:** Исправлено в commit 927706e
 
 ### 11.3. [BUG] INT 16h / AH=00h — использует suspend/resume, но может подвиснуть
 - **Файл:** `interrupts/bios.rs:63-68`
@@ -247,3 +246,19 @@
 ### 13.4. [STUB] VGA Input Status — нет реального VGA-тайминга
 - **Файл:** `peripherals/video.rs:59-78`
 - `input_status_1()` эмулирует retrace через wall-clock (Instant::now()), а не через счётчик пикселей/строк. Приемлемо для игр, но не для демок с точным таймингом.
+
+### 13.5. [STUB] VGA CRTC (0x3D4/0x3D5) — не реализован
+- **Файл:** `peripherals/video.rs`
+- CRTC порты 0x3D4/0x3D5 не обрабатываются (только `log::trace`). Режимы planar полагаются на CRTC-регистры для корректного отображения.
+
+### 13.6. [STUB] Планарные режимы — нет рендеринга с учетом CRTC
+- **Файл:** `peripherals/video.rs`
+- `render_planar()` выполняет базовую упаковку 4-bit цвета из 4 plane, но без учёта CRTC-регистров (START_ADDR, OFFSET). Режимы 0Eh/10h/12h могут отображаться некорректно.
+
+### 13.7. [BUG] INT 10h/AH=12h — заглушка, возвращает AL=12h
+- **Файл:** `interrupts/bios.rs`
+- Все подфункции BL=10h-34h возвращают AL=12h ("supported"), но реальной настройки не производят.
+
+### 13.8. [STUB] VGA palette — цвета 16-255 фейковые
+- **Файл:** `peripherals/video.rs:default_dac_palette()`
+- Indices 32-255 используют приблизительную формулу BIOS ramp, а не реальные VGA-цвета. Для игр и демок, устанавливающих палитру через DAC, это не проблема, но для exact palette reproduction не годится.

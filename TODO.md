@@ -34,7 +34,8 @@
 - `[x]` INT 21h / AH=06h — DL=0xFF проверяет буфер клавиатуры
 - `[x]` INT 10h / AH=0Eh — пишет в видеопамять через write_tty() (текстовый режим)
 - `[x]` INT 10h / AH=00h — был сломан копипастой (читал клавиатуру вместо установки режима), исправлено
-- `[!]` INT 10h / AH=02h — установка позиции курсора — заглушка
+- `[x]` INT 10h / AH=02h — установка позиции курсора
+- `[x]` INT 10h / AH=01h — установка формы курсора
 - `[x]` INT 16h / AH=00h — использует suspend_for_key (ожидание клавиши)
 - `[x]` FindFirst/FindNext — DTA настраивается через AH=1Ah
 - `[x]` INT 21h / AH=1Ah — Set DTA реализован
@@ -46,6 +47,8 @@
 - `[x]` INT 21h / AH=0Ah — buffered input (с suspend/resume)
 - `[x]` INT 21h / AH=02h, AH=06h, AH=09h, AH=0Ah — вывод через tty_write() в VRAM + stdout
 - `[x]` INT 21h / AH=3Fh — чтение из CON (handle=0) через клавиатурный буфер
+- `[x]` INT 21h / AH=07h — direct char input, no echo (blocking, no Ctrl+C)
+- `[x]` INT 21h / AH=08h — char input, no echo (blocking, with Ctrl+C → INT 23h)
 - `[ ]` INT 21h / AH=2Ah — get system date
 - `[ ]` INT 21h / AH=2Ch — get system time
 - `[ ]` INT 21h / AH=39h — MKDIR
@@ -70,11 +73,11 @@
 - `[x]` Mode 13h (320×200×8) — OK
 - `[x]` VGA Input Status 1 (порт 0x3DA) — эмуляция retrace тайминга
 - `[x]` Attribute Controller flip-flop — сброс при чтении 0x3DA
-- `[ ]` VGA CRTC — полная эмуляция портов 0x3D4/0x3D5
-- `[ ]` VGA DAC — полная 18-bit палитра (256 цветов)
-- `[ ]` VGA sequencer — порты 0x3C4/0x3C5
-- `[ ]` VGA graphics controller — порты 0x3CE/0x3CF
-- `[ ]` Режимы 12h (640×480×16), 10h (640×350×16)
+- `[x]` VGA CRTC — полная эмуляция портов 0x3D4/0x3D5
+- `[x]` VGA DAC — полная 18-bit палитра (256 цветов)
+- `[x]` VGA sequencer — порты 0x3C4/0x3C5
+- `[x]` VGA graphics controller — порты 0x3CE/0x3CF
+- `[x]` Режимы 12h (640×480×16), 10h (640×350×16)
 - `[ ]` CGA/EGA backwards compatibility
 - `[ ]` SVGA (VBE) — VESA BIOS Extensions 2.0+
 - `[ ]` Оконный GUI-масштабатор с фильтрами (CRT-шаблоны, xBRZ, scale2x)

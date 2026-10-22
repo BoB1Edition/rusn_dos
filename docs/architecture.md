@@ -32,7 +32,7 @@ Defines abstract interfaces and concrete motherboard peripherals.
 | `peripheral.rs` | `Peripheral` trait — `port_read/write`, `mem_read/write`, `tick` |
 | `display.rs` | `Display` trait — window, key polling, pixel buffer |
 | `motherboard.rs` | `Motherboard` — `Memory` + `Keyboard` + `VideoMemory` + `Pic` + `Pit`, implements `Machine` |
-| `peripherals/` | `pic.rs` (8259), `pit.rs` (8253), `keyboard.rs` (8042), `video.rs` (VGA), `fonts_vga8x16.rs` |
+| `peripherals/` | `pic.rs` (8259), `pit.rs` (8253), `keyboard.rs` (8042), `video.rs` (VGA — text/planar/mode13h, DAC, sequencer, graphics controller), `fonts_vga8x16.rs` |
 
 **Trait `Machine`** — the system bus that CPU uses to access memory, I/O ports, and interrupts:
 
@@ -182,16 +182,27 @@ step_frame(display):
 
 ### VideoMemory (`crate/bus/src/peripherals/video.rs`)
 
-Supports two modes:
-- **Text80x25** — VGA 80×25 text mode with 8×16 font. Cursor tracked via `cursor_row`/`cursor_col`. Teletype output via `write_tty()` handles backspace (0x08), line feed (0x0A), carriage return (0x0D), and scrolling via `scroll_up()`.
+Supports five video modes:
+- **Text80x25** — VGA 80×25 text mode with 8×16 font. Cursor tracked via `cursor_row`/`cursor_col`. Teletype output via `write_tty()` handles backspace (0x08), line feed (0x0A), carriage return (0x0D), and scrolling via `scroll_up()`. `scroll_window()` scrolls or clears rectangular regions (INT 10h AH=06h/07h).
 - **Mode13h** — 320×200×8 VGA graphics mode. Framebuffer at 0xA0000.
-- **VGA Input Status (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing using `retrace_epoch` (wall-clock). Resets `attr_flip_flop` on read (anti-tear).
-- **TEXT_BASE checking**: MMIO reads/writes validate offset against B8000 base (0x18000) to prevent out-of-bounds access.
+- **Mode0Dh** — 320×200×16 planar VGA (4 bitplanes)
+- **Mode0Eh** — 640×200×16 planar VGA
+- **Mode10h** — 640×350×16 planar VGA
+- **Mode12h** — 640×480×16 planar VGA
+
+**VGA DAC Palette**: Full 18-bit palette (`dac: [[u8; 3]; 256]`, 6-bit per channel). Default palette has 16 CGA colors, indices 16–31 mirror 0–15, indices 32–255 approximate BIOS ramp. Ports 0x3C6 (pixel mask), 0x3C7 (read index), 0x3C8 (write index), 0x3C9 (DAC data with auto-increment).
+
+**VGA Sequencer (0x3C4/0x3C5)**: `seq_regs[5]` with defaults `[0x01, 0x0F, 0x0F, 0x00, 0x02]`. Map mask used for planar write enable.
+
+**VGA Graphics Controller (0x3CE/0x3CF)**: `grc_regs[9]` — supports read modes 0/1, write modes 0–3, bit mask, rotate/ALU function, set/reset, and color compare/don't care. `planar_read()` and `planar_write()` implement the full VGA planar memory access logic.
+
+**VGA Input Status (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing using `retrace_epoch` (wall-clock). Resets `attr_flip_flop` on read (anti-tear).
 
 Rendering pipeline:
-1. Text mode: `render_text_to_pixels()` — renders 640×400 using VGA font + color attributes
-2. Graphics: `upscale_framebuffer()` — 6× nearest-neighbor to 1920×1200
-3. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor)
+1. Text mode: `render_text_to_pixels()` — renders 640×400 using VGA font + color attributes (DAC palette)
+2. Planar modes: `render_planar()` — packs 4-bit color from 4 planes into RGBA buffer
+3. Graphics mode 13h: `upscale_framebuffer()` — 6× nearest-neighbor to 1920×1200
+4. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor)
 
 ### File System (`crate/dos/src/filesystem.rs`)
 

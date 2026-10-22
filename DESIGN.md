@@ -90,7 +90,9 @@ instruction_bytes — сбор байтов для трассировки
 ```
 Memory            — RAM (boxed-slice)
 Keyboard          — 8042 + BIOS buffer (VecDeque<u16>)
-VideoMemory       — Text80x25 / Mode13h, cursor (row/col), dirty flag, retrace_epoch, attr_flip_flop
+VideoMemory       — Text80x25 / Mode13h / Mode0Dh-12h (planar), cursor (row/col), dirty flag,
+                    retrace_epoch, attr_flip_flop, dac[256][3], seq_regs[5], grc_regs[9], latches[4],
+                    dac_pixel_mask, dac_write/read_index, cursor_start/end
 Pic               — 8259 (master + slave masks)
 Pit               — 8253 (3 channels, wall-clock stub)
 a20_gate          — enabled/disabled + command pending
@@ -122,6 +124,6 @@ search_contexts: HashMap<u32, SearchContext>  — DTA → поиск
 2. **Feature flags**: аудио, сеть, диски как опциональные модули
 3. **Защищённый режим**: полноценная эмуляция сегментации, paging, DPMI
 4. **INT 4B00h (EXEC)**: загрузка дочерних процессов
-5. **VGA CRTC/DAC/SVGA**: полная эмуляция VGA-регистров
+5. **VGA SVGA**: VESA BIOS Extensions 2.0+
 6. **CPU speed control**: cycle-accurate PIT и синхронизация
 7. **Отладчик**: встроенный отладчик с брейкпоинтами

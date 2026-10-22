@@ -66,7 +66,7 @@ RUST_LOG=debug cargo run Run test/simple.com
 1. x86 real mode — корректность опкодов и флагов
 2. Загрузчики EXE/COM — полная поддержка MZ и COM
 3. DOS API — INT 21h/AH=00h-6Ch, INT 2Fh (включая AH=0Ah, 4B00h)
-4. VGA — режимы 03h, 13h, палитра, курсор (INT 10h/AH=02h)
+4. VGA — планарные режимы (0Dh/0Eh/10h/12h), DAC 18-bit палитра, sequencer/graphics controller, INT 10h (AH=00h–0Fh, 12h), курсор
 5. Звук — реализация PC Speaker, SB, SB16, SB pro, UltraSound, Pro Audio Spectrum, Pro Audio Spectrum 16
 6. Поддержка nes
 6. Поддержка sega megadrive
