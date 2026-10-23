@@ -162,7 +162,8 @@
 
 ### 10.3. [FIXED] VGA — sequencer, graphics controller, DAC реализованы
 - **Статус:** Sequencer (0x3C4/3C5), graphics controller (0x3CE/3CF), DAC (0x3C6-0x3C9) полностью реализованы в commit 927706e
-- CRTC (0x3D4/0x3D5) пока не обрабатывается
+- CRTC (0x3D4/0x3D5) реализован в текущей версии
+- Attribute Controller (0x3C0/0x3C1) реализован в текущей версии
 
 ### 10.4. [BUG] A20 mask — теряет верхние биты
 - **Файл:** `motherboard.rs:34-40`
@@ -247,18 +248,23 @@
 - **Файл:** `peripherals/video.rs:59-78`
 - `input_status_1()` эмулирует retrace через wall-clock (Instant::now()), а не через счётчик пикселей/строк. Приемлемо для игр, но не для демок с точным таймингом.
 
-### 13.5. [STUB] VGA CRTC (0x3D4/0x3D5) — не реализован
+### 13.5. [FIXED] VGA CRTC (0x3D4/0x3D5) — реализован
 - **Файл:** `peripherals/video.rs`
-- CRTC порты 0x3D4/0x3D5 не обрабатываются (только `log::trace`). Режимы planar полагаются на CRTC-регистры для корректного отображения.
+- CRTC порты 0x3D4/0x3D5 полностью обрабатываются: `crtc_index`, `crtc_regs[0x19]`, cursor address/start, start address, offset.
+- **Статус:** Исправлено в текущей версии.
 
-### 13.6. [STUB] Планарные режимы — нет рендеринга с учетом CRTC
+### 13.6. [~] Планарные режимы — рендеринг с учётом CRTC реализован
 - **Файл:** `peripherals/video.rs`
-- `render_planar()` выполняет базовую упаковку 4-bit цвета из 4 plane, но без учёта CRTC-регистров (START_ADDR, OFFSET). Режимы 0Eh/10h/12h могут отображаться некорректно.
+- `render_planar()` теперь использует `start_address()` и `offset_bytes()` из CRTC для корректного отображения в режимах 0Eh/10h/12h. Адресация страниц через бит 16 из CRTC reg[0x07].
 
-### 13.7. [BUG] INT 10h/AH=12h — заглушка, возвращает AL=12h
+### 13.7. [FIXED] INT 10h/AH=12h — реализована поддержка BL=10h
 - **Файл:** `interrupts/bios.rs`
-- Все подфункции BL=10h-34h возвращают AL=12h ("supported"), но реальной настройки не производят.
+- Подфункции BL=10h возвращают корректную информацию о конфигурации видео. Остальные подфункции BL=10h-34h возвращают AL=12h.
 
 ### 13.8. [STUB] VGA palette — цвета 16-255 фейковые
 - **Файл:** `peripherals/video.rs:default_dac_palette()`
 - Indices 32-255 используют приблизительную формулу BIOS ramp, а не реальные VGA-цвета. Для игр и демок, устанавливающих палитру через DAC, это не проблема, но для exact palette reproduction не годится.
+
+### 13.9. [FIXED] VGA Attribute Controller (0x3C0/0x3C1) — реализован
+- **Файл:** `peripherals/video.rs`
+- `ac_index`, `ac_regs[0x15]`, flip-flop чередование индекс/данные, mode-dependent defaults, `ac_dac_index()`, `ac_dac_index_graphics()`, `plane_enable()`, `blink_enabled()`. Чтение порта 0x3DA сбрасывает flip-flop.

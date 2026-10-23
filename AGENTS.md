@@ -29,6 +29,7 @@
 ### Разработка инструкций x86
 
 - Каждая группа инструкций в отдельном файле `crate/x86/src/instructions/`
+- Крупные файлы инструкций разбиваются на подкаталоги: `alu/` → `core.rs`, `util.rs`, `eval.rs`, `inst.rs`, `bcd.rs`, `incdec.rs`, `group.rs`, `mod.rs`; `mov/` → `rm.rs`, `imm.rs`, `str_ops.rs`, `mod.rs`.
 - ModRM разбирается через `ModRm::from_byte()` + `resolve_address()` / `resolve_offset()`
 - Префиксы 0x66/0x67 обрабатываются через `cpu.prefixes.has_operand_size / has_address_size`
 - Флаги: `compute_flags_u8/16/32()` для арифметики, `compute_logical_flags_*()` для логики

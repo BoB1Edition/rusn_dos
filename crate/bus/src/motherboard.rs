@@ -1,4 +1,4 @@
-// Ver: 4 File: crate/bus/src/motherboard.rs
+// Ver: 9 File: crate/bus/src/motherboard.rs
 
 use crate::peripherals::{keyboard::Keyboard, pic::Pic, pit::Pit, video::VideoMemory};
 use crate::{Machine, Memory, Peripheral};
@@ -30,7 +30,7 @@ impl Motherboard {
 
     #[inline(always)]
     fn apply_a20_mask(&self, addr: u32) -> u32 {
-        if !self.a20_enabled {
+        if !self.a20_enabled && addr < 0x11_0000 {
             addr & 0xFFFFF
         } else {
             addr
@@ -45,6 +45,21 @@ impl Machine for Motherboard {
             let offset = masked - 0xA0000;
             return self.video.read_mmio(offset);
         }
+        // ✅ VBE ROM (OEM-строка, список режимов)
+        if masked >= VideoMemory::VBE_ROM_BASE
+            && masked < VideoMemory::VBE_ROM_BASE + VideoMemory::VBE_ROM_SIZE as u32
+        {
+            let off = (masked - VideoMemory::VBE_ROM_BASE) as usize;
+            return self.video.vbe_rom[off];
+        }
+        // ✅ ВЕРНУТЬ: VBE Linear Frame Buffer
+        if masked >= VideoMemory::VBE_LFB_BASE
+            && masked < VideoMemory::VBE_LFB_BASE + VideoMemory::VBE_LFB_SIZE as u32
+        {
+            return self
+                .video
+                .read_lfb((masked - VideoMemory::VBE_LFB_BASE) as usize);
+        }
         self.memory.read_u8(masked)
     }
 
@@ -55,6 +70,22 @@ impl Machine for Motherboard {
             self.video.write_mmio(offset, val);
             return;
         }
+        // ✅ ФАЗА 7: VBE LFB
+        if masked >= VideoMemory::VBE_ROM_BASE
+            && masked < VideoMemory::VBE_ROM_BASE + VideoMemory::VBE_ROM_SIZE as u32
+        {
+            let off = (masked - VideoMemory::VBE_ROM_BASE) as usize;
+            self.video.vbe_rom[off] = val;
+            return; // write
+        }
+        if masked >= VideoMemory::VBE_LFB_BASE
+            && masked < VideoMemory::VBE_LFB_BASE + VideoMemory::VBE_LFB_SIZE as u32
+        {
+            let off = (masked - VideoMemory::VBE_LFB_BASE) as usize;
+            return self
+                .video
+                .write_lfb(off, val);
+        }
         self.memory.write_u8(masked, val);
     }
 
@@ -63,9 +94,8 @@ impl Machine for Motherboard {
             0x60 | 0x64 => self.keyboard.port_read(port),
             0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_read(port),
             0x40..=0x43 => self.pit.port_read(port),
-            0x3C2 | 0x3C4 | 0x3C5 | 0x3C6 | 0x3C7 | 0x3C8 | 0x3C9 | 0x3CE | 0x3CF | 0x3DA => {
-                self.video.port_read(port)
-            }
+            0x3C0 | 0x3C1 | 0x3C2 | 0x3C4 | 0x3C5 | 0x3C6 | 0x3C7 | 0x3C8 | 0x3C9 | 0x3CE
+            | 0x3CF | 0x3DA | 0x3D4 | 0x3D5 => self.video.port_read(port),
             0x92 => {
                 if self.a20_enabled {
                     0x02
@@ -98,9 +128,8 @@ impl Machine for Motherboard {
             }
             0x20 | 0x21 | 0xA0 | 0xA1 => self.pic.port_write(port, val),
             0x40..=0x43 => self.pit.port_write(port, val),
-            0x3C2 | 0x3C4 | 0x3C5 | 0x3C6 | 0x3C7 | 0x3C8 | 0x3C9 | 0x3CE | 0x3CF | 0x3DA => {
-                self.video.port_write(port, val)
-            }
+            0x3C0 | 0x3C1 | 0x3C2 | 0x3C4 | 0x3C5 | 0x3C6 | 0x3C7 | 0x3C8 | 0x3C9 | 0x3CE
+            | 0x3CF | 0x3DA | 0x3D4 | 0x3D5 => self.video.port_write(port, val),
             0x92 => {
                 self.a20_enabled = (val & 0x02) != 0;
             }

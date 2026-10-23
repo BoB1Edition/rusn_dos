@@ -9,7 +9,8 @@
 - Префиксы (0x66 operand size, 0x67 address size, 0xF2/F3 REP, 0xF0 LOCK, segment overrides)
 - Вычисление флагов (CF, PF, AF, ZF, SF, OF) для арифметических, логических и сдвиговых операций
 - Двухбайтовые опкоды 0x0F
-- Планарные видео-режимы VGA (sequencer, graphics controller, DAC палитра)
+- Планарные видео-режимы VGA (sequencer, graphics controller, CRTC, attribute controller, DAC палитра)
+- Разбивка крупных файлов инструкций на подкаталоги с модулями (`alu/`, `mov/`)
 
 ### 2. Разработка DOS API
 

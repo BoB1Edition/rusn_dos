@@ -63,7 +63,7 @@ Full 80386+ real-mode CPU implementation (partial protected mode).
 | `modrm.rs` | ModRM decoder with 16/32-bit addressing, SIB, segment defaults |
 | `executor.rs` | `execute(opcode)` and `execute_0f(opcode)` dispatch (single-byte + 0F prefix) |
 | `tracer.rs` | Instruction logging via `Tracer` trait — `FileTracer` + `NullTracer` |
-| `instructions/` | 10 instruction category modules: alu, bit, control, exchange, group, mov, shift, stack, system |
+| `instructions/` | 10 instruction category modules (alu/ subdir, mov/ subdir, bit, shift, control, exchange, group, stack, system) |
 
 ### `dos` — DOS Layer
 
@@ -196,13 +196,17 @@ Supports five video modes:
 
 **VGA Graphics Controller (0x3CE/0x3CF)**: `grc_regs[9]` — supports read modes 0/1, write modes 0–3, bit mask, rotate/ALU function, set/reset, and color compare/don't care. `planar_read()` and `planar_write()` implement the full VGA planar memory access logic.
 
+**VGA CRTC (0x3D4/0x3D5)**: `crtc_regs[0x19]` — start address (0x0C/0x0D), cursor address (0x0E/0x0F), offset (0x13), cursor scanlines (0x0A/0x0B). Methods: `start_address()`, `offset_bytes()`, `cursor_address()`, `cursor_enabled()`, `set_cursor_cell()`, `sync_cursor_from_crtc()`. BIOS cursor position is synced to CRTC cursor registers.
+
+**VGA Attribute Controller (0x3C0/0x3C1)**: `ac_regs[0x15]` with flip-flop index/data register. Mode-dependent defaults. `ac_dac_index()` and `ac_dac_index_graphics()` map 4-bit color indices through palette + color select. `plane_enable()` (reg 0x12), `blink_enabled()` (reg 0x10 bit 3).
+
 **VGA Input Status (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing using `retrace_epoch` (wall-clock). Resets `attr_flip_flop` on read (anti-tear).
 
 Rendering pipeline:
-1. Text mode: `render_text_to_pixels()` — renders 640×400 using VGA font + color attributes (DAC palette)
-2. Planar modes: `render_planar()` — packs 4-bit color from 4 planes into RGBA buffer
-3. Graphics mode 13h: `upscale_framebuffer()` — 6× nearest-neighbor to 1920×1200
-4. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor)
+1. Text mode: `VideoMemory::render_text()` — renders 640×400 using CRTC start address, line offset, cursor position/scanline, attribute controller DAC mapping, and blinking.
+2. Planar modes: `VideoMemory::render_planar()` — packs 4-bit color from 4 planes into RGBA buffer using CRTC start address and offset.
+3. Graphics mode 13h: `VideoMemory::render_mode13()` — 6× nearest-neighbor to 1920×1200 using CRTC start address and offset.
+4. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor).
 
 ### File System (`crate/dos/src/filesystem.rs`)
 

@@ -91,8 +91,9 @@ instruction_bytes — сбор байтов для трассировки
 Memory            — RAM (boxed-slice)
 Keyboard          — 8042 + BIOS buffer (VecDeque<u16>)
 VideoMemory       — Text80x25 / Mode13h / Mode0Dh-12h (planar), cursor (row/col), dirty flag,
-                    retrace_epoch, attr_flip_flop, dac[256][3], seq_regs[5], grc_regs[9], latches[4],
-                    dac_pixel_mask, dac_write/read_index, cursor_start/end
+                    retrace_epoch, attr_flip_flop, dac[256][3], seq_regs[5], grc_regs[9],
+                    crtc_regs[0x19], ac_regs[0x15], latches[4], dac_pixel_mask,
+                    dac_write/read_index
 Pic               — 8259 (master + slave masks)
 Pit               — 8253 (3 channels, wall-clock stub)
 a20_gate          — enabled/disabled + command pending

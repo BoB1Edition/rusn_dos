@@ -30,10 +30,12 @@ START:
 ; ДАННЫЕ
 ; ============================================================
 MSG_TITLE   DB '=== EMULATOR TEST SUITE v1.1 ===', 0Dh, 0Ah, '$'
+MSG_PAUSE   DB 'Press any key to exit...', 0Dh, 0Ah, '$'
 MSG_CRLF    DB 0Dh, 0Ah, '$'
 MSG_OK      DB 'OK', 0Dh, 0Ah, '$'
+MSG_AC      DB '[26] AttrCtrl reg1->DAC4 (ожид. 04, красный A): $'
 MSG_FAIL    DB 'FAIL', 0Dh, 0Ah, '$'
-
+MSG_MODE12  DB '[24] Mode 12h planar - press key...$', 0Dh, 0Ah, '$'
 MSG_DOSVER  DB '[1] DOS Version: $'
 MSG_MEMORY  DB '[2] Memory (INT 12h): $'
 MSG_KB      DB ' KB$'
@@ -68,6 +70,12 @@ MSG_DONE    DB 0Dh, 0Ah, '=== ALL TESTS COMPLETE ===', 0Dh, 0Ah, '$'
 MSG_CURSOR  DB '[21] Cursor set/get (ожид. 0A14): $'
 MSG_CELL    DB '[22] Cell write/read (ожид. 5A): $'
 MSG_SCROLL  DB '[23] Scroll/clear region: $'
+MSG_PAGE    DB '[25] CRTC page flip - press key...$', 0Dh, 0Ah, '$'
+PAGE2_STR   DB 'PAGE2', 0
+MSG_VBE       DB 0Dh,0Ah,'[27] VBE 640x480x256: press any key...$',0Dh,0Ah
+MSG_VBE_FAIL  DB 'VBE set mode failed!',0Dh,0Ah,'$'
+VBE_INFO      EQU $ - 256
+VBE_BUF       DB 256 DUP(0)       ; зарезервируй 256 байт где-нибудь в .data (например DB 256 DUP(0))
 
 ; ASCIZ-строки: печатаются ТОЛЬКО через PRINT_ASCIZ, не через AH=09h!
 TTY_STR     DB 'Hello from teletype!', 0
@@ -586,10 +594,195 @@ T20_END:
     MOV AH, 09h
     INT 21h
 
+        ; [24] Mode 12h: планарная запись через Set/Reset (цвет 4 = красный)
+    LEA DX, MSG_MODE12
+    MOV AH, 09h
+    INT 21h
+    MOV AH, 00h
+    MOV AL, 12h
+    INT 10h
+    ; GRC reg 1 (Enable Set/Reset) = 0x0F
+    MOV DX, 03CEh
+    MOV AL, 01h
+    OUT DX, AL
+    MOV DX, 03CFh
+    MOV AL, 0Fh
+    OUT DX, AL
+    ; GRC reg 0 (Set/Reset) = 0x04 (красный)
+    MOV DX, 03CEh
+    MOV AL, 00h
+    OUT DX, AL
+    MOV DX, 03CFh
+    MOV AL, 04h
+    OUT DX, AL
+    ; Блок 80 строк x 160 пикселей: y=100..179, байты 10..29
+    MOV AX, 0A000h
+    MOV ES, AX
+    MOV DI, 100 * 80 + 10
+    MOV CX, 80
+T24_ROW:
+    PUSH CX
+    MOV CX, 20
+    MOV AL, 00h          ; значение не важно: цвет даёт Set/Reset
+    REP STOSB
+    ADD DI, 60           ; до начала следующей строки (80-20)
+    POP CX
+    LOOP T24_ROW
+    MOV AH, 00h
+    INT 16h              ; ждём клавишу
+    MOV AH, 00h
+    MOV AL, 03h
+    INT 10h
+
+        ; [25] CRTC Start Address: пишем "PAGE2" в страницу B800:1000 и флипаем
+    LEA DX, MSG_PAGE
+    MOV AH, 09h
+    INT 21h
+    MOV AX, 0B800h
+    MOV ES, AX
+    MOV DI, 1000h
+    LEA SI, PAGE2_STR
+T25_LOOP:
+    LODSB
+    OR AL, AL
+    JZ T25_SET
+    MOV AH, 0Ah          ; атрибут: светло-зелёный на чёрном
+    STOSW
+    JMP T25_LOOP
+T25_SET:
+    MOV DX, 03D4h        ; индекс 0x0C = Start Address High
+    MOV AL, 0Ch
+    OUT DX, AL
+    MOV DX, 03D5h
+    MOV AL, 10h          ; 0x1000 байт
+    OUT DX, AL
+    MOV DX, 03D4h        ; индекс 0x0D = Start Address Low
+    MOV AL, 0Dh
+    OUT DX, AL
+    MOV DX, 03D5h
+    XOR AL, AL
+    OUT DX, AL
+    MOV AH, 00h          ; ждём клавишу: на экране должна быть страница 2
+    INT 16h
+    ; возврат на страницу 0
+    MOV DX, 03D4h
+    MOV AL, 0Ch
+    OUT DX, AL
+    MOV DX, 03D5h
+    XOR AL, AL
+    OUT DX, AL
+    LEA DX, MSG_OK
+    MOV AH, 09h
+    INT 21h
+
+        ; [26] Attribute Controller: палитровый регистр 1 -> DAC 4 (красный)
+    LEA DX, MSG_AC
+    MOV AH, 09h
+    INT 21h
+    MOV DX, 03DAh
+    IN  AL, DX          ; сброс flip-flop: следующая запись 3C0 = индекс
+    MOV DX, 03C0h
+    MOV AL, 01h
+    OUT DX, AL          ; индекс = палитровый регистр 1
+    MOV AL, 04h
+    OUT DX, AL          ; данные = DAC 4 (красный)
+    ; символ с атрибутом 0x01 должен стать красным
+    MOV AH, 09h
+    MOV AL, 'A'
+    MOV BL, 01h
+    MOV CX, 1
+    MOV BH, 0
+    INT 10h
+    ; read-back регистра через 0x3C1
+    MOV DX, 03DAh
+    IN  AL, DX
+    MOV DX, 03C0h
+    MOV AL, 01h
+    OUT DX, AL
+    MOV DX, 03C1h
+    IN  AL, DX          ; ожидаем 04
+    CALL PRINT_AL_HEX
+    ; восстановим регистр 1 = 01h
+    MOV DX, 03DAh
+    IN  AL, DX
+    MOV DX, 03C0h
+    MOV AL, 01h
+    OUT DX, AL
+    MOV AL, 01h
+    OUT DX, AL
+    MOV AH, 02h         ; курсор на новую строку
+    MOV DH, 24
+    MOV DL, 0
+    INT 10h
+    LEA DX, MSG_CRLF
+    MOV AH, 09h
+    INT 21h
+
+        ; [27] VBE 640x480x256 windowed: 5 цветных полос через bank switching
+    LEA DX, MSG_VBE
+    MOV AH, 09h
+    INT 21h
+    MOV AX, 4F00h
+    PUSH DS
+    POP ES
+    LEA DI, VBE_BUF
+    INT 10h
+    CMP AX, 004Fh
+    JNE T27_FAIL
+    CMP WORD PTR ES:[DI], 4556h     ; 'V','E'
+    JNE T27_FAIL
+    CMP WORD PTR ES:[DI+2], 4153h   ; 'S','A'
+    JNE T27_FAIL
+    MOV AX, 4F02h
+    MOV BX, 0101h                   ; windowed
+    INT 10h
+    CMP AX, 004Fh
+    JNE T27_FAIL
+    XOR BP, BP                      ; BP = номер банка 0..4
+T27_BANK:
+    MOV AX, 4F05h                   ; set bank BX
+    MOV BX, BP
+    INT 10h
+    MOV AX, 0A000h
+    MOV ES, AX
+    XOR DI, DI
+    MOV AX, BP
+    ADD AL, 1                       ; цвет = банк+1
+    MOV CX, 8000h                   ; ✅ 32768 байт
+    REP STOSB
+    MOV CX, 8000h                   ; ✅ ещё 32768 => весь банк 64 КБ
+    REP STOSB
+    INC BP
+    CMP BP, 5
+    JL T27_BANK
+    ; read-back: банк 2, первый байт должен быть 03
+    MOV AX, 4F05h
+    MOV BX, 2
+    INT 10h
+    MOV AX, 0A000h
+    MOV ES, AX
+    MOV AL, ES:[0]
+    CALL PRINT_AL_HEX               ; ожид. 03
+    MOV AH, 00h                     ; смотрим картинку
+    INT 16h
+    MOV AX, 0003h
+    INT 10h
+    JMP T27_DONE
+T27_FAIL:
+    LEA DX, MSG_VBE_FAIL
+    MOV AH, 09h
+    INT 21h
+T27_DONE:
+
     ; Финиш ----------------------------------------------------
     LEA DX, MSG_DONE
     MOV AH, 09h
     INT 21h
+    LEA DX, MSG_PAUSE        ; ✅ НОВОЕ: ждём клавишу перед выходом
+    MOV AH, 09h
+    INT 21h
+    MOV AH, 00h
+    INT 16h
     MOV AH, 4Ch
     INT 21h
 

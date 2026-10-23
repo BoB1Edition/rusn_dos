@@ -1,4 +1,4 @@
-// Ver: 14 File: crate/bus/src/peripherals/video.rs
+// Ver: 21 File: crate/bus/src/peripherals/video.rs
 
 use std::cell::Cell;
 
@@ -31,7 +31,6 @@ impl VideoMode {
 #[derive(Debug)]
 pub struct VideoMemory {
     pub mode: VideoMode,
-    pub text_buffer: [u16; 80 * 25],
     pub frame_buffer: [u8; 320 * 200],
     pub dirty: bool,
     pub cursor_row: u8,
@@ -44,14 +43,87 @@ pub struct VideoMemory {
     dac_read_index: u8,
     dac_cycle: u8,
     dac_mode_read: bool,
-    pub cursor_start: u8,
-    pub cursor_end: u8,
     pub planes: Box<[[u8; 0x10000]; 4]>,
     pub seq_index: u8,
     pub seq_regs: [u8; 5],
     pub grc_index: u8,
     pub grc_regs: [u8; 9],
     latches: Cell<[u8; 4]>,
+    pub crtc_index: u8,
+    pub crtc_regs: [u8; 0x19],
+    pub text_buffer: Box<[u16; 0x4000]>,
+    pub ac_index: u8,
+    pub ac_regs: [u8; 0x15],
+    pub vbe_mode: Option<VbeMode>,
+    pub vbe_lfb: Box<[u8; Self::VBE_LFB_SIZE]>,
+    pub vbe_rom: Box<[u8; 0x200]>,
+    pub vbe_bank: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VbeMode {
+    Mode101_640x480x256,
+    Mode103_800x600x256,
+    Mode105_1024x768x256,
+    Mode112_640x480x24bit,
+}
+
+impl VbeMode {
+    pub fn from_number(n: u16) -> Option<Self> {
+        match n {
+            0x101 => Some(Self::Mode101_640x480x256),
+            0x103 => Some(Self::Mode103_800x600x256),
+            0x105 => Some(Self::Mode105_1024x768x256),
+            0x112 => Some(Self::Mode112_640x480x24bit),
+            _ => None,
+        }
+    }
+    pub fn number(&self) -> u16 {
+        match self {
+            Self::Mode101_640x480x256 => 0x101,
+            Self::Mode103_800x600x256 => 0x103,
+            Self::Mode105_1024x768x256 => 0x105,
+            Self::Mode112_640x480x24bit => 0x112,
+        }
+    }
+    pub fn dims(&self) -> (usize, usize) {
+        match self {
+            Self::Mode101_640x480x256 | Self::Mode112_640x480x24bit => (640, 480),
+            Self::Mode103_800x600x256 => (800, 600),
+            Self::Mode105_1024x768x256 => (1024, 768),
+        }
+    }
+    pub fn bpp(&self) -> u8 {
+        match self {
+            Self::Mode101_640x480x256 | Self::Mode103_800x600x256 | Self::Mode105_1024x768x256 => 8,
+            Self::Mode112_640x480x24bit => 24,
+        }
+    }
+    pub fn bytes_per_line(&self) -> usize {
+        let (w, _) = self.dims();
+        w * (self.bpp() as usize / 8)
+    }
+    pub fn is_direct_color(&self) -> bool {
+        let b = matches!(self, Self::Mode112_640x480x24bit);
+        b
+    }
+}
+
+fn ac_defaults(mode: VideoMode) -> [u8; 0x15] {
+    let mut r = [0u8; 0x15];
+    for i in 0..16 {
+        r[i] = i as u8; // identity, как грузит BIOS
+    }
+    r[0x10] = match mode {
+        VideoMode::Text80x25 => 0x0C, // текст, blink включён (как реальный BIOS)
+        VideoMode::Mode13h => 0x41,   // 256 цветов
+        _ => 0x01,                    // 16-цветная графика
+    };
+    r[0x11] = 0x00; // overscan
+    r[0x12] = 0x0F; // все плоскости включены
+    r[0x13] = 0x00; // panning
+    r[0x14] = 0x00; // color select
+    r
 }
 
 pub fn default_dac_palette() -> [[u8; 3]; 256] {
@@ -76,10 +148,9 @@ pub fn default_dac_palette() -> [[u8; 3]; 256] {
     let mut p = [[0u8; 3]; 256];
     p[..16].copy_from_slice(&STD);
     for i in 16..32 {
-        p[i] = STD[i - 16]; // 16..31 — зеркало 0..15, как грузит BIOS
+        p[i] = STD[i - 16];
     }
     for i in 32..256 {
-        // аппроксимация BIOS-рампы для остальных индексов
         p[i] = [
             ((i * 7) % 64) as u8,
             ((i * 5) % 64) as u8,
@@ -95,10 +166,18 @@ fn six_to_eight(v: u8) -> u8 {
 }
 
 impl VideoMemory {
+    pub const VBE_ROM_BASE: u32 = 0xFE000;
+    pub const VBE_ROM_SIZE: usize = 0x200;
+    pub const VBE_OEM_PTR: u32 = (0xF000 << 16) | 0xE000; // far pointer в блок
+    pub const VBE_MODE_LIST_PTR: u32 = (0xF000 << 16) | 0xE100;
+    pub const VBE_OEM_STRING: &[u8] = b"RustDOS VBE 2.0\0";
+    pub const VBE_MODE_LIST: [u16; 5] = [0x101, 0x103, 0x105, 0x112, 0xFFFF];
     pub fn new() -> Self {
-        Self {
+        let mut v = Self {
             mode: VideoMode::Text80x25,
-            text_buffer: [0x0720; 80 * 25],
+            text_buffer: Box::new([0x0720; 0x4000]),
+            crtc_index: 0,
+            crtc_regs: [0u8; 0x19],
             frame_buffer: [0u8; 320 * 200],
             dirty: false,
             cursor_row: 0,
@@ -111,20 +190,32 @@ impl VideoMemory {
             dac_read_index: 0,
             dac_cycle: 0,
             dac_mode_read: false,
-            cursor_start: 6,
-            cursor_end: 7,
             planes: Box::new([[0u8; 0x10000]; 4]),
             seq_index: 0,
             seq_regs: [0x01, 0x0F, 0x0F, 0x00, 0x02],
             grc_index: 0,
             grc_regs: [0, 0, 0, 0, 0, 0, 0, 0, 0xFF],
             latches: Cell::new([0u8; 4]),
+            ac_index: 0,
+            ac_regs: ac_defaults(VideoMode::Text80x25),
+            vbe_mode: None,
+            vbe_lfb: Box::new([0u8; Self::VBE_LFB_SIZE]),
+            vbe_rom: Box::new([0u8; 512]),
+            vbe_bank: 0,
+        };
+        v.crtc_defaults();
+        v.vbe_rom[0..Self::VBE_OEM_STRING.len()].copy_from_slice(Self::VBE_OEM_STRING);
+        for (i, &m) in Self::VBE_MODE_LIST.iter().enumerate() {
+            let off = 0x100 + i * 2;
+            v.vbe_rom[off] = (m & 0xFF) as u8;
+            v.vbe_rom[off + 1] = (m >> 8) as u8;
         }
+        v
     }
 
-    const FRAME_NS: u128 = 16_666_667; // 60 Гц
-    const VBLANK_NS: u128 = 1_400_000; // окно вертикального обратного хода
-    const HFRAME_NS: u128 = 63_500; // ~15.75 кГц
+    const FRAME_NS: u128 = 16_666_667;
+    const VBLANK_NS: u128 = 1_400_000;
+    const HFRAME_NS: u128 = 63_500;
     const HBLANK_NS: u128 = 11_000;
 
     pub fn input_status_1(&mut self) -> u8 {
@@ -144,10 +235,22 @@ impl VideoMemory {
         status
     }
 
+    fn crtc_defaults(&mut self) {
+        self.crtc_index = 0;
+        self.crtc_regs = [0u8; 0x19];
+        self.crtc_regs[0x13] = match self.mode {
+            VideoMode::Text80x25 => 40,
+            VideoMode::Mode0Dh => 10,
+            VideoMode::Mode13h | VideoMode::Mode0Eh | VideoMode::Mode10h | VideoMode::Mode12h => 20,
+        };
+        self.crtc_regs[0x0A] = 0x06;
+        self.crtc_regs[0x0B] = 0x07;
+    }
+
     pub fn set_mode(&mut self, mode: VideoMode) {
         self.mode = mode;
         match mode {
-            VideoMode::Text80x25 => self.text_buffer = [0x0720; 80 * 25],
+            VideoMode::Text80x25 => self.text_buffer = Box::new([0x0720; 0x4000]),
             VideoMode::Mode13h => self.frame_buffer = [0u8; 320 * 200],
             _ => {
                 for p in self.planes.iter_mut() {
@@ -160,17 +263,73 @@ impl VideoMemory {
                 self.latches.set([0u8; 4]);
             }
         }
+        self.vbe_mode = None;
+        self.crtc_defaults();
+        self.ac_regs = ac_defaults(mode);
+        self.ac_index = 0;
+        self.attr_flip_flop = false;
         self.cursor_row = 0;
         self.cursor_col = 0;
         self.dirty = true;
-        self.cursor_start = 6;
-        self.cursor_end = 7;
         self.reset_dac();
+    }
+
+    pub fn start_address(&self) -> usize {
+        let lo = self.crtc_regs[0x0D] as usize;
+        let hi = (self.crtc_regs[0x0C] as usize) << 8;
+        let b16 = (((self.crtc_regs[0x07] >> 5) & 1) as usize) << 16;
+        hi | lo | b16
+    }
+
+    pub fn offset_bytes(&self) -> usize {
+        (self.crtc_regs[0x13] as usize) * 4
+    }
+    pub fn text_line_cells(&self) -> usize {
+        match self.offset_bytes() / 2 {
+            0 => 80,
+            n => n,
+        }
+    }
+
+    pub fn cursor_address(&self) -> usize {
+        let lo = self.crtc_regs[0x0F] as usize;
+        let hi = (self.crtc_regs[0x0E] as usize) << 8;
+        let b16 = (((self.crtc_regs[0x07] >> 6) & 1) as usize) << 16;
+        hi | lo | b16
+    }
+    pub fn cursor_enabled(&self) -> bool {
+        (self.crtc_regs[0x0A] & 0x20) == 0
+    }
+    pub fn cursor_scan_start(&self) -> usize {
+        (self.crtc_regs[0x0A] & 0x1F) as usize
+    }
+    pub fn cursor_scan_end(&self) -> usize {
+        (self.crtc_regs[0x0B] & 0x1F) as usize
+    }
+
+    pub fn set_cursor_cell(&mut self, cell: usize) {
+        let addr = cell * 2;
+        self.crtc_regs[0x0E] = ((addr >> 8) & 0xFF) as u8;
+        self.crtc_regs[0x0F] = (addr & 0xFF) as u8;
+        if addr & 0x10000 != 0 {
+            self.crtc_regs[0x07] |= 0x40;
+        } else {
+            self.crtc_regs[0x07] &= !0x40;
+        }
+    }
+
+    pub fn sync_cursor_from_crtc(&mut self) {
+        if self.mode != VideoMode::Text80x25 {
+            return;
+        }
+        let line = self.text_line_cells();
+        let cell = self.cursor_address() / 2;
+        self.cursor_row = ((cell / line) as u8).min(24);
+        self.cursor_col = ((cell % line) as u8).min(79);
     }
 
     pub fn set_mode_u8(&mut self, mode: u8) -> bool {
         match mode & 0x7F {
-            // бит 7 = «не очищать память», игнорируем очистку всё равно
             0x03 => {
                 self.set_mode(VideoMode::Text80x25);
                 true
@@ -203,7 +362,6 @@ impl VideoMemory {
     }
 
     pub fn scroll_up(&mut self) {
-        // Копируем строки 1..24 на место 0..23
         for row in 0..24 {
             for col in 0..80 {
                 self.text_buffer[row * 80 + col] = self.text_buffer[(row + 1) * 80 + col];
@@ -238,15 +396,11 @@ impl VideoMemory {
                 }
             }
             0x0D => {
-                /* Carriage Return: возврат в начало строки */
                 self.cursor_col = 0;
             }
             _ => {
-                /* Печатный символ */
                 let idx = self.cursor_row as usize * 80 + self.cursor_col as usize;
                 self.text_buffer[idx] = ((attr as u16) << 8) | (ch as u16);
-
-                // Двигаем курсор вправо
                 self.cursor_col += 1;
                 if self.cursor_col >= 80 {
                     self.cursor_col = 0;
@@ -258,13 +412,18 @@ impl VideoMemory {
                 }
             }
         }
+        let line = self.text_line_cells();
+        self.set_cursor_cell(self.cursor_row as usize * line + self.cursor_col as usize);
         self.dirty = true;
     }
 
     const TEXT_BASE: u32 = 0x18000;
-    const TEXT_SIZE: u32 = 80 * 25 * 2; // 4000 байт
+    const TEXT_SIZE: u32 = 0x8000;
 
     pub fn read_mmio(&self, offset: u32) -> u8 {
+        if self.vbe_mode.is_some() && offset < 0x10000 {
+            return self.window_read(offset as usize); // read
+        }
         if self.mode.planar_dims().is_some() {
             return self.planar_read(offset);
         }
@@ -295,6 +454,10 @@ impl VideoMemory {
     }
 
     pub fn write_mmio(&mut self, offset: u32, value: u8) {
+        if self.vbe_mode.is_some() && offset < 0x10000 {
+            self.window_write(offset as usize, value);
+            return; // write
+        }
         if self.mode.planar_dims().is_some() {
             self.planar_write(offset, value);
             self.dirty = true;
@@ -419,7 +582,6 @@ impl Default for VideoMemory {
     }
 }
 
-// Реализуем Peripheral для будущего DeviceMapper
 impl Peripheral for VideoMemory {
     fn mem_read(&mut self, addr: u32) -> u8 {
         self.read_mmio(addr)
@@ -431,7 +593,19 @@ impl Peripheral for VideoMemory {
 
     fn port_read(&mut self, port: u16) -> u8 {
         match port {
+            0x3D4 => self.crtc_index,
+            0x3D5 => self
+                .crtc_regs
+                .get(self.crtc_index as usize)
+                .copied()
+                .unwrap_or(0),
             0x3DA => self.input_status_1(),
+            0x3C0 => self.ac_index | ((self.attr_flip_flop as u8) << 5),
+            0x3C1 => self
+                .ac_regs
+                .get(self.ac_index as usize)
+                .copied()
+                .unwrap_or(0),
             0x3C4 => self.seq_index,
             0x3C5 => self
                 .seq_regs
@@ -472,6 +646,30 @@ impl Peripheral for VideoMemory {
 
     fn port_write(&mut self, port: u16, val: u8) {
         match port {
+            0x3D4 => self.crtc_index = val,
+            0x3D5 => {
+                let i = self.crtc_index as usize;
+                if i < self.crtc_regs.len() {
+                    self.crtc_regs[i] = val;
+                    if i == 0x0E || i == 0x0F {
+                        self.sync_cursor_from_crtc(); // ✅ железо дёргает BIOS-курсор
+                    }
+                    self.dirty = true;
+                }
+            }
+            0x3C0 => {
+                if !self.attr_flip_flop {
+                    self.ac_index = val & 0x1F;
+                } else {
+                    let i = self.ac_index as usize;
+                    if i < self.ac_regs.len() {
+                        self.ac_regs[i] = val;
+                        self.dirty = true;
+                    }
+                }
+                self.attr_flip_flop = !self.attr_flip_flop; // ✅ чередование индекс/данные
+            }
+            0x3C1 => { /* read-only порт, записи игнорируем */ }
             0x3C6 => self.dac_pixel_mask = val,
             0x3C7 => {
                 // индекс ЧТЕНИЯ + переход в read-состояние
@@ -705,26 +903,246 @@ impl VideoMemory {
     }
 
     pub fn render_planar(&self, w: usize, h: usize, palette: &[[u8; 3]; 256]) -> Vec<u32> {
-        let rowbytes = w / 8;
+        let line_bytes = match self.offset_bytes() {
+            0 => w / 8,
+            n => n,
+        };
+        let start = self.start_address();
         let mut out = vec![0u32; w * h];
         for y in 0..h {
-            for xb in 0..rowbytes {
-                let off = y * rowbytes + xb;
+            for xb in 0..(w / 8) {
+                let off = start + y * line_bytes + xb;
                 let b = [
-                    self.planes[0][off],
-                    self.planes[1][off],
-                    self.planes[2][off],
-                    self.planes[3][off],
+                    self.planes[0].get(off).copied().unwrap_or(0),
+                    self.planes[1].get(off).copied().unwrap_or(0),
+                    self.planes[2].get(off).copied().unwrap_or(0),
+                    self.planes[3].get(off).copied().unwrap_or(0),
                 ];
                 for bit in 0..8usize {
                     let s = 7 - bit;
-                    let idx = (((b[0] >> s) & 1)
+                    let mut idx = (((b[0] >> s) & 1)
                         | (((b[1] >> s) & 1) << 1)
                         | (((b[2] >> s) & 1) << 2)
                         | (((b[3] >> s) & 1) << 3)) as usize;
-                    let c = palette[idx];
+                    idx &= self.plane_enable() as usize;
+                    let c = palette[self.ac_dac_index_graphics(idx)];
                     out[y * w + xb * 8 + bit] =
-                        (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32;
+                        (c[0] as u32) << 16 | (c[1] as u32) << 8 | (c[2] as u32);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn render_text(&self, palette: &[[u8; 3]; 256]) -> Vec<u32> {
+        const WIDTH: usize = 640;
+        const HEIGHT: usize = 400;
+        let mut pixels = vec![0u32; WIDTH * HEIGHT];
+        let font = VGA_FONT_8X16;
+        let line = self.text_line_cells();
+        let start = self.start_address() / 2;
+        let cur_cell = self.cursor_address() / 2;
+        let cur_on = self.cursor_enabled();
+        let (cs, ce) = (self.cursor_scan_start(), self.cursor_scan_end());
+
+        for row in 0..25usize {
+            for col in 0..80usize {
+                let addr = start + row * line + col;
+                let cell = self.text_buffer.get(addr).copied().unwrap_or(0x0720);
+                let ch = (cell & 0xFF) as usize;
+                let attr = ((cell >> 8) & 0xFF) as usize;
+                let fg4 = attr & 0x0F;
+                let bg4 = if self.blink_enabled() {
+                    (attr >> 4) & 0x07
+                } else {
+                    (attr >> 4) & 0x0F
+                };
+                let fg = palette[self.ac_dac_index(fg4)];
+                let bg = palette[self.ac_dac_index(bg4)];
+                let fg_c = (fg[0] as u32) << 16 | (fg[1] as u32) << 8 | fg[2] as u32;
+                let bg_c = (bg[0] as u32) << 16 | (bg[1] as u32) << 8 | bg[2] as u32;
+                let is_cur = cur_on && cs <= ce && addr == cur_cell;
+                for y in 0..16usize {
+                    let glyph_row = font[ch * 16 + y];
+                    let mut colors = [bg_c; 8];
+                    for x in 0..8usize {
+                        if (glyph_row >> (7 - x)) & 1 == 1 {
+                            colors[x] = fg_c;
+                        }
+                    }
+                    if is_cur && y >= cs && y <= ce {
+                        colors = [fg_c; 8]; // сканлайны курсора
+                    }
+                    let base = (row * 16 + y) * WIDTH + col * 8;
+                    pixels[base..base + 8].copy_from_slice(&colors);
+                }
+            }
+        }
+        pixels
+    }
+
+    pub fn render_mode13(&self, palette: &[[u8; 3]; 256]) -> Vec<u32> {
+        const SRC_W: usize = 320;
+        const SRC_H: usize = 200;
+        const DST_W: usize = 1920;
+        const DST_H: usize = 1200;
+        let mut out = vec![0u32; DST_W * DST_H];
+        let line_px = match self.offset_bytes() * 4 {
+            0 => SRC_W,
+            n => n,
+        };
+        let start_px = self.start_address() * 4;
+        for y in 0..SRC_H {
+            for x in 0..SRC_W {
+                let idx = start_px + y * line_px + x;
+                let ci = self.frame_buffer.get(idx).copied().unwrap_or(0) as usize;
+                let c = palette[ci];
+                let color = (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32;
+                for dy in 0..6 {
+                    for dx in 0..6 {
+                        out[(y * 6 + dy) * DST_W + x * 6 + dx] = color;
+                    }
+                }
+            }
+        }
+        out
+    }
+    #[inline]
+    pub fn ac_dac_index(&self, idx4: usize) -> usize {
+        let p = self.ac_regs[idx4 & 0x0F] as usize;
+        let cs = self.ac_regs[0x14] as usize;
+        (p & 0x3F) | ((cs & 0x03) << 6)
+    }
+    /// 16-цветная графика: биты 4-5 DAC берутся из Color Select 2-3
+    #[inline]
+    pub fn ac_dac_index_graphics(&self, idx4: usize) -> usize {
+        let p = self.ac_regs[idx4 & 0x0F] as usize;
+        let cs = self.ac_regs[0x14] as usize;
+        (p & 0x0F) | ((cs & 0x0C) << 2) | ((cs & 0x03) << 6)
+    }
+    #[inline]
+    pub fn plane_enable(&self) -> u8 {
+        self.ac_regs[0x12] & 0x0F
+    }
+    #[inline]
+    pub fn blink_enabled(&self) -> bool {
+        (self.ac_regs[0x10] & 0x08) != 0
+    }
+}
+
+impl VideoMemory {
+    pub const VBE_LFB_BASE: u32 = 0xE000_0000;
+    pub const VBE_LFB_SIZE: usize = 1024 * 768;
+
+    pub fn vbe_info_block(&self) -> [u8; 256] {
+        let mut b = [0u8; 256];
+        b[0..4].copy_from_slice(b"VESA");
+        b[4..6].copy_from_slice(&0x0200u16.to_le_bytes());
+        b[6..10].copy_from_slice(&Self::VBE_OEM_PTR.to_le_bytes());
+        b[10..14].copy_from_slice(&0x0000_0001u32.to_le_bytes());
+        b[14..18].copy_from_slice(&Self::VBE_MODE_LIST_PTR.to_le_bytes());
+        b[18..20].copy_from_slice(&12u16.to_le_bytes());
+        b
+    }
+
+    pub fn vbe_mode_info_block(&self, mode: VbeMode) -> [u8; 256] {
+        let mut block = [0u8; 256];
+        let (w, h) = mode.dims();
+        let bpp = mode.bpp();
+        let bpl = mode.bytes_per_line();
+
+        // ModeAttributes: бит 0 = mode supported, бит 1 = optional info,
+        //                 бит 3 = color, бит 4 = graphics, бит 7 = linear FB
+        block[0..2].copy_from_slice(&0x009Bu16.to_le_bytes());
+        block[2] = 0x07; // WinA: exists, readable, writable
+        block[3] = 0x00; // WinB: not supported
+        block[4..6].copy_from_slice(&64u16.to_le_bytes()); // WinGranularity (KB)
+        block[6..8].copy_from_slice(&64u16.to_le_bytes()); // WinSize (KB)
+        block[8..10].copy_from_slice(&0xA000u16.to_le_bytes()); // WinASegment
+        block[10..12].copy_from_slice(&0u16.to_le_bytes()); // WinBSegment
+        block[16..18].copy_from_slice(&(bpl as u16).to_le_bytes());
+        block[18..20].copy_from_slice(&(w as u16).to_le_bytes());
+        block[20..22].copy_from_slice(&(h as u16).to_le_bytes());
+        block[22] = 8; // XCharSize
+        block[23] = 16; // YCharSize
+        block[24] = 1; // NumberOfPlanes
+        block[25] = bpp;
+        block[26] = 1; // NumberOfBanks
+        block[27] = if mode.is_direct_color() { 6 } else { 4 }; // MemoryModel: 4=packed, 6=direct
+        block[28] = 0; // BankSize
+        block[29] = 0; // NumberOfImagePages
+
+        if mode.is_direct_color() {
+            // Direct Color masks: 8:8:8
+            block[31] = 8;
+            block[32] = 16; // Red
+            block[33] = 8;
+            block[34] = 8; // Green
+            block[35] = 8;
+            block[36] = 0; // Blue
+            block[37] = 0;
+            block[38] = 0; // Reserved
+        }
+
+        // PhysBasePtr — LFB base
+        block[40..44].copy_from_slice(&Self::VBE_LFB_BASE.to_le_bytes());
+
+        block
+    }
+
+    pub fn window_read(&self, off: usize) -> u8 {
+        self.vbe_lfb
+            .get(self.vbe_bank * 65536 + off)
+            .copied()
+            .unwrap_or(0)
+    }
+    pub fn window_write(&mut self, off: usize, val: u8) {
+        let addr = self.vbe_bank * 65536 + off;
+        if addr < Self::VBE_LFB_SIZE {
+            self.vbe_lfb[addr] = val;
+            self.dirty = true;
+        }
+    }
+
+    pub fn set_vbe_mode(&mut self, mode: VbeMode) {
+        self.mode = VideoMode::Text80x25; // сбрасываем «обычный» режим
+        self.vbe_mode = Some(mode);
+        self.vbe_lfb.fill(0);
+        self.vbe_bank = 0;
+        self.dirty = true;
+    }
+
+    pub fn read_lfb(&self, offset: usize) -> u8 {
+        self.vbe_lfb.get(offset).copied().unwrap_or(0)
+    }
+
+    pub fn write_lfb(&mut self, offset: usize, val: u8) {
+        if offset < Self::VBE_LFB_SIZE {
+            self.vbe_lfb[offset] = val;
+            self.dirty = true;
+        }
+    }
+
+    pub fn render_vbe(&self, mode: VbeMode, palette: &[[u8; 3]; 256]) -> Vec<u32> {
+        let (w, h) = mode.dims();
+        let mut out = vec![0u32; w * h];
+        if mode.is_direct_color() {
+            for y in 0..h {
+                for x in 0..w {
+                    let base = (y * w + x) * 3;
+                    let b = self.vbe_lfb.get(base).copied().unwrap_or(0) as u32;
+                    let g = self.vbe_lfb.get(base + 1).copied().unwrap_or(0) as u32;
+                    let r = self.vbe_lfb.get(base + 2).copied().unwrap_or(0) as u32;
+                    out[y * w + x] = (r << 16) | (g << 8) | b;
+                }
+            }
+        } else {
+            // 8bpp: индекс в DAC
+            for y in 0..h {
+                for x in 0..w {
+                    let idx = self.vbe_lfb.get(y * w + x).copied().unwrap_or(0) as usize;
+                    let c = palette[idx];
+                    out[y * w + x] = ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32);
                 }
             }
         }

@@ -1,7 +1,7 @@
-// Ver: 15 File: crate/dos/src/system.rs
+// Ver: 17 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{
-    VideoMode, get_fonts_vga8x16, render_text_to_pixels, scale_buffer, upscale_framebuffer,
+    VideoMode, scale_buffer,
 };
 use bus::{Cpu, Display, Machine, Motherboard};
 use emu_config::MachineConfig;
@@ -205,22 +205,24 @@ impl DosSystem {
             return None;
         }
         self.machine.video.dirty = false;
-        let (buffer, w, h) = match self.machine.video.mode {
-            VideoMode::Text80x25 => {
+        let (buffer, w, h) = match (self.machine.video.vbe_mode, self.machine.video.mode) {
+            (Some(vbe), _) => {
                 let pal = self.machine.video.palette_rgb8();
-                let buf = render_text_to_pixels(
-                    &self.machine.video.text_buffer,
-                    &get_fonts_vga8x16(),
-                    &pal,
-                );
+                let buf = self.machine.video.render_vbe(vbe, &pal);
+                let (w, h) = vbe.dims();
+                (buf, w, h)
+            }
+            (None, VideoMode::Text80x25) => {
+                let pal = self.machine.video.palette_rgb8();
+                let buf = self.machine.video.render_text(&pal);
                 (buf, 640, 400)
             }
-            VideoMode::Mode13h => {
+            (None, VideoMode::Mode13h) => {
                 let pal = self.machine.video.palette_rgb8();
-                let buf = upscale_framebuffer(&self.machine.video.frame_buffer, &pal);
+                let buf = self.machine.video.render_mode13(&pal);
                 (buf, 1920, 1200)
             }
-            m => {
+            (None, m) => {
                 let (w, h) = m.planar_dims().unwrap_or((320, 200));
                 let pal = self.machine.video.palette_rgb8();
                 let buf = self.machine.video.render_planar(w, h, &pal);

@@ -74,6 +74,7 @@
 - `[x]` VGA Input Status 1 (порт 0x3DA) — эмуляция retrace тайминга
 - `[x]` Attribute Controller flip-flop — сброс при чтении 0x3DA
 - `[x]` VGA CRTC — полная эмуляция портов 0x3D4/0x3D5
+- `[x]` VGA Attribute Controller — порт 0x3C0/0x3C1, flip-flop, palette mapping
 - `[x]` VGA DAC — полная 18-bit палитра (256 цветов)
 - `[x]` VGA sequencer — порты 0x3C4/0x3C5
 - `[x]` VGA graphics controller — порты 0x3CE/0x3CF
@@ -160,7 +161,15 @@
 - `[ ]` GD-ROM
 - `[ ]` AICA звук
 
-## 7. Сборка и CI
+## 8. Рефакторинг — Разбивка файлов на модули
+
+- `[x]` `alu.rs` → `alu/` с модулями `core`, `util`, `eval`, `inst`, `bcd`, `incdec`, `group`
+- `[x]` `mov.rs` → `mov/` с модулями `rm`, `imm`, `str_ops`
+- `[ ]` `shift.rs` — разбить на подкаталог
+- `[ ]` `bit.rs` — разбить на подкаталог
+- `[ ]` `control.rs` — разбить на подкаталог
+
+## 9. Сборка и CI
 
 - `[ ]` Feature flags: `full`, `minimal`, `x86-only`, `with-audio`, `with-gui`
 - `[ ]` Бенчмарки для ключевых инструкций x86
@@ -175,9 +184,9 @@
 - `[x]` docs/architecture.md — описание архитектуры
 - `[x]` docs/x86.md — список реализованных инструкций
 - `[x]` docs/porting.md — как добавить поддержку новой периферии
-- `[ ]` docs/bus.md — описание трейтов Machine, Cpu, Peripheral, Display
-- `[ ]` docs/dos-api.md — полный список поддерживаемых INT 21h функций
-- `[ ]` docs/build.md — сборка, зависимости, конфигурация
+- `[x]` docs/bus.md — описание трейтов Machine, Cpu, Peripheral, Display
+- `[x]` docs/dos-api.md — полный список поддерживаемых INT 21h функций
+- `[x]` docs/build.md — сборка, зависимости, конфигурация
 - `[x]` README.md — главный README
 - `[x]` DESIGN.md — дизайн-документ
 - `[x]` SKILL.md — описание навыков

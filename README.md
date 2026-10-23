@@ -8,7 +8,7 @@ rusn_dos — это мультисистемный эмулятор, напис�
 - **DOS**: Загрузка COM/EXE (MZ), INT 21h (AH=00h-6Ch), INT 2Fh, файловая система с несколькими дисками, устройства DOS (CON/NUL/COM/LPT/CLOCK$/EMMXXXX0)
 - **BIOS**: INT 10h (видеорежимы, телетайп), INT 16h (клавиатура), INT 15h (A20, расширенная память), INT 1Ah (часы), INT 08h/1Ch (таймер)
 - **EMS 4.0**: INT 67h (выделение/освобождение/маппинг страниц)
-- **VGA**: Текстовый режим 80x25, Mode 13h (320x200x8), планарные режимы 0Dh/0Eh/10h/12h (16 цветов), DAC 18-bit палитра (256 цветов), VGA sequencer + graphics controller, порты 0x3C4/3C5/3C6-3C9/3CE/3CF/3DA, Input Status 1 (retrace timing), attribute flip-flop, рендеринг через minifb
+- **VGA**: Текстовый режим 80x25, Mode 13h (320x200x8), планарные режимы 0Dh/0Eh/10h/12h (16 цветов), DAC 18-bit палитра (256 цветов), VGA sequencer + graphics controller + CRTC + attribute controller, порты 0x3C0/3C1/3C4/3C5/3C6-3C9/3CE/3CF/3D4/3D5/3DA, Input Status 1 (retrace timing), attribute flip-flop, рендеринг через minifb
 - **Клавиатура**: 8042, Set 1 scancodes, буфер BIOS, suspend/resume (re-dispatch) для неблокирующего ввода
 - **MCB**: DOS Memory Control Block — выделение/освобождение/изменение блоков памяти
 - **Графическое окно**: minifb, 60 FPS, маппинг клавиш

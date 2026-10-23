@@ -1,8 +1,8 @@
-// Ver: 12 File: crate/dos/src/interrupts/bios.rs
+// Ver: 16 File: crate/dos/src/interrupts/bios.rs
 use std::io::Write;
 
 use bus::Machine;
-use bus::peripherals::video::VideoMode;
+use bus::peripherals::video::{VbeMode, VideoMode};
 use x86::flags;
 
 use crate::consts;
@@ -12,10 +12,10 @@ fn mode_number(mode: VideoMode) -> u8 {
     match mode {
         VideoMode::Text80x25 => 0x03,
         VideoMode::Mode13h => 0x13,
-        VideoMode::Mode0Dh => 0x0D, 
-        VideoMode::Mode0Eh => 0x0E, 
-        VideoMode::Mode10h => 0x10, 
-        VideoMode::Mode12h => 0x12
+        VideoMode::Mode0Dh => 0x0D,
+        VideoMode::Mode0Eh => 0x0E,
+        VideoMode::Mode10h => 0x10,
+        VideoMode::Mode12h => 0x12,
     }
 }
 
@@ -45,28 +45,36 @@ pub fn handle_int10(sys: &mut DosSystem) {
         }
 
         0x01 => {
-            // Установка формы курсора: CH = start, CL = end scanline
-            sys.machine.video.cursor_start = ch;
-            sys.machine.video.cursor_end = cl;
-            sys.machine.write_mem_u8(0x460, ch); // BDA: тип курсора
+            // Форма курсора теперь живёт в CRTC 0x0A/0x0B
+            sys.machine.video.crtc_regs[0x0A] = ch & 0x3F;
+            sys.machine.video.crtc_regs[0x0B] = cl & 0x1F;
+            sys.machine.write_mem_u8(0x460, ch);
             sys.machine.write_mem_u8(0x461, cl);
+            sys.machine.video.dirty = true;
         }
-
         0x02 => {
-            // Установка позиции курсора: DH = строка, DL = колонка.
-            // Клампим: защита от паники при index out of bounds в write_tty.
-            sys.machine.video.cursor_row = dh.min(24);
-            sys.machine.video.cursor_col = dl.min(79);
+            let row = dh.min(24);
+            let col = dl.min(79);
+            sys.machine.video.cursor_row = row;
+            sys.machine.video.cursor_col = col;
+            // ✅ BIOS пишет и в CRTC, как настоящее железо
+            let line = sys.machine.video.text_line_cells();
+            sys.machine
+                .video
+                .set_cursor_cell(row as usize * line + col as usize);
             sync_cursor_bda(sys);
+            sys.machine.video.dirty = true;
         }
-
         0x03 => {
-            // Чтение позиции и формы курсора
-            sys.cpu.registers.set_bh(0); // страница
+            sys.cpu.registers.set_bh(0);
             sys.cpu.registers.set_dh(sys.machine.video.cursor_row);
             sys.cpu.registers.set_dl(sys.machine.video.cursor_col);
-            sys.cpu.registers.set_ch(sys.machine.video.cursor_start);
-            sys.cpu.registers.set_cl(sys.machine.video.cursor_end);
+            sys.cpu
+                .registers
+                .set_ch(sys.machine.video.crtc_regs[0x0A] & 0x3F);
+            sys.cpu
+                .registers
+                .set_cl(sys.machine.video.crtc_regs[0x0B] & 0x1F);
         }
 
         0x05 => {
@@ -120,7 +128,7 @@ pub fn handle_int10(sys: &mut DosSystem) {
                 log::debug!("INT 10h/0E in Mode13h: char {:#02x}", ch);
             }
         }
-
+        0x10 => palette_functions(sys),
         0x12 => {
             // Alternate function select: отвечаем «поддержано» на известные BL
             match sys.cpu.registers.bl() {
@@ -141,7 +149,55 @@ pub fn handle_int10(sys: &mut DosSystem) {
             sys.cpu.registers.set_ah(80);
             sys.cpu.registers.set_bh(0);
         }
-
+        0x4F => {
+            // VESA BIOS Extensions
+            let sub = sys.cpu.registers.al();
+            let es = sys.cpu.registers.es(); // ✅ добавить
+            let di = sys.cpu.registers.di(); // ✅ добавить
+            let bx = sys.cpu.registers.bx(); // ✅ добавить
+            match sub {
+                0x00 => {
+                    let block = sys.machine.video.vbe_info_block();
+                    for (i, &b) in block.iter().enumerate() {
+                        sys.write_u8(es, di.wrapping_add(i as u16), b);
+                    }
+                    sys.cpu.registers.set_ax(0x004F);
+                }
+                0x01 => match VbeMode::from_number(cx) {
+                    Some(m) => {
+                        let block = sys.machine.video.vbe_mode_info_block(m);
+                        for (i, &b) in block.iter().enumerate() {
+                            sys.write_u8(es, di.wrapping_add(i as u16), b);
+                        }
+                        sys.cpu.registers.set_ax(0x004F);
+                    }
+                    None => sys.cpu.registers.set_ax(0x014F),
+                },
+                0x02 => match VbeMode::from_number(bx & 0x1FF) {
+                    Some(m) => {
+                        sys.machine.video.set_vbe_mode(m);
+                        sys.cpu.registers.set_ax(0x004F);
+                        log::info!("VBE mode {:#04X} set", bx & 0x1FF);
+                    }
+                    None => sys.cpu.registers.set_ax(0x014F),
+                },
+                0x05 => {
+                    let bh = sys.cpu.registers.bh();
+                    if bh == 0 {
+                        sys.machine.video.vbe_bank = (bx as usize).min(11);
+                        sys.machine.video.dirty = true;
+                        sys.cpu.registers.set_ax(0x004F);
+                    } else {
+                        sys.cpu.registers.set_dx(sys.machine.video.vbe_bank as u16);
+                        sys.cpu.registers.set_ax(0x004F);
+                    }
+                }
+                _ => {
+                    log::info!("Unsupported VBE subfunction AL={:#02X}", sub);
+                    sys.cpu.registers.set_ax(0x014F);
+                }
+            }
+        }
         _ => {
             log::info!("Unsupported INT 10h / AH={:02X}", sys.cpu.registers.ah());
         }
@@ -353,4 +409,104 @@ pub fn tty_write(sys: &mut DosSystem, ch: u8) {
         _ => {}
     }
     std::io::stdout().flush().ok();
+}
+
+fn palette_functions(sys: &mut DosSystem) {
+    let sub = sys.cpu.registers.al();
+    let bl = sys.cpu.registers.bl();
+    let bh = sys.cpu.registers.bh();
+    let bx = sys.cpu.registers.bx();
+    let cx = sys.cpu.registers.cx();
+    let es = sys.cpu.registers.es();
+    let dx = sys.cpu.registers.dx();
+    match sub {
+        0x00 => {
+            // установить палитровый регистр: BL=регистр, BH=значение
+            let r = (bl & 0x1F) as usize;
+            if r < sys.machine.video.ac_regs.len() {
+                sys.machine.video.ac_regs[r] = bh;
+                sys.machine.video.dirty = true;
+            }
+        }
+        0x01 => {
+            // overscan
+            sys.machine.video.ac_regs[0x11] = bh;
+            sys.machine.video.dirty = true;
+        }
+        0x02 => {
+            // все 16 регистров + overscan из ES:DX (17 байт)
+            for i in 0..16u16 {
+                sys.machine.video.ac_regs[i as usize] = sys.read_u8(es, dx.wrapping_add(i));
+            }
+            sys.machine.video.ac_regs[0x11] = sys.read_u8(es, dx.wrapping_add(16));
+            sys.machine.video.dirty = true;
+        }
+        0x03 => {
+            // blink/intensity: BL=0 -> blink, BL=1 -> intensity
+            if bl == 0 {
+                sys.machine.video.ac_regs[0x10] |= 0x08;
+            } else {
+                sys.machine.video.ac_regs[0x10] &= !0x08;
+            }
+            sys.machine.video.dirty = true;
+        }
+        0x07 => {
+            // читать палитровый регистр: BL=регистр -> BH
+            let v = sys.machine.video.ac_regs[(bl & 0x1F) as usize];
+            sys.cpu.registers.set_bh(v);
+        }
+        0x08 => sys.cpu.registers.set_bh(sys.machine.video.ac_regs[0x11]),
+        0x09 => {
+            // читать все регистры в ES:DX (17 байт)
+            for i in 0..16u16 {
+                sys.write_u8(
+                    es,
+                    dx.wrapping_add(i),
+                    sys.machine.video.ac_regs[i as usize],
+                );
+            }
+            sys.write_u8(es, dx.wrapping_add(16), sys.machine.video.ac_regs[0x11]);
+        }
+        0x10 => {
+            // установить цвет DAC: BX=индекс, CH=R, DH=G, CL=B (6 бит)
+            let i = (bx & 0xFF) as usize;
+            sys.machine.video.dac[i] = [
+                sys.cpu.registers.ch() & 0x3F,
+                sys.cpu.registers.dh() & 0x3F,
+                sys.cpu.registers.cl() & 0x3F,
+            ];
+            sys.machine.video.dirty = true;
+        }
+        0x12 => {
+            // блок цветов DAC: ES:DX, CX=кол-во, BX=старт (R,G,B на цвет)
+            for i in 0..cx as u16 {
+                let base = dx.wrapping_add(i * 3);
+                let idx = (bx.wrapping_add(i)) as usize & 0xFF;
+                sys.machine.video.dac[idx] = [
+                    sys.read_u8(es, base) & 0x3F,
+                    sys.read_u8(es, base.wrapping_add(1)) & 0x3F,
+                    sys.read_u8(es, base.wrapping_add(2)) & 0x3F,
+                ];
+            }
+            sys.machine.video.dirty = true;
+        }
+        0x15 => {
+            // читать цвет DAC: BX=индекс -> CH=R, DH=G, CL=B
+            let d = sys.machine.video.dac[(bx & 0xFF) as usize];
+            sys.cpu.registers.set_ch(d[0]);
+            sys.cpu.registers.set_dh(d[1]);
+            sys.cpu.registers.set_cl(d[2]);
+        }
+        0x17 => {
+            // читать блок DAC в ES:DX
+            for i in 0..cx as u16 {
+                let base = dx.wrapping_add(i * 3);
+                let d = sys.machine.video.dac[(bx.wrapping_add(i)) as usize & 0xFF];
+                sys.write_u8(es, base, d[0]);
+                sys.write_u8(es, base.wrapping_add(1), d[1]);
+                sys.write_u8(es, base.wrapping_add(2), d[2]);
+            }
+        }
+        _ => log::info!("Unsupported INT 10h / AH=10h AL={:02X}", sub),
+    }
 }
