@@ -1,4 +1,4 @@
-// Ver: 4 File: crate/dos/src/filesystem.rs
+// Ver: 5 File: crate/dos/src/filesystem.rs
 use bus::Machine;
 use std::{
     collections::HashMap,
@@ -167,7 +167,6 @@ impl FileSystem {
             }
         }
 
-        // Безопасность: проверяем, что путь не вышел за пределы root
         if let (Ok(canonical_root), Ok(canonical_path)) =
             (driver.root_path.canonicalize(), local_path.canonicalize())
         {
@@ -358,8 +357,6 @@ impl FileSystem {
         }
     }
 
-    // === Поиск файлов (Find First / Find Next) ===
-
     pub fn find_first(
         &mut self,
         dos_path: &str,
@@ -458,8 +455,6 @@ impl FileSystem {
 
         let name = entry.file_name().to_string_lossy().to_uppercase();
         let name_83 = format_83(&name);
-
-        // Упрощенное получение времени/даты (в реальном DOS это из metadata)
         let time = 0;
         let date = 0;
 
@@ -478,8 +473,6 @@ impl Default for FileSystem {
         Self::new()
     }
 }
-
-// === Вспомогательные функции ===
 
 fn match_pattern(name: &str, pattern: &str) -> bool {
     let n: Vec<char> = name.chars().collect();
@@ -550,17 +543,9 @@ pub fn resolve_device(dos_path: &str) -> Option<DeviceKind> {
     } else {
         dos_path
     };
-
-    // 2. Последний компонент пути.
     let name = path.rsplit(|c| c == '\\' || c == '/').next().unwrap_or("");
-
-    // 3. Расширение не имеет значения: CON.TXT == CON
     let raw = name.split('.').next().unwrap_or("");
-
-    // 4. Нормализация: trailing spaces + upper case
     let base = raw.trim_end().to_ascii_uppercase();
-
-    // 5. Допустимая запись "LPT1:" / "COM1:"
     let base = base.trim_end_matches(':');
 
     match base {

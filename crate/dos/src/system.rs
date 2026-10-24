@@ -1,4 +1,4 @@
-// Ver: 18 File: crate/dos/src/system.rs
+// Ver: 19 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{letterbox43, scale_into_rect, VideoMode};
 use bus::{Cpu, Display, Machine, Motherboard};
@@ -40,7 +40,6 @@ impl Default for EmsState {
     }
 }
 
-/// Главный объект DOS-эмулятора: шина (Motherboard) + CPU (X86Cpu) + DOS-слой.
 pub struct DosSystem {
     pub machine: Motherboard,
     pub cpu: X86Cpu,
@@ -82,7 +81,6 @@ impl DosSystem {
     pub fn get_dta_addr(&self) -> u32 {
         ((self.dta_segment as u32) << 4) + self.dta_offset as u32
     }
-    // === Адресация памяти ===
 
     #[inline(always)]
     pub fn phys(segment: u16, offset: u16) -> u32 {
@@ -189,10 +187,8 @@ impl DosSystem {
 
         let now = std::time::Instant::now();
         let elapsed_ms = now.duration_since(self.last_timer_tick).as_millis();
-
-        // 1000 / 18.2 ≈ 54.9 мс. Берём 55 для простоты.
         if elapsed_ms >= 54 {
-            self.last_timer_tick = now; // сбрасываем, даже если прерывание подавлено
+            self.last_timer_tick = now;
 
             if !self.cpu.inhibit_interrupts && flags::test_if(self.cpu.registers.flags()) {
                 self.raise_interrupt(0x08);
@@ -307,35 +303,9 @@ impl DosSystem {
             ss: 0, // больше не используются
         });
         log::debug!("Suspended INT {:02X}h for key wait", vector);
-        /*let sp = self.cpu.registers.sp();
-        let ss = self.cpu.registers.ss();
-
-        let ip_before_int = self.read_phys_u16(Self::phys(ss, sp));
-        let cs_before_int = self.read_phys_u16(Self::phys(ss, sp.wrapping_add(2)));
-        let flags_before_int = self.read_phys_u16(Self::phys(ss, sp.wrapping_add(4)));
-        let sp_before_int = sp.wrapping_add(6);
-
-        self.suspended = Some(SuspendedCall {
-            vector,
-            cs: cs_before_int,
-            ip: ip_before_int,
-            flags: flags_before_int,
-            sp: sp_before_int,
-            ss,
-        });
-
-        self.cpu.registers.set_ip(ip_before_int);
-        self.cpu.registers.set_sp(sp_before_int);
-        self.cpu.registers.set_cs(cs_before_int);
-        self.cpu.registers.set_flags(flags_before_int);
-        self.cpu.registers.set_ss(ss);
-
-        log::debug!("Suspended INT {:02X}h for key wait", vector);*/
     }
 }
 
-/// Мостик `Machine` для CPU: делегирует шине и знает, какие векторы
-/// обслуживает DOS-слой (CS=0xF000 → внутренние).
 struct CpuBus<'a> {
     mem: &'a mut Motherboard,
 }
@@ -367,7 +337,6 @@ impl Machine for CpuBus<'_> {
     }
 }
 
-/// Реализация `Machine` для `DosSystem`: делегирование шине + DOS-семантика прерываний.
 impl Machine for DosSystem {
     fn read_mem_u8(&self, addr: u32) -> u8 {
         self.machine.read_mem_u8(addr)

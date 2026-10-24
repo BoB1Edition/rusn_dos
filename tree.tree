@@ -172,8 +172,10 @@
 │   └── working.asm
 ├── test-x86.prompt.md
 ├── test.sh
+├── TODO copy.md
 ├── TODO.md
+├── TODO.shared.md
 ├── topopcodes.md
 └── tree.tree
 
-37 directories, 140 files
+37 directories, 142 files

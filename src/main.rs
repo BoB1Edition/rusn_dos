@@ -1,4 +1,4 @@
-// Ver: 1 File: ./src/main.rs
+// Ver: 2 File: ./src/main.rs
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};
@@ -9,16 +9,29 @@ mod app;
 #[command(name = "rusn_dos")]
 #[command(version, about)]
 struct Cli {
-    /// mode run program
+    /// Subcommand to run
     #[command(subcommand)]
     command: Option<Commands>,
-    /// optional config path
+
+    /// Config file path
     #[arg(short, long, default_value = "config.toml")]
     config: PathBuf,
     #[arg(long, default_value = "false")]
     no_log: bool,
-    #[arg(long, default_value = "false")]
+    #[arg(long)]
+    log: Option<String>,
+    #[arg(short, long, default_value = "false")]
     graphics: bool,
+    #[arg(long)]
+    tail: Option<String>,
+    #[arg(long, default_value = "false")]
+    no_stdin_keys: bool,
+    #[arg(long)]
+    mount: Vec<String>,
+    #[arg(long, default_value = "0")]
+    timeout: u64,
+    #[arg(long, default_value = "20")]
+    max_call_depth: u16,
 }
 
 #[derive(Debug, Subcommand)]
@@ -40,7 +53,7 @@ fn set_workdir(workdir: &PathBuf) -> Result<(), Box<dyn Error>> {
         .map(|_| log::debug!("Current directory: {}", workdir.display()))
 }
 
-fn main() -> Result<(), Box<dyn Error>>{
+fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     let cli = Cli::parse();
     if let Some(command) = cli.command {
@@ -64,7 +77,12 @@ fn main() -> Result<(), Box<dyn Error>>{
     Ok(())
 }
 
-fn run_program(program: PathBuf, config: PathBuf, no_log: bool, graphics: bool) -> Result<(), Box<dyn Error>> {
+fn run_program(
+    program: PathBuf,
+    config: PathBuf,
+    no_log: bool,
+    graphics: bool,
+) -> Result<(), Box<dyn Error>> {
     let app = app::App::load_from_file(config);
     if graphics {
         log::debug!("graphics");
