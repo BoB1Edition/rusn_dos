@@ -1,4 +1,4 @@
-// Ver: 4 File: crate/gui/src/lib.rs
+// Ver: 5 File: ./crate/gui/src/lib.rs
 
 use std::collections::HashSet;
 
@@ -62,10 +62,16 @@ impl Display for EmuWindow {
     }
 
     fn update(&mut self, pixels: &[u32], width: usize, height: usize) {
-        self.last_frame = pixels.to_vec();
+        if self.last_frame.len() == pixels.len() {
+            self.last_frame.copy_from_slice(pixels);
+        } else {
+            self.last_frame = pixels.to_vec();
+        }
         self.last_size = (width, height);
         self.last_update = std::time::Instant::now();
-        self.window.update_with_buffer(pixels, width, height).ok();
+        self.window
+            .update_with_buffer(&self.last_frame, width, height)
+            .ok();
     }
 
     fn pump_events(&mut self) {

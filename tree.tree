@@ -1,8 +1,12 @@
 .
+├── add-dos-api.prompt.md
+├── add-opcode.prompt.md
+├── add-peripheral.prompt.md
 ├── AGENTS.md
 ├── app
 ├── Cargo.lock
 ├── Cargo.toml
+├── CHANGELOG.md
 ├── config.json
 ├── config.toml
 ├── crate
@@ -22,7 +26,15 @@
 │   │           ├── mod.rs
 │   │           ├── pic.rs
 │   │           ├── pit.rs
-│   │           └── video.rs
+│   │           └── video
+│   │               ├── core.rs
+│   │               ├── dac.rs
+│   │               ├── mod.rs
+│   │               ├── peripheral.rs
+│   │               ├── planar.rs
+│   │               ├── render.rs
+│   │               ├── types.rs
+│   │               └── vbe.rs
 │   ├── dos
 │   │   ├── Cargo.toml
 │   │   └── src
@@ -30,7 +42,15 @@
 │   │       ├── filesystem.rs
 │   │       ├── interrupts
 │   │       │   ├── bios.rs
-│   │       │   ├── dos.rs
+│   │       │   ├── dos
+│   │       │   │   ├── console.rs
+│   │       │   │   ├── dir.rs
+│   │       │   │   ├── dispatch.rs
+│   │       │   │   ├── file_ops.rs
+│   │       │   │   ├── find.rs
+│   │       │   │   ├── memory.rs
+│   │       │   │   ├── misc.rs
+│   │       │   │   └── mod.rs
 │   │       │   ├── ems.rs
 │   │       │   └── mod.rs
 │   │       ├── ivt.rs
@@ -43,6 +63,10 @@
 │   │       ├── mcb.rs
 │   │       └── system.rs
 │   ├── dreamcast
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       └── lib.rs
+│   ├── emu_config
 │   │   ├── Cargo.toml
 │   │   └── src
 │   │       └── lib.rs
@@ -77,13 +101,25 @@
 │       │   ├── executor.rs
 │       │   ├── flags.rs
 │       │   ├── instructions
-│       │   │   ├── alu.rs
+│       │   │   ├── alu
+│       │   │   │   ├── bcd.rs
+│       │   │   │   ├── core.rs
+│       │   │   │   ├── eval.rs
+│       │   │   │   ├── group.rs
+│       │   │   │   ├── incdec.rs
+│       │   │   │   ├── inst.rs
+│       │   │   │   ├── mod.rs
+│       │   │   │   └── util.rs
 │       │   │   ├── bit.rs
 │       │   │   ├── control.rs
 │       │   │   ├── exchange.rs
 │       │   │   ├── group.rs
 │       │   │   ├── mod.rs
-│       │   │   ├── mov.rs
+│       │   │   ├── mov
+│       │   │   │   ├── imm.rs
+│       │   │   │   ├── mod.rs
+│       │   │   │   ├── rm.rs
+│       │   │   │   └── str_ops.rs
 │       │   │   ├── shift.rs
 │       │   │   ├── stack.rs
 │       │   │   └── system.rs
@@ -101,8 +137,21 @@
 │           ├── stack_test.rs
 │           ├── string_test.rs
 │           └── system_test.rs
+├── DESIGN.md
+├── docs
+│   ├── architecture.md
+│   ├── build.md
+│   ├── bus.md
+│   ├── dos-api.md
+│   ├── porting.md
+│   └── x86.md
 ├── ERRORS.md
+├── fix-bug.prompt.md
+├── README.md
+├── refactor.prompt.md
 ├── shufled.py
+├── SKILL.md
+├── split_module.prompt.md
 ├── src
 │   ├── app.rs
 │   └── main.rs
@@ -118,12 +167,13 @@
 │   ├── test2.asm
 │   ├── test3.asm
 │   ├── test4.asm
+│   ├── testvga.asm
 │   ├── ttasm.asm
 │   └── working.asm
+├── test-x86.prompt.md
 ├── test.sh
-├── tests
 ├── TODO.md
 ├── topopcodes.md
 └── tree.tree
 
-31 directories, 96 files
+37 directories, 140 files

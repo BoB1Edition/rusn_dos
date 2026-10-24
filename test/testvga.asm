@@ -29,6 +29,7 @@ START:
 ; ============================================================
 ; ДАННЫЕ
 ; ============================================================
+MSG_FX DB '[28] Border/blink/pan - press key...$', 0Dh, 0Ah, '$'
 MSG_TITLE   DB '=== EMULATOR TEST SUITE v1.1 ===', 0Dh, 0Ah, '$'
 MSG_PAUSE   DB 'Press any key to exit...', 0Dh, 0Ah, '$'
 MSG_CRLF    DB 0Dh, 0Ah, '$'
@@ -773,6 +774,62 @@ T27_FAIL:
     MOV AH, 09h
     INT 21h
 T27_DONE:
+
+    ; [28] Border + blink + panning
+    LEA DX, MSG_FX
+    MOV AH, 09h
+    INT 21h
+    MOV AH, 10h          ; overscan = красный (4)
+    MOV AL, 01h
+    MOV BH, 04h
+    INT 10h
+    MOV DX, 03D4h        ; активная ширина 70 колонок
+    MOV AL, 01h
+    OUT DX, AL
+    MOV DX, 03D5h
+    MOV AL, 69
+    OUT DX, AL
+    MOV AH, 02h         ; курсор в (2,0)
+    MOV DH, 2
+    MOV DL, 0
+    INT 10h
+    MOV AH, 09h
+    MOV AL, 'B'
+    MOV BL, 8Fh
+    MOV CX, 1
+    MOV BH, 0
+    INT 10h
+    MOV AH, 02h         ; курсор УВЕЛИ с мигающей ячейки
+    MOV DH, 3
+    MOV DL, 0
+    INT 10h
+    MOV DX, 03DAh        ; panning = 4 (сброс flip-flop чтением 3DA)
+    IN  AL, DX
+    MOV DX, 03C0h
+    MOV AL, 13h
+    OUT DX, AL
+    MOV AL, 04h
+    OUT DX, AL
+    MOV AH, 00h
+    INT 16h
+    ; восстановление
+    MOV DX, 03DAh
+    IN  AL, DX
+    MOV DX, 03C0h
+    MOV AL, 13h
+    OUT DX, AL
+    MOV AL, 00h
+    OUT DX, AL
+    MOV DX, 03D4h
+    MOV AL, 01h
+    OUT DX, AL
+    MOV DX, 03D5h
+    MOV AL, 79
+    OUT DX, AL
+    MOV AH, 10h
+    MOV AL, 01h
+    MOV BH, 00h
+    INT 10h
 
     ; Финиш ----------------------------------------------------
     LEA DX, MSG_DONE

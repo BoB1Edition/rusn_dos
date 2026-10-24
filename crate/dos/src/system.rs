@@ -1,8 +1,6 @@
-// Ver: 17 File: crate/dos/src/system.rs
+// Ver: 18 File: crate/dos/src/system.rs
 
-use bus::peripherals::video::{
-    VideoMode, scale_buffer,
-};
+use bus::peripherals::video::{letterbox43, scale_into_rect, VideoMode};
 use bus::{Cpu, Display, Machine, Motherboard};
 use emu_config::MachineConfig;
 use x86::cpu::X86Cpu;
@@ -56,6 +54,7 @@ pub struct DosSystem {
     pub suspended: Option<SuspendedCall>,
     pub machine_config: MachineConfig,
     pub console_input: ConsoleInputState,
+    pub scale_buf: Vec<u32>,
 }
 
 impl DosSystem {
@@ -75,6 +74,7 @@ impl DosSystem {
             suspended: None,
             machine_config: config,
             console_input: ConsoleInputState::default(),
+            scale_buf: Vec::new(),
         }
     }
 
@@ -200,31 +200,22 @@ impl DosSystem {
         }
     }
 
-    pub fn take_frame(&mut self) -> Option<(Vec<u32>, usize, usize)> {
+        pub fn take_frame(&mut self) -> Option<(Vec<u32>, usize, usize)> {
         if !self.machine.video.dirty {
             return None;
         }
         self.machine.video.dirty = false;
+        let pal = self.machine.video.palette_rgb8();
         let (buffer, w, h) = match (self.machine.video.vbe_mode, self.machine.video.mode) {
             (Some(vbe), _) => {
-                let pal = self.machine.video.palette_rgb8();
                 let buf = self.machine.video.render_vbe(vbe, &pal);
                 let (w, h) = vbe.dims();
                 (buf, w, h)
             }
-            (None, VideoMode::Text80x25) => {
-                let pal = self.machine.video.palette_rgb8();
-                let buf = self.machine.video.render_text(&pal);
-                (buf, 640, 400)
-            }
-            (None, VideoMode::Mode13h) => {
-                let pal = self.machine.video.palette_rgb8();
-                let buf = self.machine.video.render_mode13(&pal);
-                (buf, 1920, 1200)
-            }
+            (None, VideoMode::Text80x25) => (self.machine.video.render_text(&pal), 640, 400),
+            (None, VideoMode::Mode13h) => (self.machine.video.render_mode13(&pal), 320, 200),
             (None, m) => {
                 let (w, h) = m.planar_dims().unwrap_or((320, 200));
-                let pal = self.machine.video.palette_rgb8();
                 let buf = self.machine.video.render_planar(w, h, &pal);
                 (buf, w, h)
             }
@@ -232,20 +223,21 @@ impl DosSystem {
         Some((buffer, w, h))
     }
 
-    pub fn render(&mut self, display: &mut dyn Display) {
+        pub fn render(&mut self, display: &mut dyn Display) {
         let frame = self.take_frame();
         if let Some((buffer, w, h)) = frame {
             let (dw, dh) = display.size();
-            let scaled = if w != dw || h != dh {
-                scale_buffer(&buffer, w, h, dw, dh)
-            } else {
-                buffer
-            };
-            display.update(&scaled, dw, dh);
+            if self.scale_buf.len() != dw * dh {
+                self.scale_buf.resize(dw * dh, 0);
+            }
+            let (ox, oy, rw, rh) = letterbox43(dw, dh);
+            scale_into_rect(&buffer, w, h, &mut self.scale_buf, dw, dh, ox, oy, rw, rh);
+            display.update(&self.scale_buf, dw, dh);
         }
     }
 
     pub fn step_frame(&mut self, mut display: Option<&mut dyn Display>) {
+        self.machine.video.blink_tick();
         const INSTR_BUDGET: usize = 50_000;
         const POLL_INTERVAL: usize = 256;
         let mut executed = 0usize;
