@@ -1,4 +1,4 @@
-// Ver: 2 File: ./src/main.rs
+// Ver: 1 File: ./src/main.rs
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};
@@ -18,18 +18,12 @@ struct Cli {
     config: PathBuf,
     #[arg(long, default_value = "false")]
     no_log: bool,
-    #[arg(long)]
-    log: Option<String>,
     #[arg(short, long, default_value = "false")]
     graphics: bool,
-    #[arg(long)]
-    tail: Option<String>,
     #[arg(long, default_value = "false")]
     no_stdin_keys: bool,
     #[arg(long)]
     mount: Vec<String>,
-    #[arg(long, default_value = "0")]
-    timeout: u64,
     #[arg(long, default_value = "20")]
     max_call_depth: u16,
 }

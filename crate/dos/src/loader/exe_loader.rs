@@ -1,4 +1,4 @@
-// Ver: 5 File: crate/dos/src/loader/exe_loader.rs
+// Ver: 1 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
@@ -7,7 +7,6 @@ use crate::system::DosSystem;
 use bus::{Machine, Motherboard};
 
 use emu_config::MachineConfig;
-// ✅ ДОБАВЛЕНО: Правильный импорт из крейта x86
 use x86::instructions::stack;
 
 pub struct ExeLoader {

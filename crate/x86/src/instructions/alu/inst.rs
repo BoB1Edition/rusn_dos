@@ -1,3 +1,4 @@
+// Ver: 1 File: ./crate/x86/src/instructions/alu/inst.rs
 use crate::cpu::X86Cpu;
 use bus::Machine;
 

@@ -1,4 +1,4 @@
-// Ver: 19 File: crate/dos/src/system.rs
+// Ver: 1 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{letterbox43, scale_into_rect, VideoMode};
 use bus::{Cpu, Display, Machine, Motherboard};

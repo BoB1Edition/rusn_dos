@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/x86/src/executor.rs
+// Ver: 1 File: ./crate/x86/src/executor.rs
 use crate::cpu::X86Cpu;
 use crate::instructions::{alu, bit, control, exchange, group, mov, shift, stack, system};
 use bus::Machine;

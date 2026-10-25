@@ -1,4 +1,4 @@
-// Ver: 5 File: crate/dos/src/loader/com_loader.rs
+// Ver: 1 File: crate/dos/src/loader/com_loader.rs
 use bus::{Machine, Motherboard};
 use emu_config::MachineConfig;
 

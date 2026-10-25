@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/bus/src/peripherals/keyboard.rs
+// Ver: 1 File: ./crate/bus/src/peripherals/keyboard.rs
 use std::collections::VecDeque;
 
 use crate::Peripheral;

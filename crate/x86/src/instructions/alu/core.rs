@@ -1,3 +1,4 @@
+// Ver: 1 File: ./crate/x86/src/instructions/alu/core.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 
