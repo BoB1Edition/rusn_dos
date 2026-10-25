@@ -16,6 +16,7 @@ dos = { path = "crate/dos" }
 gui = { path = "crate/gui" }
 emu_config = { path = "crate/emu_config" }
 config = "0.15.27"
+crossterm = "0.29.0"
 
 [workspace]
 members = [

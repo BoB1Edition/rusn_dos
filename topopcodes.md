@@ -112,3 +112,4 @@
 | **P2** | BSF, BSR, 0F 01 | для защищённого режима |
 | **P2** | SGDT/SIDT, INT 1Ch, INT 09h | полная совместимость |
 | **P3** | INT 1Ch, WAIT, RDTSC | редкие случаи |
+| **P3** | VBE (VESA BIOS Extensions) | SVGA-совместимость (LFB + bank switching реализованы) |

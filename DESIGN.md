@@ -63,9 +63,10 @@ main()
   │     ├── Загрузка COM/EXE в память
   │     ├── Настройка MCB
   │     └── Инициализация регистров
-  ├── init_drivers() — монтирование дисков
-  ├── setup_program_directory()
-  └── Цикл: step_frame(display)
+   ├── init_drivers() — монтирование дисков (из App.config)
+   ├── setup_program_directory()
+   ├── init_stdin_bridge() — RawTerminal (crossterm raw-mode, если не --no-stdin-keys)
+   └── Цикл: step_frame(display)
         ├── step() → execute opcode
          ├── tick_timer() → IRQ0 каждые ~55ms
          ├── Опрос клавиатуры каждые 256 инструкций
@@ -109,6 +110,8 @@ first_mcb_segment          — начало цепочки MCB
 dta_segment/offset         — Disk Transfer Area
 suspended: Option<SuspendedCall>  — ожидание клавиши
 console_input: ConsoleInputState   — AH=0Ah буферизованный ввод
+exit_code: u8                      — код выхода программы
+program_terminated: bool           — флаг завершения (INT 20h/AH=4Ch)
 ```
 
 ### FileSystem

@@ -59,29 +59,48 @@ cargo run Run test/simple.exe --graphics
 # С отладочными логами
 RUST_LOG=debug cargo run Run test/simple.com
 
-# С трассировкой опкодов (пишет logopcode.txt без вывода в консоль)
-cargo run Run test/simple.exe --graphics --no-log
-
 # С указанием рабочей директории
 cargo run Run test/prog.exe --workdir /path/to
 
 # С альтернативным конфигом
-cargo run Run test/prog.exe --config myconfig.toml
+cargo run Run test/prog.exe -c myconfig.toml
+
+# Без опроса stdin как клавиатуры
+cargo run Run test/simple.com --no-stdin-keys
+
+# С аргументами для DOS-программы
+cargo run Run test/prog.exe -- arg1 arg2
 ```
 
 ## CLI
 
 ```
-Usage: rusn_dos [OPTIONS] [COMMAND]
+Usage: rusn_dos [OPTIONS] <COMMAND>
 
 Commands:
   Run   Запуск DOS-программы
   Win   Запуск в оконном режиме (TODO)
 
 Options:
-  -c, --config <FILE>    Путь к config.toml [default: config.toml]
-      --no-log           Отключить трассировку опкодов
-      --graphics         Включить графическое окно
+  -c, --config <FILE>        Путь к config.toml [default: config.toml]
+      --no-log               Отключить трассировку опкодов
+  -s, --startdir <DIR>       Поиск программы [default: ./]
+  -w, --workdir <DIR>        Рабочая директория [default: ./]
+      --graphics             Включить графическое окно
+      --no-stdin-keys        Не читать stdin как клавиши (headless)
+      --mount <L=path[:ro]>  Монтирование диска (C=./app:ro)
+      --max-call-depth <N>   Лимит глубины CALL в батчах [default: 20]
+
+Run usage: rusn_dos Run <PROGRAM> [--startdir <DIR>] [--workdir <DIR>] [OPTIONS] [-- <args>...]
+
+Win usage: rusn_dos Win [--workdir <DIR>] [OPTIONS]
+
+Коды выхода:
+  0   Успешное завершение
+  1   Ошибка эмулятора
+  2   Headless-ввод (программа ждёт клавишу без stdin)
+  3   Ошибка CLI/конфига/путей
+  101 Паника Rust
 ```
 
 ## Конфигурация (config.toml)

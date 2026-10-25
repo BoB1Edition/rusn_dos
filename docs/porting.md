@@ -18,7 +18,7 @@ The `Display` trait (in `crate/bus/src/display.rs`) has an optional `pump_events
 
 ### Steps
 
-1. **Create a new file** in `crate/bus/src/peripherals/`, e.g. `mouse.rs`
+1. **Create a new file** in `crate/bus/src/peripherals/` or in a subdirectory for complex peripherals (e.g. `video/`, `audio/`), e.g. `mouse.rs`
 2. **Add it to `crate/bus/src/peripherals/mod.rs`**
 3. **Add a field** to `Motherboard` in `crate/bus/src/motherboard.rs`
 4. **Initialize** in `Motherboard::new()`
@@ -81,13 +81,6 @@ DOS applications reference character devices by name (CON, NUL, PRN, etc.) via I
 Device names are case-insensitive, ignore extensions (CON.TXT == CON), and strip trailing colons (LPT1: == LPT1).
 
 All file handles 0–4 are pre-registered as character devices:
-| Handle | Device | Purpose |
-|--------|--------|---------|
-| 0 | CON | stdin (read from keyboard) |
-| 1 | CON | stdout (write to host stdout) |
-| 2 | CON | stderr (write to host stdout) |
-| 3 | AUX (COM1) | auxiliary device |
-| 4 | PRN (LPT1) | printer device |
 
 ## Registering a BIOS/DOS Interrupt Handler
 
@@ -196,7 +189,6 @@ Not yet implemented — currently all features are always compiled.
 ## Debugging
 
 - `RUST_LOG=info` / `RUST_LOG=debug` / `RUST_LOG=trace` for logging
-- `--no-log` disables opcode tracing
 - Opcode tracer writes to `logopcode.txt`
 - Use `X86Cpu::new_with_tracer("logopcode.txt")` for instruction-level debugging
 

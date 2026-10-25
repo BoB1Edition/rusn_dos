@@ -10,3 +10,4 @@ libs/dos_core/src/loader/com.rs
 memory_stage*
 run.log
 log
+testvga.asm

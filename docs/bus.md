@@ -18,7 +18,15 @@ crate/bus/src/
     ├── pic.rs
     ├── pit.rs
     ├── keyboard.rs
-    ├── video.rs
+    ├── video/        — VGA (разбит: core, dac, planar, render, peripheral, vbe, types)
+    │   ├── mod.rs
+    │   ├── core.rs
+    │   ├── dac.rs
+    │   ├── planar.rs
+    │   ├── render.rs
+    │   ├── peripheral.rs
+    │   ├── vbe.rs
+    │   └── types.rs
     └── fonts_vga8x16.rs
 ```
 
@@ -144,6 +152,8 @@ impl Memory {
 | 0x3CE, 0x3CF | VGA Graphics Controller | `video.port_read/write` |
 | 0x3D4, 0x3D5 | VGA CRTC | `video.port_read/write` |
 | 0x3DA | VGA Input Status 1 | `video.port_read` |
+| 0xE0000000+ | VBE LFB | MMIO (read_lfb/write_lfb) |
+| 0xFE000-0xFE1FF | VBE ROM | MMIO (vbe_info_block) |
 | 0x92 | A20 gate | прямое чтение/запись |
 
 MMIO (video):
@@ -213,6 +223,7 @@ MMIO (video):
 - Текстовый режим 80x25 (640×400).
 - Mode 13h (320×200×8, 256 цветов).
 - Планарные режимы: Mode 0Dh (320×200×16), 0Eh (640×200×16), 10h (640×350×16), 12h (640×480×16).
+- VBE (VESA BIOS Extensions): Mode 101h (640×480×256), 103h (800×600×256), 105h (1024×768×256), 112h (24-bit). LFB на 0xE0000000.
 - DAC 18-bit палитра (256 цветов, 6 бит на канал).
 - VGA Sequencer (0x3C4/0x3C5): маппинг страниц, режимы.
 - VGA Graphics Controller (0x3CE/0x3CF): режимы чтения 0/1, записи 0–3, bit mask, ALU.

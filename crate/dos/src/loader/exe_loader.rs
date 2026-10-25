@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/loader/exe_loader.rs
+// Ver: 2 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
@@ -71,10 +71,14 @@ impl ExeLoader {
         &mut self,
         no_log: bool,
         config: &MachineConfig,
+        args: Vec<String>,
     ) -> Result<DosSystem, Box<dyn std::error::Error>> {
-        const LOAD_SEGMENT: u16 = 0x1000; // Базовый сегмент загрузки
-        const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10; // PSP на 256 байт ниже кода
+        const LOAD_SEGMENT: u16 = 0x1000;
+        const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10;
+        const ENV_SEGMENT: u16 = PSP_SEGMENT - 0x10;
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
+        crate::loader::psp::build_environment_block(&mut machine, ENV_SEGMENT, PSP_SEGMENT);
+
         let header_size = self.header.e_cparhdr as usize * 16;
         let code_data = &self.data[header_size..];
         let loaded_bytes = code_data.len();
@@ -82,7 +86,10 @@ impl ExeLoader {
         let total_prog_bytes = loaded_bytes + bss_bytes;
         let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16;
         let end_segment = LOAD_SEGMENT + prog_paragraphs;
-        Self::create_psp(&mut machine, PSP_SEGMENT, end_segment);
+
+        let mem_paragraphs = MAX_MCB_SEGMENT - PSP_SEGMENT;
+        crate::loader::psp::build_psp(&mut machine, PSP_SEGMENT, ENV_SEGMENT, mem_paragraphs, &args);
+
         let code_base = LOAD_SEGMENT as u32 * 16;
         if code_base as usize + code_data.len() > machine.memory.len() {
             return Err("EXE file too large".into());
@@ -114,6 +121,7 @@ impl ExeLoader {
         sys.first_mcb_segment = PSP_SEGMENT - 1;
         sys.dta_segment = PSP_SEGMENT;
         sys.dta_offset = 0x0080;
+
         let prog_mcb = MCB {
             signature: MCB_SIGNATURE_NON_LAST,
             owner: PSP_SEGMENT,
@@ -147,11 +155,9 @@ impl ExeLoader {
         sys.cpu.registers.set_ip(ip);
         sys.cpu.registers.set_sp(sp);
 
-        // ✅ ИСПРАВЛЕНО: Корректная эмуляция начального PUSH адреса возврата в PSP.
-        // Используем штатные функции стека из крейта x86, чтобы избежать ошибок
-        // с ручным расчетом физ. адреса и переносом SP через 0.
-        stack::push16(&mut sys.cpu, &mut sys.machine, 0x0000); // IP (указывает на INT 20h в PSP)
-        stack::push16(&mut sys.cpu, &mut sys.machine, PSP_SEGMENT); // CS
+
+        stack::push16(&mut sys.cpu, &mut sys.machine, 0x0000);
+        stack::push16(&mut sys.cpu, &mut sys.machine, PSP_SEGMENT);
 
         log::info!(
             "Loaded .EXE file: CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X}, DS={:04X}",
@@ -195,25 +201,5 @@ impl ExeLoader {
                 corrected
             );
         }
-    }
-
-    // ✅ ИСПРАВЛЕНО: Добавлен параметр env_segment
-    fn create_psp(machine: &mut Motherboard, segment: u16, env_segment: u16) {
-        let psp_base = segment as u32 * 16;
-        machine.memory.write_u8(psp_base, 0xCD);
-        machine.memory.write_u8(psp_base + 1, 0x20);
-        //Начальный размер в памяти - не трогать
-        machine.memory.write_u8(psp_base + 2, 0xF0);
-        machine.memory.write_u8(psp_base + 3, 0x00);
-        //========================================
-        machine.memory.write_u8(psp_base + 5, 0xCD);
-        machine.memory.write_u8(psp_base + 6, 0x21);
-        machine.memory.write_u8(psp_base + 7, 0xCB);
-        machine.memory.write_u8(psp_base + 8, 0x00);
-        machine.memory.write_u8(psp_base + 9, 0x00);
-
-        // 0x2C: Сегмент окружения (Environment).
-        // Теперь указывает на память ПОСЛЕ программы, а не на её код (LOAD_SEGMENT).
-        machine.write_mem_u16(psp_base + 0x2C, env_segment);
     }
 }

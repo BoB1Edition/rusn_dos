@@ -33,7 +33,7 @@
 
 ---
 
-## 3. ALU (crate/x86/src/instructions/alu.rs)
+## 3. ALU (crate/x86/src/instructions/alu/)
 
 ### 3.1. [STUB] AF не вычисляется в shift/rotate (передаётся false)
 - **Файл:** `shift.rs:91,112,131`
@@ -42,12 +42,12 @@
 - **Fix:** Добавить вычисление AF для сдвигов/вращений.
 
 ### 3.2. [BUG] DAA/DAS — OF не меняется, но читается из старого состояния
-- **Файл:** `alu.rs:799,824`
+- **Файл:** `crate/x86/src/instructions/alu/inst.rs` (бывший `alu.rs:799,824`)
 - `let of = flags::test_of(cpu.registers.flags());` — OF undefined для DAA/DAS на реальном x86. Код сохраняет старое значение, что приемлемо на практике.
 
 ---
 
-## 4. Строковые инструкции (crate/x86/src/instructions/mov.rs)
+## 4. Строковые инструкции (crate/x86/src/instructions/mov/str_ops.rs)
 
 ### 4.1. [BUG] INS/OUTS с 0x66 — нестандартная обработка
 - **Файл:** `mov.rs:595-662`
@@ -193,9 +193,9 @@
 - **Файл:** `interrupts/ems.rs:17-24`
 - `AH=42h` проверяет handle, но не копирует данные в page frame (0xD000). Любая программа, использующая EMS real pages, получит мусор.
 
-### 11.5. [BUG] `run_window()` — todo!()
-- **Файл:** `main.rs:78-80`
-- Команда `Win` не реализована.
+### 11.5. [STUB] `run_window()` — todo!()
+- **Файл:** `src/main.rs:116-118`
+- Команда `Win` не реализована, вызывает `todo!()`.
 
 ### 11.6. [STUB] INT 21h / AH=00h — terminate, но не освобождает память
 - **Файл:** `interrupts/dos.rs:14-20`

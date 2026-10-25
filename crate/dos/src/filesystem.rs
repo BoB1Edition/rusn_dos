@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/filesystem.rs
+// Ver: 2 File: crate/dos/src/filesystem.rs
 use bus::Machine;
 use std::{
     collections::HashMap,
@@ -38,6 +38,7 @@ pub struct FileSystem {
     open_files: HashMap<u16, FileHandle>,
     next_handle: u16,
     search_contexts: HashMap<u32, SearchContext>,
+    handle_paths: HashMap<u16, PathBuf>,
 }
 
 impl FileSystem {
@@ -49,12 +50,15 @@ impl FileSystem {
             current_directories: HashMap::new(),
             current_drive: 'C',
             search_contexts: HashMap::new(),
+            handle_paths: HashMap::new(),
         };
         fs.open_files.insert(0, FileHandle::Device(DeviceKind::Con)); // stdin
         fs.open_files.insert(1, FileHandle::Device(DeviceKind::Con)); // stdout
         fs.open_files.insert(2, FileHandle::Device(DeviceKind::Con)); // stderr
-        fs.open_files.insert(3, FileHandle::Device(DeviceKind::Com(1))); // aux
-        fs.open_files.insert(4, FileHandle::Device(DeviceKind::Lpt(1))); // prn
+        fs.open_files
+            .insert(3, FileHandle::Device(DeviceKind::Com(1))); // aux
+        fs.open_files
+            .insert(4, FileHandle::Device(DeviceKind::Lpt(1))); // prn
 
         fs
     }
@@ -125,7 +129,6 @@ impl FileSystem {
         if dos_path.is_empty() {
             return Err("Empty path".to_string());
         }
-
         // 1. Определяем букву диска и относительную часть
         let (drive_letter, relative_path) =
             if dos_path.len() >= 2 && dos_path.chars().nth(1) == Some(':') {
@@ -134,12 +137,10 @@ impl FileSystem {
             } else {
                 (self.current_drive, dos_path)
             };
-
         let driver = self
             .drivers
             .get(&drive_letter)
             .ok_or_else(|| format!("Drive {} not configured", drive_letter))?;
-
         let current_dir = self
             .current_directories
             .get(&drive_letter)
@@ -147,12 +148,10 @@ impl FileSystem {
             .unwrap_or("");
         let is_absolute = relative_path.starts_with('\\') || relative_path.starts_with('/');
         let path_str = relative_path.trim_start_matches(|c| c == '\\' || c == '/');
-
         let mut local_path = driver.root_path.clone();
         if !is_absolute && !current_dir.is_empty() {
             local_path.push(current_dir);
         }
-
         let normalized = path_str.replace('\\', "/");
         for component in normalized.split('/') {
             match component {
@@ -164,14 +163,6 @@ impl FileSystem {
                     local_path.pop();
                 }
                 _ => local_path.push(component),
-            }
-        }
-
-        if let (Ok(canonical_root), Ok(canonical_path)) =
-            (driver.root_path.canonicalize(), local_path.canonicalize())
-        {
-            if !canonical_path.starts_with(&canonical_root) {
-                return Err(format!("Path traversal blocked: {}", dos_path));
             }
         }
 
@@ -188,7 +179,9 @@ impl FileSystem {
         if let Some(device) = resolve_device(dos_path) {
             let handle = self.next_handle;
             self.next_handle = self.next_handle.wrapping_add(1);
-            if self.next_handle < 5 { self.next_handle = 5; }
+            if self.next_handle < 5 {
+                self.next_handle = 5;
+            }
             self.open_files.insert(handle, FileHandle::Device(device));
             log::info!("Opened virtual device: {:?}", device);
             return Ok(handle);
@@ -233,6 +226,8 @@ impl FileSystem {
         if self.next_handle < 5 {
             self.next_handle = 5;
         }
+        log::info!("Opened file: {:?}:{:?}", local_path, file);
+        self.handle_paths.insert(handle, local_path);
         self.open_files.insert(handle, FileHandle::Disk(file));
         Ok(handle)
     }
@@ -241,8 +236,11 @@ impl FileSystem {
         if let Some(device) = resolve_device(dos_path) {
             let handle = self.next_handle;
             self.next_handle = self.next_handle.wrapping_add(1);
-            if self.next_handle < 5 { self.next_handle = 5; }
+            if self.next_handle < 5 {
+                self.next_handle = 5;
+            }
             self.open_files.insert(handle, FileHandle::Device(device));
+            log::info!("Created virtual device: {:?}", device);
             return Ok(handle);
         }
         let local_path = self.resolve_path(dos_path)?;
@@ -258,7 +256,9 @@ impl FileSystem {
         if self.next_handle < 5 {
             self.next_handle = 5;
         }
+        log::info!("Created file: {:?}:{:?}", local_path, file);
         self.open_files.insert(handle, FileHandle::Disk(file));
+        self.handle_paths.insert(handle, local_path);
         Ok(handle)
     }
 
@@ -266,7 +266,7 @@ impl FileSystem {
         if resolve_device(dos_path).is_some() {
             return Err("Access denied: Cannot delete a device".to_string());
         }
-        
+
         let local_path = self.resolve_path(dos_path)?;
         if local_path.is_dir() {
             return Err("Cannot delete directory with delete_file".to_string());
@@ -276,6 +276,7 @@ impl FileSystem {
     }
 
     pub fn close_file(&mut self, handle: u16) -> Result<(), String> {
+        self.handle_paths.remove(&handle);
         if self.open_files.remove(&handle).is_none() {
             Err(format!("Invalid file handle {}", handle))
         } else {
@@ -284,35 +285,38 @@ impl FileSystem {
     }
 
     pub fn read_file(&mut self, handle: u16, buffer: &mut [u8]) -> Result<u16, String> {
-        let file = self.open_files.get_mut(&handle)
+        let file = self
+            .open_files
+            .get_mut(&handle)
             .ok_or_else(|| format!("Invalid file handle {}", handle))?;
-            
+
         match file {
             FileHandle::Disk(f) => {
                 let bytes_read = f.read(buffer).map_err(|e| format!("Read error: {}", e))?;
                 Ok(bytes_read as u16)
             }
-            FileHandle::Device(DeviceKind::Con) => {
-                Ok(0)
-            }
+            FileHandle::Device(DeviceKind::Con) => Ok(0),
             FileHandle::Device(_) => {
                 // NUL, PRN, COM, CLOCK, EMS при чтении всегда возвращают EOF (0 байт)
-                Ok(0) 
+                Ok(0)
             }
         }
     }
 
     pub fn write_file(&mut self, handle: u16, buffer: &[u8]) -> Result<u16, String> {
-        let file = self.open_files.get_mut(&handle)
+        let file = self
+            .open_files
+            .get_mut(&handle)
             .ok_or_else(|| format!("Invalid file handle {}", handle))?;
-            
+
         match file {
             FileHandle::Disk(f) => {
                 let bytes_written = f.write(buffer).map_err(|e| format!("Write error: {}", e))?;
                 Ok(bytes_written as u16)
             }
             FileHandle::Device(DeviceKind::Con) => {
-                let bytes_written = std::io::stdout().write(buffer)
+                let bytes_written = std::io::stdout()
+                    .write(buffer)
                     .map_err(|e| format!("CON write error: {}", e))?;
                 std::io::stdout().flush().ok();
                 Ok(bytes_written as u16)
@@ -328,8 +332,7 @@ impl FileSystem {
                 log::info!("[AUX/COM OUTPUT] {}", String::from_utf8_lossy(buffer));
                 Ok(buffer.len() as u16)
             }
-            FileHandle::Device(DeviceKind::Clock) |
-            FileHandle::Device(DeviceKind::Ems) => {
+            FileHandle::Device(DeviceKind::Clock) | FileHandle::Device(DeviceKind::Ems) => {
                 log::debug!("Write to CLOCK$/EMMXXXX0 ignored");
                 Ok(buffer.len() as u16)
             }
@@ -337,9 +340,11 @@ impl FileSystem {
     }
 
     pub fn seek_file(&mut self, handle: u16, offset: i32, origin: u8) -> Result<u32, String> {
-        let file = self.open_files.get_mut(&handle)
+        let file = self
+            .open_files
+            .get_mut(&handle)
             .ok_or_else(|| format!("Invalid file handle {}", handle))?;
-            
+
         match file {
             FileHandle::Disk(f) => {
                 let whence = match origin {
@@ -455,8 +460,11 @@ impl FileSystem {
 
         let name = entry.file_name().to_string_lossy().to_uppercase();
         let name_83 = format_83(&name);
-        let time = 0;
-        let date = 0;
+        let (date, time) = metadata
+            .modified()
+            .ok()
+            .map(system_time_to_dos_datetime)
+            .unwrap_or((0, 0));
 
         Ok(Some(FoundFile {
             name_83,
@@ -465,6 +473,9 @@ impl FileSystem {
             date,
             size: metadata.len() as u32,
         }))
+    }
+    pub fn handle_path(&self, handle: u16) -> Option<&PathBuf> {
+        self.handle_paths.get(&handle)
     }
 }
 
@@ -535,9 +546,9 @@ pub enum FileHandle {
 
 pub fn resolve_device(dos_path: &str) -> Option<DeviceKind> {
     // 1. Отбрасываем префикс диска: "C:\DIR\CON.TXT" -> "\DIR\CON.TXT"
-    let path = if dos_path.len() >= 2 
-        && dos_path.as_bytes()[1] == b':' 
-        && dos_path.as_bytes()[0].is_ascii_alphabetic() 
+    let path = if dos_path.len() >= 2
+        && dos_path.as_bytes()[1] == b':'
+        && dos_path.as_bytes()[0].is_ascii_alphabetic()
     {
         &dos_path[2..]
     } else {
@@ -549,12 +560,12 @@ pub fn resolve_device(dos_path: &str) -> Option<DeviceKind> {
     let base = base.trim_end_matches(':');
 
     match base {
-        "CON"      => Some(DeviceKind::Con),
-        "NUL"      => Some(DeviceKind::Nul),
-        "CLOCK$"   => Some(DeviceKind::Clock),
+        "CON" => Some(DeviceKind::Con),
+        "NUL" => Some(DeviceKind::Nul),
+        "CLOCK$" => Some(DeviceKind::Clock),
         "EMMXXXX0" => Some(DeviceKind::Ems),
-        "PRN"      => Some(DeviceKind::Lpt(1)),
-        "AUX"      => Some(DeviceKind::Com(1)),
+        "PRN" => Some(DeviceKind::Lpt(1)),
+        "AUX" => Some(DeviceKind::Com(1)),
         _ => {
             if let Some(n) = base.strip_prefix("LPT") {
                 parse_port(n).map(DeviceKind::Lpt)
@@ -568,7 +579,63 @@ pub fn resolve_device(dos_path: &str) -> Option<DeviceKind> {
 }
 
 fn parse_port(s: &str) -> Option<u8> {
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
     let n: u8 = s.parse().ok()?;
     if (1..=4).contains(&n) { Some(n) } else { None }
+}
+
+pub fn system_time_to_dos_datetime(t: std::time::SystemTime) -> (u16, u16) {
+    let dur = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let secs = dur.as_secs();
+    let days = secs / 86400;
+    let sod = secs % 86400;
+
+    let mut year: u64 = 1970;
+    let mut rem = days;
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        let diy: u64 = if leap { 366 } else { 365 };
+        if rem < diy {
+            break;
+        }
+        rem -= diy;
+        year += 1;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    let dim: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month: u64 = 1;
+    for &d in dim.iter() {
+        if rem < d {
+            break;
+        }
+        rem -= d;
+        month += 1;
+    }
+    let day = rem + 1;
+
+    // DOS хранит год как (год-1980) в 7 битах: диапазон 1980..=2107
+    let year = year.clamp(1980, 2107);
+
+    let hours = sod / 3600;
+    let minutes = (sod % 3600) / 60;
+    let seconds = sod % 60;
+
+    let date = (((year - 1980) as u16) << 9) | ((month as u16) << 5) | (day as u16);
+    let time = ((hours as u16) << 11) | ((minutes as u16) << 5) | ((seconds / 2) as u16);
+    (date, time)
 }

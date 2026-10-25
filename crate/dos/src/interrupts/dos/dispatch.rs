@@ -1,6 +1,8 @@
-// Ver: 1 File: crate/dos/src/interrupts/dos/dispatch.rs
+// Ver: 5 File: crate/dos/src/interrupts/dos/dispatch.rs
 use x86::flags;
 
+use crate::interrupts::dos::file_ops::file_date_time;
+use crate::interrupts::dos::misc::{get_country_info, get_system_date, get_system_time};
 use crate::system::DosSystem;
 
 use super::console::{print_char, direct_console_io, direct_char_input_no_echo, char_input_no_echo, print_dos_string, buffered_input, read_char_with_echo};
@@ -11,14 +13,12 @@ use super::memory::{allocate_memory_handler, free_memory_handler, modify_memory_
 use super::find::{find_first, find_next};
 
 pub fn handle_int21(sys: &mut DosSystem) {
-    log::info!("int 21: {:#02x}", sys.cpu.registers.ah());
+    log::trace!("int 21: {:#02x}", sys.cpu.registers.ah());
     match sys.cpu.registers.ah() {
         0x00 => {
-            log::info!(
-                "Program terminated via INT 21h AH=00h, exit code={}",
-                sys.cpu.registers.al()
-            );
-            sys.cpu.halted = true;
+            log::info!("Program terminated via INT 21h AH=00h, exit code={}", sys.cpu.registers.al());
+            sys.exit_code = sys.cpu.registers.al();
+            sys.program_terminated = true;
         }
         0x01 => read_char_with_echo(sys),
         0x02 => print_char(sys),
@@ -30,6 +30,8 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x19 => get_current_drive(sys),
         0x1A => set_dta(sys),
         0x25 => set_interrupt_vector(sys),
+        0x2A => get_system_date(sys),
+        0x2C => get_system_time(sys),
         0x30 => {
             sys.cpu.registers.set_ax(0x1606);
             sys.cpu.registers.set_bx(0x0000);
@@ -37,6 +39,7 @@ pub fn handle_int21(sys: &mut DosSystem) {
             set_carry_flag(sys, false);
         }
         0x35 => get_interrupt_vector(sys),
+        0x38 => get_country_info(sys),
         0x3B => set_current_directory(sys),
         0x3C => create_file(sys),
         0x3D => open_file(sys),
@@ -51,9 +54,15 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x48 => allocate_memory_handler(sys),
         0x49 => free_memory_handler(sys),
         0x4A => modify_memory_handler(sys),
-        0x4C => sys.cpu.halted = true,
+        0x4C => {
+            log::debug!("Program terminated via INT 21h AH=4Ch, exit code={}", sys.cpu.registers.al());
+            sys.exit_code = sys.cpu.registers.al();
+            sys.program_terminated = true;
+            sys.cpu.halted = true
+        }
         0x4E => find_first(sys),
         0x4F => find_next(sys),
+        0x57 => file_date_time(sys),
         _ => {
             log::warn!(
                 "Unsupported DOS call 21h/{:02X}h at CS:IP={:04X}:{:04X}",

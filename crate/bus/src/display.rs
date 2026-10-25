@@ -1,4 +1,4 @@
-// Ver: 3 File: crate/bus/src/display.rs
+// Ver: 1 File: crate/bus/src/display.rs
 
 /// Абстракция окна вывода/ввода (минибуфер). Реализуется во внешнем crate.
 /// Позволяет `bus`/`dos` не зависеть напрямую от конкретной GUI-библиотеки.

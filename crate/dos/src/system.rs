@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/system.rs
+// Ver: 2 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{letterbox43, scale_into_rect, VideoMode};
 use bus::{Cpu, Display, Machine, Motherboard};
@@ -54,6 +54,8 @@ pub struct DosSystem {
     pub machine_config: MachineConfig,
     pub console_input: ConsoleInputState,
     pub scale_buf: Vec<u32>,
+    pub exit_code: u8,
+    pub program_terminated: bool,
 }
 
 impl DosSystem {
@@ -74,6 +76,8 @@ impl DosSystem {
             machine_config: config,
             console_input: ConsoleInputState::default(),
             scale_buf: Vec::new(),
+            exit_code: 0,
+            program_terminated: false,
         }
     }
 

@@ -32,7 +32,7 @@ Defines abstract interfaces and concrete motherboard peripherals.
 | `peripheral.rs` | `Peripheral` trait — `port_read/write`, `mem_read/write`, `tick` |
 | `display.rs` | `Display` trait — window, key polling, pixel buffer |
 | `motherboard.rs` | `Motherboard` — `Memory` + `Keyboard` + `VideoMemory` + `Pic` + `Pit`, implements `Machine` |
-| `peripherals/` | `pic.rs` (8259), `pit.rs` (8253), `keyboard.rs` (8042), `video.rs` (VGA — text/planar/mode13h, DAC, sequencer, graphics controller), `fonts_vga8x16.rs` |
+| `peripherals/` | `pic.rs` (8259), `pit.rs` (8253), `keyboard.rs` (8042), `video/` (VGA — core, dac, planar, render, peripheral, vbe, types), `fonts_vga8x16.rs` |
 
 **Trait `Machine`** — the system bus that CPU uses to access memory, I/O ports, and interrupts:
 
@@ -63,7 +63,7 @@ Full 80386+ real-mode CPU implementation (partial protected mode).
 | `modrm.rs` | ModRM decoder with 16/32-bit addressing, SIB, segment defaults |
 | `executor.rs` | `execute(opcode)` and `execute_0f(opcode)` dispatch (single-byte + 0F prefix) |
 | `tracer.rs` | Instruction logging via `Tracer` trait — `FileTracer` + `NullTracer` |
-| `instructions/` | 10 instruction category modules (alu/ subdir, mov/ subdir, bit, shift, control, exchange, group, stack, system) |
+| `instructions/` | 10 instruction category modules (`alu/` subdir, `mov/` subdir, `bit`, `shift`, `control`, `exchange`, `group`, `stack`, `system`) |
 
 ### `dos` — DOS Layer
 
@@ -73,7 +73,7 @@ Connects x86 CPU to DOS environment.
 |--------|----------|
 | `system.rs` | `DosSystem` — Motherboard + X86Cpu + FileSystem + EMS + DTA + suspend + `ConsoleInputState` |
 | `ivt.rs` | IVT initialization (0x00000-0x003FF), internal handler routing via CS=0xF000 |
-| `interrupts/` | `dos.rs` (INT 21h), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h EMS 4.0) |
+| `interrupts/` | `dos/` (INT 21h subdir: dispatch, console, file_ops, dir, find, memory, misc), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h EMS 4.0) |
 | `loader/` | COM loader, EXE loader (MZ header), executable detection |
 | `filesystem.rs` | Multi-drive filesystem, `DiskDriver`, `DeviceKind`/`FileHandle`, wildcard matching, 8.3 formatting |
 | `mcb.rs` | DOS Memory Control Block allocator (allocate/free/modify/coalesce) |
@@ -176,7 +176,9 @@ step_frame(display):
 | 0xA0000-0xBFFFF | Video RAM (VGA) |
 | 0xC0000-0xEFFFF | ROM/Expansion |
 | 0xF0000-0xFFFFF | BIOS area (internal handlers) |
-| 0x100000-0xEFFFFF | Extended Memory (XMS) |
+| 0xFE000-0xFE1FF | VBE BIOS ROM |
+| 0x100000-0xEFFFFFF | Extended Memory (XMS) |
+| 0xE0000000-0xE03FFFF | VBE LFB (Linear Frame Buffer) |
 
 ## Video System
 
@@ -200,13 +202,16 @@ Supports five video modes:
 
 **VGA Attribute Controller (0x3C0/0x3C1)**: `ac_regs[0x15]` with flip-flop index/data register. Mode-dependent defaults. `ac_dac_index()` and `ac_dac_index_graphics()` map 4-bit color indices through palette + color select. `plane_enable()` (reg 0x12), `blink_enabled()` (reg 0x10 bit 3).
 
+**VBE (VESA BIOS Extensions)**: Support for modes 101h (640×480×256), 103h (800×600×256), 105h (1024×768×256), 112h (24-bit). LFB at 0xE0000000 (VBE_LFB_SIZE = 1024×768×4). Bank switching via A0000 window. `vbe_info_block()` returns 256-byte VBE info block. `set_vbe_mode()` configures framebuffer.
+
 **VGA Input Status (port 0x3DA)**: `input_status_1()` simulates vertical/horizontal retrace timing using `retrace_epoch` (wall-clock). Resets `attr_flip_flop` on read (anti-tear).
 
 Rendering pipeline:
 1. Text mode: `VideoMemory::render_text()` — renders 640×400 using CRTC start address, line offset, cursor position/scanline, attribute controller DAC mapping, and blinking.
 2. Planar modes: `VideoMemory::render_planar()` — packs 4-bit color from 4 planes into RGBA buffer using CRTC start address and offset.
-3. Graphics mode 13h: `VideoMemory::render_mode13()` — 6× nearest-neighbor to 1920×1200 using CRTC start address and offset.
-4. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor).
+3. Graphics mode 13h: `VideoMemory::render_mode13()` — framebuffer to RGBA buffer using CRTC start address and offset.
+4. VBE modes: `VideoMemory::render_vbe()` — renders LFB content to RGBA buffer.
+5. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor).
 
 ### File System (`crate/dos/src/filesystem.rs`)
 
@@ -222,5 +227,7 @@ Multi-drive virtual filesystem with:
 
 Concrete `Machine` impl with:
 - **A20 gate**: `apply_a20_mask()` wraps addresses when disabled. Controlled via port 0x92 or keyboard controller 0x64/0x60 command 0xD1.
-- **Port dispatch**: Routes I/O to Keyboard, PIC, PIT, VideoMemory peripherals.
+- **Port dispatch**: Routes I/O to Keyboard, PIC, PIT, VideoMemory peripherals (all VGA ports: 0x3C0-0x3C9, 0x3CE-0x3CF, 0x3D4-0x3D5, 0x3DA).
+- **MMIO**: Routes VBE LFB (0xE0000000+) and VBE ROM (0xFE000-0xFE1FF) to VideoMemory.
 - **Interrupts**: `trigger_irq()` delegates to PIC.
+- **A20 gate readback**: Port 0x92 bit 1 returns A20 state.

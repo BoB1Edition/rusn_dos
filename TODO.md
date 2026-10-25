@@ -9,8 +9,8 @@
 | ID | Решение | Статус |
 |----|---------|--------|
 | D1 | Command tail: склейка одиночными пробелами + авто-кавычки вокруг токенов с пробелом/табом; ведущий пробел; терминатор `0x0D` | ✅ |
-| D2 | `--tail 'raw'` — дословный хвост поверх `argv` | ✅ |
-| D3 | Headless: `--stdin-keys` включён по умолчанию (без `-g` и без `--no-stdin-keys`). С `--no-stdin-keys` при ожидании ввода → выход с кодом 2 | ✅ |
+| D2 | `--tail 'raw'` — дословный хвост поверх `argv` | ❌ удалён из CLI |
+| D3 | Headless: `--stdin-keys` включён по умолчанию (без `-g` и без `--no-stdin-keys`). С `--no-stdin-keys` при ожидании ввода → выход с кодом 2 | ✅ через stdin_bridge |
 | D4 | Байты stdin → клавиши; `\n` → Enter; EOF при ожидании → код 2 | ✅ |
 | D5 | Окно только при `-g`/`--graphics`, независимо от типа программы | ✅ |
 | D6 | PROGRAM: host-путь и DOS-путь (`c:\...`) одновременно | ✅ |
@@ -22,7 +22,7 @@
 | D12 | Минимальный набор bat-команд, расширение по мере развития | ✅ |
 | D13 | `ECHO ON` по умолчанию, `@` глушит строку | ✅ |
 | D14 | Лимит глубины `CALL`: дефолт 20, правится конфигом и CLI, кламп `1..=255` | ✅ |
-| D15 | Уровень лога = самый широкий из `--log` и `RUST_LOG`; дефолт `warn` | ✅ |
+| D15 | Уровень лога = самый широкий из `--log` и `RUST_LOG`; дефолт `warn` | ❌ удалён из CLI |
 | D16 | REPL делаем (этап 5) | ✅ |
 | D17 | DOS-мини-блок (45/46, 36, 1Ah) в этапе 2 | ✅ |
 
@@ -34,7 +34,7 @@
 | 1 | Ошибка эмулятора (unsupported DOS call, unsupported opcode, halt) |
 | 2 | Нарушение headless-ввода (D3/D4) |
 | 3 | Ошибка CLI/конфига/путей |
-| 4 | `--timeout` |
+| 4 | `--timeout` | ❌ удалён из CLI |
 | 101 | Паника Rust (плюс panic-hook пишет `error!` в лог) |
 
 ---
@@ -53,9 +53,9 @@
 ### Подэтап 1.1: Парсер CLI по новой грамматике
 
 **Что делаем:**
-- Переписываем `src/main.rs` под новую структуру: глобальные флаги до `run`, флаги до первого позиционного аргумента, всё после `=` — токены хвоста
-- Добавляем флаги: `--log <level>`, `--tail <raw>`, `--no-stdin-keys`, `--mount <L=host[:ro]>`, `--timeout <N>`, `--max-call-depth <N>`
-- Убираем подкоманду `Win`, оставляем только `run` (или делаем `run` дефолтным при отсутствии подкоманды)
+- Переписываем `src/main.rs` под новую структуру: `run` и `win` как clap subcommands
+- Добавляем флаги: `--no-stdin-keys`, `--mount <L=host[:ro]>`, `--max-call-depth <N>`
+- Флаги `--log`, `--tail`, `--timeout`, `--no-log` **удалены** из CLI
 
 **Файлы:** `src/main.rs`
 
@@ -67,9 +67,8 @@
 ### Подэтап 1.2: Логирование по D15
 
 **Что делаем:**
-- Merge `--log` и `RUST_LOG`: берём самый широкий уровень
+- `env_logger::init()` через `RUST_LOG` (флаг `--log` **удалён** из CLI)
 - Дефолт = `warn` для чистоты вывода сборки
-- Panic-hook: ловит паники, пишет `error!` в лог, возвращает код 101
 
 **Файлы:** `src/main.rs`
 
@@ -169,7 +168,7 @@
   - Паника → код 101 (уже в panic-hook)
 - Добавляем поле `exit_code: u8` в `DosSystem`, устанавливаем в обработчиках `INT 21h/AH=4Ch` и `INT 20h`
 
-**Файлы:** `src/main.rs`, `src/app.rs`, `crate/dos/src/system.rs`, `crate/dos/src/interrupts/dos.rs`
+**Файлы:** `src/main.rs`, `src/app.rs`, `crate/dos/src/system.rs`, `crate/dos/src/interrupts/dos/dispatch.rs`
 
 **Критерии приёмки:**
 ```bash
@@ -179,16 +178,12 @@
 ### Подэтап 1.9: Headless-ввод (D3/D4)
 
 **Что делаем:**
-- Флаг `--no-stdin-keys` отключает чтение stdin
-- По умолчанию (без `-g` и без `--no-stdin-keys`) запускаем поток-читатель stdin:
-  - Байты stdin → `keyboard.push_key(scancode=0, ascii=byte)`
-  - `\n` → Enter (`0x0D`)
-  - Ctrl-C (`0x03`) проходит как есть
-  - EOF → устанавливаем флаг `stdin_closed`
-- В `system.rs` при `step_frame` если `display == None` и программа ждёт клавишу (`suspended.is_some()`):
-  - Если `--no-stdin-keys` → `error!` + код 2 + сообщение "program waits for keyboard in headless mode, do not use --no-stdin-keys"
-  - Если EOF → `error!` + код 2 + сообщение "stdin closed while program waits for keyboard"
-  - Иначе → кормим клавиши из потока
+- Реализован `src/stdin_bridge.rs` — crossterm raw-mode опрос клавиатуры через stdin, маппинг US scancodes
+- `RawTerminal` RAII-гард включает raw mode при старте, восстанавливает при выходе
+- `poll_keys()` — неблокирующий опрос всех накопленных событий
+- EOF при ожидании ввода → `--no-stdin-keys` не установлен? → программа продолжает
+- Если `--no-stdin-keys` и программа ждёт ввод → `error!` + выход с кодом 2
+- **Реализовано:** `App::run()` использует `stdin_bridge::poll_keys()` в цикле
 
 **Файлы:** `src/main.rs`, `src/app.rs`, `crate/dos/src/system.rs`
 
@@ -206,8 +201,7 @@
 ### Подэтап 2.1: `--timeout N`
 
 **Что делаем:**
-- Флаг `--timeout N` (секунды, 0 = выкл)
-- В `step_frame` проверяем elapsed time, если превышен → `error!` + код 4
+- Флаг `--timeout N` **удалён** из CLI (секция кодов выхода оставлена для совместимости, но не реализована)
 
 **Файлы:** `src/main.rs`, `src/app.rs`, `crate/dos/src/system.rs`
 

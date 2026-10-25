@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/dos/src/interrupts/dos/file_ops.rs
+// Ver: 2 File: ./crate/dos/src/interrupts/dos/file_ops.rs
 use crate::filesystem::DeviceKind;
 use crate::interrupts::bios::tty_write;
 use crate::system::DosSystem;
@@ -215,6 +215,60 @@ pub fn file_attributes(sys: &mut DosSystem) {
         _ => {
             set_carry_flag(sys, true);
             sys.cpu.registers.set_ax(1);
+        }
+    }
+}
+
+/// INT 21h / AH=57h — Get/Set File Date and Time
+pub fn file_date_time(sys: &mut DosSystem) {
+    let al = sys.cpu.registers.al();
+    let bx = sys.cpu.registers.bx();
+
+    // Валидность хендла: устройство или открытый дисковый файл
+    let is_device = sys.filesystem.device_of(bx).is_some();
+    let path = sys.filesystem.handle_path(bx).cloned();
+    if !is_device && path.is_none() {
+        log::warn!("INT 21h / AH=57h: invalid handle {}", bx);
+        set_carry_flag(sys, true);
+        sys.cpu.registers.set_ax(0x06);
+        return;
+    }
+
+    match al {
+        // Get: время/дата (00), дата доступа (02), дата/время создания (04)
+        0x00 | 0x02 | 0x04 => {
+            let (date, time) = if is_device {
+                (0u16, 0u16) // у устройств timestamps нет
+            } else {
+                path.as_ref()
+                    .and_then(|p| std::fs::metadata(p).ok())
+                    .and_then(|md| md.modified().ok())
+                    .map(crate::filesystem::system_time_to_dos_datetime)
+                    .unwrap_or((0, 0))
+            };
+            sys.cpu.registers.set_cx(time);
+            sys.cpu.registers.set_dx(date);
+            set_carry_flag(sys, false);
+            log::info!(
+                "INT 21h / AH=57h/AL={:02X}: handle {} -> date={:04X} time={:04X}",
+                al,
+                bx,
+                date,
+                time
+            );
+        }
+        // Set: (01), (03), (05) — принимаем как успех, но mtime хост-файла не трогаем
+        0x01 | 0x03 | 0x05 => {
+            set_carry_flag(sys, false);
+            log::info!(
+                "INT 21h / AH=57h/AL={:02X}: set date/time handle {} accepted (host mtime unchanged)",
+                al,
+                bx
+            );
+        }
+        _ => {
+            set_carry_flag(sys, true);
+            sys.cpu.registers.set_ax(0x01);
         }
     }
 }

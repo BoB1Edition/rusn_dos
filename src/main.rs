@@ -1,19 +1,16 @@
-// Ver: 1 File: ./src/main.rs
+// Ver: 5 File: ./src/main.rs
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};
-
 mod app;
+mod stdin_bridge;
 
 #[derive(Debug, Parser)]
 #[command(name = "rusn_dos")]
 #[command(version, about)]
 struct Cli {
-    /// Subcommand to run
     #[command(subcommand)]
     command: Option<Commands>,
-
-    /// Config file path
     #[arg(short, long, default_value = "config.toml")]
     config: PathBuf,
     #[arg(long, default_value = "false")]
@@ -34,17 +31,16 @@ enum Commands {
         #[arg(short, long, default_value = "./")]
         workdir: PathBuf,
     },
+    #[command(disable_help_flag = true)]
     Run {
         program: PathBuf,
-        #[arg(short, long, default_value = "./")]
+        #[arg(short = 's', long = "startdir", default_value = "./")]
+        startdir: PathBuf,
+        #[arg(short = 'w', long = "workdir", default_value = "./")]
         workdir: PathBuf,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        program_args: Vec<String>,
     },
-}
-
-fn set_workdir(workdir: &PathBuf) -> Result<(), Box<dyn Error>> {
-    env::set_current_dir(workdir)
-        .map_err(|e| e.into())
-        .map(|_| log::debug!("Current directory: {}", workdir.display()))
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -53,16 +49,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(command) = cli.command {
         match command {
             Commands::Win { workdir } => {
-                let _ = set_workdir(&workdir);
+                let _ = env::set_current_dir(&workdir);
                 run_window(cli.config)?;
             }
-            Commands::Run { program, workdir } => {
-                let _ = set_workdir(&workdir);
-                if program.exists() && program.is_file() {
-                    run_program(program, cli.config, cli.no_log, cli.graphics)?;
+            Commands::Run {
+                program,
+                startdir,
+                workdir,
+                program_args,
+            } => {
+                let actual_program = if program.exists() && program.is_file() {
+                    program
                 } else {
-                    info!("program not found or program not a file");
-                }
+                    let joined = startdir.join(&program);
+                    if joined.exists() && joined.is_file() {
+                        joined
+                    } else {
+                        program
+                    }
+                };
+                run_program(
+                    actual_program,
+                    startdir,
+                    workdir,
+                    cli.config,
+                    cli.no_log,
+                    cli.graphics,
+                    cli.no_stdin_keys,
+                    program_args,
+                )?;
             }
         }
     } else {
@@ -73,16 +88,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run_program(
     program: PathBuf,
+    startdir: PathBuf,
+    workdir: PathBuf,
     config: PathBuf,
     no_log: bool,
     graphics: bool,
+    no_stdin_keys: bool,
+    program_args: Vec<String>,
 ) -> Result<(), Box<dyn Error>> {
     let app = app::App::load_from_file(config);
     if graphics {
         log::debug!("graphics");
-        app.run_with_graphics(program, no_log)?;
+        app.run_with_graphics(program, startdir, workdir, no_log, program_args)?;
     } else {
-        app.run(program, no_log)?;
+        app.run(
+            program,
+            startdir,
+            workdir,
+            no_log,
+            no_stdin_keys,
+            program_args,
+        )?;
     }
     Ok(())
 }

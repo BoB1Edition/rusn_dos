@@ -1,6 +1,6 @@
 # AGENTS.md — Правила и соглашения для агентов, работающих с кодом
 
-## Проект: rusn_dos — Мультисистемный эмулятор на Rust пока находится в бета режиме
+## Проект: rusn_dos — Мультисистемный эмулятор на Rust (beta)
 
 ### Архитектура
 
@@ -9,13 +9,19 @@
 - `crate/x86` — эмуляция CPU 80386+: регистры, флаги, ModRM (16/32-bit + SIB), декодер (`execute`/`execute_0f`), все инструкции
 - `crate/dos` — DOS-оболочка: загрузчики EXE/COM, файловая система (многодисковая + устройства DOS), IVT, MCB, EMS, прерывания (INT 08h–67h)
 - `crate/gui` — графическое окно (minifb), клавиатура (scancode → DOS)
-- `crate/emu_config` — типы конфигурации (Resolution, MachineConfig, VideoConfig, SoundConfig, DriverConfig)
-- `src/` — точка входа (clap CLI), конфигурация (config.toml), монтирование дисков
-- максимальное избегание длинных более 300-400 строк файлов исходников, длинные файлы допустимы только если разбить файл логически совсем не возможно(./crate/bus/src/peripherals/fonts_vga8x16.rs) или на время беты, группировка по логике в отдельный каталогах
+- `crate/emu_config` — типы конфигурации (Resolution, MachineConfig, VideoConfig, SoundConfig, DriverConfig, CpuConfig)
+- `src/` — точка входа (clap CLI, subcommands Run/Win), конфигурация (config.toml), монтирование дисков, stdin_bridge (crossterm raw-mode)
+- максимальное избегание длинных более 300-400 строк файлов исходников, длинные файлы допустимы только если разбить файл логически совсем не возможно (`./crate/bus/src/peripherals/fonts_vga8x16.rs`) или на время беты, группировка по логике в отдельные каталоги
 - максимальное избегание god object где только можно
 - использование макросов для избегания дублирования кода приветствуется
-- переход на альфу предполагает перевод кахдого процессора\сопроцессора на свой поток, то есть видео карта - поток, аудио - отдельный поток, таймер отдельный поток....  
-- в альфа режим могут переводиться как само приложение в целом, так и отдельные крейты 
+- переход на альфу предполагает перевод каждого процессора\сопроцессора на свой поток, то есть видео карта — поток, аудио — отдельный поток, таймер — отдельный поток, но перед этим проводится анализ, действительно ли это нужно
+- в альфа режим могут переводиться как само приложение в целом, так и отдельные крейты, модули
+- в альфу не может быть переведён крейт или модуль, который зависит от крейта/модуля, находящегося в бете
+- из альфы можно переводить в бету не модифицируя код, а исправляя файлы ALFA.md, PREALFA.md и BETA.md
+- в проекте находятся специальные файлы ALFA.md, PREALFA.md и BETA.md
+- BETA.md содержит все крейты и модули, находящиеся в бета
+- PREALFA.md — все крейты и модули, предложенные для перевода в альфу
+- ALFA.md — все крейты и модули, находящиеся в альфе
 
 ### Стиль кода
 
@@ -31,6 +37,8 @@
 
 - Каждая группа инструкций в отдельном файле `crate/x86/src/instructions/`
 - Крупные файлы инструкций разбиваются на подкаталоги: `alu/` → `core.rs`, `util.rs`, `eval.rs`, `inst.rs`, `bcd.rs`, `incdec.rs`, `group.rs`, `mod.rs`; `mov/` → `rm.rs`, `imm.rs`, `str_ops.rs`, `mod.rs`.
+- `crate/dos/src/interrupts/dos/` разбит на: `dispatch.rs`, `console.rs`, `file_ops.rs`, `dir.rs`, `find.rs`, `memory.rs`, `misc.rs`, `mod.rs`.
+- `crate/bus/src/peripherals/video/` разбит на: `core.rs`, `dac.rs`, `planar.rs`, `render.rs`, `peripheral.rs`, `vbe.rs`, `types.rs`, `mod.rs`.
 - ModRM разбирается через `ModRm::from_byte()` + `resolve_address()` / `resolve_offset()`
 - Префиксы 0x66/0x67 обрабатываются через `cpu.prefixes.has_operand_size / has_address_size`
 - Флаги: `compute_flags_u8/16/32()` для арифметики, `compute_logical_flags_*()` для логики
@@ -59,7 +67,8 @@ RUST_LOG=debug cargo run Run test/simple.com
 
 - EMS 4.0 (INT 67h) — в `crate/dos/src/interrupts/ems.rs`
 - IVT инициализируется в `crate/dos/src/ivt.rs` (вектора с CS=0xF000 — внутренние)
-- Железо: PIC (8259), PIT (8253), клавиатура (8042), VGA — в `crate/bus/src/peripherals/`
+- VBE — VESA BIOS Extensions: режимы 101h (640x480x256), 103h (800x600x256), 105h (1024x768x256), 112h (24-bit), LFB на 0xE0000000, банковский доступ через A0000
+- Железо: PIC (8259), PIT (8253), клавиатура (8042), VGA (CRTC, sequencer, DAC, attribute controller, graphics controller) — в `crate/bus/src/peripherals/`
 - Устройства DOS: `tty_write()` — пишет и в VRAM и в stdout (используется INT 21h/AH=02h,06h,09h,0Ah)
 - Механизм suspend/resume для неблокирующего ввода: `SuspendedCall` в `system.rs` (re-dispatch через `dispatch(vector)`, не stack-unwind)
 
@@ -70,8 +79,8 @@ RUST_LOG=debug cargo run Run test/simple.com
 3. DOS API — INT 21h/AH=00h-6Ch, INT 2Fh (включая AH=0Ah, 4B00h)
 4. VGA — планарные режимы (0Dh/0Eh/10h/12h), DAC 18-bit палитра, sequencer/graphics controller, INT 10h (AH=00h–0Fh, 12h), курсор
 5. Звук — реализация PC Speaker, SB, SB16, SB pro, UltraSound, Pro Audio Spectrum, Pro Audio Spectrum 16
-6. Поддержка sega megadrive
-7. Поддержка nes
-8. Документация
-9. Стабилизация
-10. Перевод bus в альфа режим
+6. Поддержка NES
+7. Поддержка sega megadrive
+8. VBE (VESA BIOS Extensions) — режимы 101h/103h/105h/112h, LFB, банкинг
+9. Документация
+10. Стабилизация

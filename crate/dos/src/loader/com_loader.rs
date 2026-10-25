@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/loader/com_loader.rs
+// Ver: 2 File: crate/dos/src/loader/com_loader.rs
 use bus::{Machine, Motherboard};
 use emu_config::MachineConfig;
 
@@ -22,13 +22,15 @@ impl ComLoader {
         self,
         no_log: bool,
         config: &MachineConfig,
+        args: Vec<String>, // <--- ДОБАВЛЕНО
     ) -> Result<DosSystem, Box<dyn std::error::Error>> {
         const PSP_SEGMENT: u16 = 0x1000;
+        const ENV_SEGMENT: u16 = PSP_SEGMENT - 0x10;
         const CODE_OFFSET: u16 = 0x0100;
         const STACK_TOP: u16 = 0xFFFE;
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
+        crate::loader::psp::build_environment_block(&mut machine, ENV_SEGMENT, PSP_SEGMENT);
 
-        Self::create_psp(&mut machine, PSP_SEGMENT);
         let code_base = (PSP_SEGMENT as u32 * 16 + CODE_OFFSET as u32) as usize;
         if code_base + self.data.len() > machine.memory.len() {
             return Err("COM file too large (>64KB)".into());
@@ -37,19 +39,30 @@ impl ComLoader {
             machine.write_mem_u8((code_base + i) as u32, byte);
         }
 
-        let cpu = crate::loader::make_cpu(no_log)?;
-        let mut sys = DosSystem::new(machine, cpu, config.clone());
-
-        sys.first_mcb_segment = PSP_SEGMENT - 1;
-        sys.dta_segment = PSP_SEGMENT; // ✅ DTA по умолчанию внутри PSP
-        sys.dta_offset = 0x0080;
-        let com_paragraphs = ((self.data.len() + 0x100 + 15) / 16) as u16; // +0x100 для PSP header
+        let com_paragraphs = ((self.data.len() + 0x100 + 15) / 16) as u16;
         let end_segment = PSP_SEGMENT + com_paragraphs;
+        let mem_paragraphs = MAX_MCB_SEGMENT - PSP_SEGMENT;
+
+        // 2. Формируем PSP с аргументами
+        crate::loader::psp::build_psp(
+            &mut machine,
+            PSP_SEGMENT,
+            ENV_SEGMENT,
+            mem_paragraphs,
+            &args,
+        );
+
         let prog_mcb = MCB {
             signature: MCB_SIGNATURE_NON_LAST,
             owner: PSP_SEGMENT,
             size: com_paragraphs,
         };
+        let cpu = crate::loader::make_cpu(no_log)?;
+        let mut sys = DosSystem::new(machine, cpu, config.clone());
+        sys.first_mcb_segment = PSP_SEGMENT - 1;
+        sys.dta_segment = PSP_SEGMENT;
+        sys.dta_offset = 0x0080;
+
         prog_mcb.write(&mut sys.machine, PSP_SEGMENT - 1);
         let free_mcb = MCB {
             signature: MCB_SIGNATURE_LAST,
@@ -58,12 +71,8 @@ impl ComLoader {
         };
         free_mcb.write(&mut sys.machine, end_segment);
 
-        sys.write_phys_u16(
-            (PSP_SEGMENT as u32 * 16) + 0x02,
-            MAX_MCB_SEGMENT - PSP_SEGMENT,
-        );
-
         init_ivt(&mut sys.machine);
+
         sys.cpu.registers.set_cs(PSP_SEGMENT);
         sys.cpu.registers.set_ds(PSP_SEGMENT);
         sys.cpu.registers.set_es(PSP_SEGMENT);
@@ -81,16 +90,6 @@ impl ComLoader {
             sys.cpu.registers.sp(),
             sys.cpu.registers.ds()
         );
-
         Ok(sys)
-    }
-
-    fn create_psp(machine: &mut Motherboard, segment: u16) {
-        let psp_base = segment as u32 * 16;
-        machine.memory.write_u8(psp_base, 0xCD);
-        machine.memory.write_u8(psp_base + 1, 0x20);
-        machine.memory.write_u8(psp_base + 5, 0xCD);
-        machine.memory.write_u8(psp_base + 6, 0x21);
-        machine.memory.write_u8(psp_base + 7, 0xCB);
     }
 }

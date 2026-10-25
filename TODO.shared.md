@@ -79,8 +79,8 @@
 - `[x]` VGA sequencer — порты 0x3C4/0x3C5
 - `[x]` VGA graphics controller — порты 0x3CE/0x3CF
 - `[x]` Режимы 12h (640×480×16), 10h (640×350×16)
+- `[x]` SVGA (VBE) — VESA BIOS Extensions: режимы 101h, 103h, 105h, 112h; LFB, bank switching
 - `[ ]` CGA/EGA backwards compatibility
-- `[ ]` SVGA (VBE) — VESA BIOS Extensions 2.0+
 - `[ ]` Оконный GUI-масштабатор с фильтрами (CRT-шаблоны, xBRZ, scale2x)
 
 ### 4.3. Ввод (Plugin: Input)
@@ -161,10 +161,21 @@
 - `[ ]` GD-ROM
 - `[ ]` AICA звук
 
+## 7. Консольный ввод (Stdin Bridge)
+
+- `[x]` `src/stdin_bridge.rs` — crossterm raw-mode опрос stdin
+- `[x]` US scancode маппинг (буквы, цифры, F1-F10, стрелки, home/end/pgup/pgdn, ins/del)
+- `[x]` `RawTerminal` RAII-гард — try_enable() для tty, None для пайпов
+- `[x]` `poll_keys()` — неблокирующий опрос всех накопленных событий
+- `[x]` `--no-stdin-keys` отключает stdin bridge
+- `[x]` При `suspended` + `--no-stdin-keys` → ошибка с кодом 2
+
 ## 8. Рефакторинг — Разбивка файлов на модули
 
 - `[x]` `alu.rs` → `alu/` с модулями `core`, `util`, `eval`, `inst`, `bcd`, `incdec`, `group`
 - `[x]` `mov.rs` → `mov/` с модулями `rm`, `imm`, `str_ops`
+- `[x]` `dos.rs` → `dos/` с модулями `dispatch`, `console`, `file_ops`, `dir`, `find`, `memory`, `misc`
+- `[x]` `video.rs` → `video/` с модулями `core`, `dac`, `planar`, `render`, `peripheral`, `vbe`, `types`
 - `[ ]` `shift.rs` — разбить на подкаталог
 - `[ ]` `bit.rs` — разбить на подкаталог
 - `[ ]` `control.rs` — разбить на подкаталог
