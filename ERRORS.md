@@ -1,270 +1,243 @@
-# ERRORS.md — Описание текущих ошибок в реализации
+# ERRORS.md — Найденные ошибки и проблемные места
 
-## Категории ошибок
+## Критические (CRITICAL)
 
-- **[CRITICAL]** — блокирует работу программ
-- **[BUG]** — неверное поведение
-- **[STUB]** — код-заглушка, требующий реализации
-- **[DEAD]** — мёртвый код
-- **[CLEANUP]** — избыточный дублирующийся код, можно заменить вызовом общей функции
+### 1. UB в RCL/RCR: `1u64 << 64` при 32-bit rotate-through-carry
 
----
+- **Файл:** `crate/x86/src/instructions/shift.rs:165,185`
+- **Severity:** CRITICAL
+- **Описание:** При `width == 32` переменная `wide = 64`, и `(1u64 << 64) - 1` — undefined behavior (в Rust сдвиг на ≥ разрядности — UB, в debug mode паника).
+- **Воспроизведение:** Любая 32-битная инструкция RCL/RCR с ненулевым count.
+- **Исправление:** Добавить `if wide == 64 { u64::MAX } else { (1u64 << wide) - 1 }`.
 
-## 1. Регистры (crate/x86/src/registers.rs)
+### 2. UB в SHLD/SHRD: `>> (32 - imm)` при `imm = 0`
 
-### 1.1. [BUG] `set_eflags()` не форсирует бит 1
-- **Файл:** `registers.rs:324-326`
-- **Проблема:** `set_flags()` на строке 318 устанавливает `| 0x2` (бит 1 всегда 1 на 8086). `set_eflags()` на строке 324 этого не делает, что позволяет сбросить зарезервированный бит.
-- **Fix:** добавить `| 0x2` в `set_eflags()`.
-- `0x2` — зарезервированный бит 1, должен быть всегда 1.
+- **Файл:** `crate/x86/src/instructions/bit.rs:15,30,51,66,87,102,123,138`
+- **Severity:** CRITICAL
+- **Описание:** Условие `imm > 31` пропускает `imm = 0`. Тогда `(32 - 0) = 32`, и `u32 >> 32` — UB. Аналогично для 16-битного варианта: `u16 >> 16` при `imm = 0`.
+- **Затрагивает:** `shld_imm`, `shld_cl`, `shrd_imm`, `shrd_cl` — все 4 функции, обе ширины.
+- **Исправление:** Использовать `wrapping_shr(32 - imm)` или заменить на `if imm > 0 { ... >> (32 - imm) } else { 0 }`.
 
-### 1.2. [CLEANUP] `set_ss()` — debug log
-- **Файл:** `registers.rs:313`
-- `log::debug!("set sp ...")` — остаточный отладочный вывод, засоряет лог.
+### 3. Bounds check: `text_buffer[idx]` без валидации cursor_row/cursor_col
 
----
+- **Файл:** `crate/dos/src/interrupts/bios.rs:98,400`
+- **Severity:** HIGH
+- **Описание:** `idx = cursor_row * 80 + cursor_col`. Если guest напрямую пишет в CRTC регистры (0x0E/0x0F) без вызова `sync_cursor_from_crtc()`, значения `cursor_row`/`cursor_col` могут быть любыми `u8`. `cursor_row = 255` даёт `255 * 80 + 79 = 20479`, что за пределами `text_buffer` (16384). Паника.
+- **Исправление:** Заменить на `sys.machine.video.text_buffer.get(idx).copied().unwrap_or(0)`.
 
-## 2. ModRM (crate/x86/src/modrm.rs)
+## Высокие (HIGH)
 
-### 2.1. [BUG] SIB: base_field==5 + mod_field!=0 — ss_default установлен слишком рано
-- **Файл:** `modrm.rs:94`
-- **Проблема:** `ss_default = base_field == 4 || base_field == 5` устанавливается до проверки `base_field == 5 && mod_field == 0` (return early на строке 113). Для `base_field == 5 && mod_field != 0` всё корректно. Но `ss_default` также применяется через `ss_default || (rm_field == 5 && mod != 0)` на строке 157, что приводит к двойной проверке. Не ошибка, но избыточность.
-- Исправить: убрать `ss_default` в SIB-path для base_field==5, т.к. строка 157 перепроверяет.
+### 4. PIC — цепочка прерываний мёртва
 
----
+- **Файл:** `crate/bus/src/peripherals/pic.rs:39`
+- **Severity:** HIGH
+- **Описание:** `Pic::get_next_interrupt()` никем не вызывается. Таймер (IRQ0) доставляет INT 08h напрямую через `raise_interrupt()`, минуя PIC. Поля `master_irr`, `master_isr`, `slave_irr`, `slave_isr` — мёртвый код. Эмуляция PIC не работает как контроллер прерываний.
+- **Исправление:** Либо подключить `get_next_interrupt()` в цикл `step_frame()`, либо удалить мёртвый код.
 
-## 3. ALU (crate/x86/src/instructions/alu/)
+### 5. `resolve_offset()` — мёртвый код
 
-### 3.1. [STUB] AF не вычисляется в shift/rotate (передаётся false)
-- **Файл:** `shift.rs:91,112,131`
-- **Проблема:** `compute_flags_u8/16/32()` получают `af = false`. На реальном x86 все арифметические и сдвиговые инструкции могут менять AF (кроме логических — AND/OR/XOR/TEST — AF undefined).
-- **Проявление:** Программы, проверяющие AF после сдвига, получают неверное значение.
-- **Fix:** Добавить вычисление AF для сдвигов/вращений.
+- **Файл:** `crate/x86/src/modrm.rs:167`
+- **Severity:** HIGH
+- **Описание:** Публичный метод `resolve_offset()` нигде не вызывается. Всегда используется `resolve_address()`.
+- **Исправление:** Удалить или закомментировать до востребования.
 
-### 3.2. [BUG] DAA/DAS — OF не меняется, но читается из старого состояния
-- **Файл:** `crate/x86/src/instructions/alu/inst.rs` (бывший `alu.rs:799,824`)
-- `let of = flags::test_of(cpu.registers.flags());` — OF undefined для DAA/DAS на реальном x86. Код сохраняет старое значение, что приемлемо на практике.
+### 6. `todo!()` в `run_window` — паника при запуске без подкоманды
 
----
+- **Файл:** `src/main.rs:117`
+- **Severity:** HIGH
+- **Описание:** `Commands::Win` вызывает `run_window()` с `todo!("run_window")`. Любой запуск без подкоманды приводит к панике. Также `config` не используется, `Ok(())` недостижим.
+- **Исправление:** Реализовать `run_window` или убрать команду `Win`.
 
-## 4. Строковые инструкции (crate/x86/src/instructions/mov/str_ops.rs)
+### 7. Дублирование расчёта даты/високосного года (3 копии)
 
-### 4.1. [BUG] INS/OUTS с 0x66 — нестандартная обработка
-- **Файл:** `mov.rs:595-662`
-- **Проблема:** `insw()` и `outsw()` при `has_operand_size == true` читают/пишут 4 последовательных порта вместо того, чтобы эмулировать 32-битный INSD/OUTSD из одного порта.
-- **Fix:** Для 16-битного режима с 0x66 ожидается 32-битный IN/OUT (читается/пишется 4 байта за один порт, а не 4 отдельных IN).
+- **Файлы:**
+  - `crate/dos/src/filesystem.rs:597-620`
+  - `crate/dos/src/interrupts/dos/misc.rs:182-216`
+- **Severity:** HIGH
+- **Описание:** Алгоритм `epoch seconds → (year, month, day)` повторён почти дословно в двух местах. Любое исправление бага в одном не применяется к другому.
+- **Исправление:** Вынести в общую функцию в новый модуль `crate/dos/src/datetime.rs`.
 
----
+### 8. `Peripheral` trait — вся диспетчеризация мёртва
 
-## 5. Системные инструкции (crate/x86/src/instructions/system.rs)
+- **Файл:** `crate/bus/src/peripheral.rs`
+- **Severity:** HIGH
+- **Описание:** Трейт `Peripheral` реализован для `Pic`, `Pit`, `Keyboard`, `VideoMemory`, но:
+  - `peripheral.tick()` никогда не вызывается Motherboard
+  - `peripheral.mem_read()` / `peripheral.mem_write()` никогда не вызываются
+  - I/O порты вызываются напрямую: `keyboard.port_read()`, `pic.port_read()` и т.д.
+- **Исправление:** Либо перейти на трейт-диспетчеризацию, либо удалить неиспользуемые методы трейта.
 
-### 5.1. [BUG] SGDT/SIDT — пишут заглушку
-- **Файл:** `system.rs:319-323`
-- **Проблема:** `machine.write_mem_u16(addr, 0xFFFF)` и `write_mem_u32(addr+2, 0)`. Не пишут реальные GDTR/IDTR.
-- **Fix:** Заменить на запись `cpu.gdtr_limit`, `cpu.gdtr_base` (скорректированных на 24-bit).
+## Средние (MEDIUM)
 
-### 5.2. [BUG] `cbw` при `has_operand_size` — неправильное имя
-- **Файл:** `system.rs:87-95`
-- **Проблема:** С префиксом 0x66 инструкция 0x98 это `CWDE` (CW → CDQE в 64-bit, но для 32-bit это CWDE: sign-extend AX to EAX), а не CBW. Реализация делает sign-extend AX в EAX — правильно для CWDE.
-- Имя функции `cbw()` вводит в заблуждение, хотя поведение верное.
-- **Fix:** Переименовать в `cwde_or_cbw()` или разделить.
+### 9. Небезопасный `unwrap()` в системе suspend/resume
 
-### 5.3. [BUG] `cwd()` при `has_operand_size` — неправильное имя (должно быть CDQ)
-- **Файл:** `system.rs:97-105`
-- С 0x66 опкод 0x99 = CDQ (sign-extend EAX to EDX:EAX). Реализация делает sign-extend EAX → EDX — верно.
+- **Файл:** `crate/dos/src/system.rs:262`
+- **Severity:** MEDIUM
+- **Описание:** `self.suspended.take().unwrap().vector` — если `keyboard.has_key()` вернёт `true`, а `suspended == None`, будет паника. Инвариант хрупкий.
+- **Исправление:** Заменить на `match self.suspended.take() { Some(s) => self.dispatch(s.vector), None => { /* лог ошибки */ } }`.
 
-### 5.4. [STUB] RDTSC — возвращает 0
-- **Файл:** `system.rs:516-519`
-- **Проблема:** `cpu.registers.set_eax(0); set_edx(0)`. Нет эмуляции счетчика тактов.
-- **Fix:** Использовать `std::time::Instant` или счётчик инструкций CPU.
+### 10. `println!` в production коде
 
-### 5.5. [BUG] INT1 (0xF1) — halt вместо прерывания
-- **Файл:** `system.rs:442-449`, `executor.rs:317`
-- **Проблема:** 0xF1 (INT1/ICEBP) должен вызывать `software_interrupt(cpu, machine, 1)`, а не холдить CPU.
+- **Файлы:**
+  - `crate/dos/src/interrupts/dos/console.rs:125` — `println!()`
+  - `crate/dos/src/interrupts/bios.rs:406` — `print!("\n")`
+- **Severity:** MEDIUM
+- **Описание:** Прямой вывод в stdout, минуя систему логирования. В оконном режиме этот вывод не виден, в терминальном — засоряет вывод.
+- **Исправление:** Заменить на `log::info!`/`log::debug!`.
 
-### 5.6. [BUG] IN/OUT AX — с 0x66 читает/пишет 4 отдельных порта
-- **Файл:** `system.rs:151-176`
-- **Проблема:** `read_port_ax()`/`write_port_ax()` при `has_operand_size` делает 4× `in_port` на последовательных портах. Правильное поведение: INSD/OUTSD читает/пишет 32-битное значение из одного порта.
-- Но на практике у многих устройств порты идут подряд, так что может работать. **Поведение не соответствует спецификации.**
+### 11. Смешанные типы ошибок
 
----
+- **Severity:** MEDIUM
+- **Описание:** `Result<T, Box<dyn Error>>` в `main.rs`/`app.rs`, `Result<T, String>` в `filesystem.rs`, вообще без `Result` в обработчиках прерываний. Нет единого подхода к обработке ошибок.
+- **Исправление:** Определить общий тип ошибки для проекта.
 
-## 6. Сдвиги/вращения (crate/x86/src/instructions/shift.rs)
+### 12. `cf` переменная в INC — никогда не читается
 
-### 6.1. [BUG] OF для ROL/ROR/RCL/RCR при count > 1
-- **Файл:** `shift.rs:140,150,169,189`
-- **Проблема:** На реальном x86 OF вычисляется только для count=1. Для count>1 OF undefined. Код вычисляет OF только при `count == 1` — **верно**.
+- **Файл:** `crate/x86/src/instructions/alu/incdec.rs:12,22`
+- **Severity:** MEDIUM
+- **Описание:** `let cf = old == 0xFFFF_FFFF;` (строка 12) и `let cf = old == 0xFFFF;` (строка 22) вычисляются, но затем CF восстанавливается из `old_cf`. Переменная `cf` не используется.
+- **Исправление:** Убрать неиспользуемые `let cf` или перенести в `compute_flags_u32`/`compute_flags_u16`.
 
-### 6.2. [BUG] SAR — OF всегда false
-- **Файл:** `shift.rs:239`
-- На реальном x86 SAR с count=1 устанавливает OF в 0 всегда. Код делает `let of = false` — **правильно для count=1**, для count>1 OF undefined.
+### 13. Дублирование read/write helper'ов в group.rs
 
-### 6.3. [CLEANUP] AF в compute_flags не передаётся (hardcoded false)
-- **Файл:** `shift.rs:91,112,131`
-- AF не вычисляется для сдвигов/вращений. На реальном x86 AF undefined для всех сдвигов, так что это приемлемо. **Но для RCL/RCR AF = undefined, не false.**
+- **Файл:** `crate/x86/src/instructions/group.rs:419-454`
+- **Severity:** MEDIUM
+- **Описание:** `read16()`, `read32()`, `write8()`, `write16()`, `write32()` в `group.rs` по сути дублируют `read_rm*` / `write_rm*` из `alu/util.rs`.
+- **Исправление:** Использовать общие функции из `alu::util` в `group.rs`.
 
----
+### 14. Чрезмерно публичный API
 
-## 7. Групповые инструкции (crate/x86/src/instructions/group.rs)
+- **Severity:** MEDIUM
+- **Описание:**
+  - `crate/dos/src/filesystem.rs:531` — `enum DeviceKind` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem.rs:542` — `enum FileHandle` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem.rs:547` — `fn resolve_device()` — `pub` → `pub(crate)`
+  - `crate/x86/src/tracer.rs:60` — `struct NullTracer` — `pub` → `pub(crate)`
+  - `crate/dos/src/consts.rs:3-8` — все `pub const` — `pub` → `pub(crate)`
+  - `crate/x86/src/instructions/alu/core.rs:151,157` — `enum Width`, `enum Op` — `pub` → `pub(crate)`
+  - `crate/bus/src/memory.rs:6` — `struct Memory` — `pub` → `pub(crate)`
+  - `crate/bus/src/memory.rs:20` — `fn from_slice()` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem.rs:589` — `fn system_time_to_dos_datetime()` — `pub` → `pub(crate)`
 
-### 7.1. [CLEANUP] `mul_flags()` — дублирует `set_mul_overflow()` в system.rs
-- **Файл:** `group.rs:381-389` и `system.rs:242-250`
-- **Проблема:** Две одинаковые функции, устанавливающие CF/OF для умножения.
-- **Fix:** Вынести в общий модуль или использовать одну.
+### 15. Неиспользуемый импорт `MCB_SIGNATURE_LAST`
 
-### 7.2. [STUB] CALL far через Grp FF /3 — не поддерживает register mode
-- **Файл:** `group.rs:333-347`
-- `if modrm.is_register_mode() { cpu.halted = true; }` — FF /3 с mod=3 это FAR CALL через регистр (невалидно на x86, но halt — не лучшее решение).
+- **Файл:** `crate/dos/src/loader/psp.rs:3`
+- **Severity:** LOW (но warning компилятора)
+- **Исправление:** Убрать `MCB_SIGNATURE_LAST` из импорта.
 
----
+### 16. Поле `pattern` в `SearchContext` никогда не читается
 
-## 8. Битовые инструкции (crate/x86/src/instructions/bit.rs)
+- **Файл:** `crate/dos/src/filesystem.rs:28`
+- **Severity:** LOW
+- **Исправление:** Убрать поле `pattern` или использовать его.
 
-### 8.1. [BUG] BT/BTS/BTR/BTC для памяти — неверная адресация бита
-- **Файл:** `bit.rs:207-212`
-- **Проблема:** Для memory operand, если индекс бита >= размера операнда, x86 адресует через (offset + index/8) и (bit = index % 8). Текущий код использует `(value >> (index & 0xF)) & 1` — работает только когда index < 16. Для index >= 16 доступ должен перейти на следующий байт в памяти.
+### 17. `base_val = 0u32` — присвоение, перезаписываемое до чтения
 
-### 8.2. [CLEANUP] `set_cf()` — дублирует системную установку CF
-- **Файл:** `bit.rs:430-438`
-- **Проблема:** В файле есть своя `set_cf()`, хотя во всём проекте CF устанавливается через `flags` напрямую. Можно заменить на общую функцию.
+- **Файл:** `crate/x86/src/modrm.rs:85,185`
+- **Severity:** LOW (warning компилятора)
+- **Исправление:** Просто `let mut base_val;` или `let mut base_val: u32;`
 
-### 8.3. [MISSING] BSF (0F BC) и BSR (0F BD) — не реализованы
-- **Файл:** `executor.rs:368-404`
-- В `execute_0f()` нет обработки опкодов 0xBC (BSF) и 0xBD (BSR).
+### 18. Неиспользуемый параметр `dh` в `scale_into_rect`
 
----
+- **Файл:** `crate/bus/src/peripherals/video/render.rs:115`
+- **Severity:** LOW (warning компилятора)
+- **Исправление:** `_dh: usize` или определить, для чего он нужен.
 
-## 9. Исполнитель (crate/x86/src/executor.rs)
+## Низкие (LOW) — clippy и стиль
 
-### 9.1. [BUG] Отсутствуют опкоды 0x37 (AAA) и 0x3F (AAS)
-- **Файл:** `executor.rs:6-366`
-- **Проблема:** AAA и AAS не диспатчатся, ведут к `halt_unknown`. Это базовые BCD-инструкции, нужны для некоторых DOS-программ.
+### 19. Unreachable expression после `todo!`
 
-### 9.2. [MISSING] 0x0F 0xBC (BSF) и 0x0F 0xBD (BSR)
-- **Файл:** `executor.rs:368-404`
-- Бит-сканирующие инструкции, нужны для Windows-совместимости и некоторых защищённых программ.
+- **Файл:** `src/main.rs:118`
+- **Исправление:** Убрать `Ok(())` или убрать `todo!()`.
 
-### 9.3. [MISSING] 0x0F 0x40-0x4F (CMOVcc) — нет
-- Условные MOV для Pentium Pro+. Не критично для DOS, но нужно для Win95.
+### 20. Неиспользуемый импорт `log::info`
 
----
+- **Файл:** `src/main.rs:3`
+- **Исправление:** Убрать импорт.
 
-## 10. Шина/Материнская плата (crate/bus/)
+### 21. Лишние касты в `bit.rs`
 
-### 10.1. [STUB] PIT (8253) — порты возвращают wall-clock, нет счётной эмуляции
-- **Файл:** `peripherals/pit.rs`
-- `port_read(0x40-0x42)` возвращает `(SystemTime::now().duration_since(UNIX_EPOCH).as_millis() & 0xFF) as u8`. Не эмулирует реальный счётчик PIT.
-- `tick()` всегда возвращает true (всегда IRQ), но **никогда не вызывается из Motherboard**.
+- **Файл:** `crate/x86/src/instructions/bit.rs:30,66,102,138,183`
+- `src.wrapping_shl(imm as u32) as u16` — каст `u16 → u16` избыточен.
+- `bit as u16` где `bit` уже `u16`.
 
-### 10.2. [BUG] PIC — не используется для IRQ
-- **Файл:** `peripherals/pic.rs`
-- `get_next_interrupt()` не вызывается. Таймер ставит IRQ0 напрямую через `DosSystem::raise_interrupt()`, минуя PIC.
+### 22. Лишние касты в `file_ops.rs`
 
-### 10.3. [FIXED] VGA — sequencer, graphics controller, DAC реализованы
-- **Статус:** Sequencer (0x3C4/3C5), graphics controller (0x3CE/3CF), DAC (0x3C6-0x3C9) полностью реализованы в commit 927706e
-- CRTC (0x3D4/0x3D5) реализован в текущей версии
-- Attribute Controller (0x3C0/0x3C1) реализован в текущей версии
+- **Файл:** `crate/dos/src/interrupts/dos/file_ops.rs:125`
+- `offset_high as i32` и `offset_low as i32` — `i32 → i32`.
 
-### 10.4. [BUG] A20 mask — теряет верхние биты
-- **Файл:** `motherboard.rs:34-40`
-- `addr & 0xFFFFF` корректно для real-mode wrapping, но для protected mode адреса выше 16MB обрезаются до 1MB region.
+### 23. Лишние касты в `bios.rs`
 
-### 10.5. [BUG] IRQ1 (клавиатура) — не генерируется аппаратно
-- **Файл:** `peripherals/keyboard.rs`, `interrupts/mod.rs:15-18`
-- INT 09h отправляет EOI, но не читает scancode. Клавиши поступают через буфер в `DosSystem::step_frame()`, минуя цепочку IRQ1 → INT 09h.
+- **Файл:** `crate/dos/src/interrupts/bios.rs:482,502`
+- `cx as u16` — `u16 → u16`.
 
----
+### 24. `needless_range_loop` (4+ мест)
 
-## 11. DOS (crate/dos/)
+- `crate/bus/src/peripherals/video/dac.rs:5,44`
+- `crate/bus/src/peripherals/video/planar.rs:51,171`
+- `crate/dos/src/interrupts/dos/file_ops.rs:102`
 
-### 11.1. [BUG] INT 10h / AH=0Eh — не пишет в видеопамять в Mode 13h
-- **Файл:** `interrupts/bios.rs`
-- В режиме 13h символы не выводятся на экран, только `log::debug`. Замечание: существует `tty_write()` который пишет и в VRAM и в stdout, но он используется только консольными функциями DOS (INT 21h), а не напрямую INT 10h.
+### 25. `manual_memcpy`
 
-### 11.2. [FIXED] INT 10h / AH=02h — установка курсора
-- Исправлено: `cursor_row`/`cursor_col` сохраняются, синхронизируются с BDA
-- **Статус:** Исправлено в commit 927706e
+- **Файл:** `crate/bus/src/peripherals/video/dac.rs:41-43`
+- Заменить цикл на `p[16..32].copy_from_slice(&STD)`.
 
-### 11.3. [BUG] INT 16h / AH=00h — использует suspend/resume, но может подвиснуть
-- **Файл:** `interrupts/bios.rs:63-68`
-- Использует `suspend_for_key()`, что корректно. Убедиться, что всегда есть wakeup.
+### 26. `manual_is_multiple_of` (12+ мест)
 
-### 11.4. [BUG] EMS — страницы не маппятся реально
-- **Файл:** `interrupts/ems.rs:17-24`
-- `AH=42h` проверяет handle, но не копирует данные в page frame (0xD000). Любая программа, использующая EMS real pages, получит мусор.
+- `crate/dos/src/filesystem.rs:598` (6 шт.)
+- `crate/dos/src/interrupts/dos/misc.rs:183,193` (6 шт.)
+- `crate/x86/src/flags.rs:63`
+- `crate/bus/src/peripherals/video/core.rs:323,359`
+- `crate/dos/src/system.rs:275`
 
-### 11.5. [STUB] `run_window()` — todo!()
-- **Файл:** `src/main.rs:116-118`
-- Команда `Win` не реализована, вызывает `todo!()`.
+### 27. `identity_op`
 
-### 11.6. [STUB] INT 21h / AH=00h — terminate, но не освобождает память
-- **Файл:** `interrupts/dos.rs:14-20`
-- Просто ставит `halted = true`. Не освобождает выделенные блоки MCB, не закрывает файлы.
+- `crate/bus/src/peripherals/video/planar.rs:48` — `& 0xFF` избыточен после `as u8`
+- `crate/x86/src/registers.rs:95` — `self.bx() >> 0` — сдвиг на 0
+- `crate/dos/src/interrupts/dos/misc.rs:109` — `buf_off + 0x00`
 
-### 11.7. [MISSING] INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов)
-- **Файл:** `interrupts/dos.rs`
-- Критично для COMMAND.COM и многих программ.
+### 28. `collapsible_if`
 
-### 11.8. [MISSING] INT 21h / AH=2Ah (Get System Date), AH=2Ch (Get System Time)
-- Необходимы для программ, показывающих дату/время.
+- **Файл:** `crate/dos/src/system.rs:275-285`
 
----
+## Частично реализованные методы
 
-## 12. Прочее
+### 29. 6 платформенных заглушек
 
-### 12.1. [CLEANUP] `set_carry_flag()` в dos.rs дублирует set_cf из bit.rs
-- **Файл:** `interrupts/dos.rs:193-201`
-- Локальная функция. Есть аналоги в `bit.rs:430-438` и `alu.rs` (косвенно).
+- `crate/jvm/src/lib.rs` — JVM заглушка
+- `crate/nes/src/lib.rs` — NES заглушка
+- `crate/snes/src/lib.rs` — SNES заглушка
+- `crate/megadrive/src/lib.rs` — Mega Drive заглушка
+- `crate/saturn/src/lib.rs` — Saturn заглушка
+- `crate/dreamcast/src/lib.rs` — Dreamcast заглушка
 
-### 12.2. [CLEANUP] `cpu.prefixes.has_operand_size` назван confusingly
-- В реальном x86 0x66 = операнд-размер override. В 16-bit режиме он переключает на 32-bit; в 32-bit режиме переключает на 16-bit. Сейчас эмулятор **не поддерживает 32-bit default**, поэтому `has_operand_size` = "32-bit mode". При добавлении защищённого режима это сломается.
+Все содержат `step()`, `load_rom()`, `load_class()` и т.д. с `log::info!("...not yet implemented")`.
 
-### 12.3. [CLEANUP] `Pending_interrupt` — только один слот
-- `cpu.rs:31` — `pending_interrupt: Option<u8>`. Если DOS-обработчик прерывания вызывает `software_interrupt()`, предыдущий pending перезаписывается.
+### 30. `leave()` — только 16-bit
 
-### 12.4. [BUG] IVT — не все стандартные вектора установлены
-- **Файл:** `ivt.rs`
-- Отсутствуют вектора: INT 00h (Division by zero), INT 01h (Single Step), INT 02h (NMI), INT 03h (Breakpoint), INT 04h (INTO), INT 05h (BOUND), INT 06h (Invalid Opcode), INT 07h (Coprocessor), INT 11h (Equipment Check), INT 14h (Serial), INT 17h (Printer), INT 18h (BASIC), INT 19h (Boot).
+- **Файл:** `crate/x86/src/instructions/control.rs:269-273`
+- 32-bit (с префиксом 0x66) не обрабатывается.
 
-Каждый отсутствующий вектор — `0xF000:0x0000`, что приведёт к `halt` в необработанном внутреннем прерывании (`interrupts/mod.rs:29-37`).
+### 31. `mov_rm16_sreg` / `mov_sreg_rm16` — только 16-bit
 
----
+- **Файл:** `crate/x86/src/instructions/mov/imm.rs:8-54`
+- Не обрабатывают 32-битный размер с префиксом 0x66.
 
-## 13. Новые проблемы (VGA / suspend / display)
+## Тесты
 
-### 13.1. [DEAD] `suspend_for_key()` — неиспользуемые поля SuspendedCall
-- **Файл:** `system.rs:297-331`
-- Поля `cs`, `ip`, `flags`, `sp`, `ss` в `SuspendedCall` всегда устанавливаются в 0 и не используются. Механизм перешёл на re-dispatch через `dispatch(vector)`.
+### 32. В крейтах `bus` и `dos` нет тестов
 
-### 13.2. [BUG] `step_frame()` — отступы сломаны
-- **Файл:** `system.rs:237-291`
-- Тело `step_frame()` имеет неверный отступ (метод на одном уровне с impl-блоком из-за проблем с форматированием после копипасты).
+- `crate/bus` — 0 unit-тестов, 0 doc-тестов
+- `crate/dos` — 0 unit-тестов, 0 doc-тестов
+- Все тесты только в `crate/x86` (56 тестов).
 
-### 13.3. [BUG] `EmuWindow::pump_events()` — паника при закрытом окне
-- **Файл:** `gui/src/lib.rs:50-53`
-- `pump()` вызывает `window.update_with_buffer()` без проверки `is_open()`. При закрытии окна может упасть.
+## Итог
 
-### 13.4. [STUB] VGA Input Status — нет реального VGA-тайминга
-- **Файл:** `peripherals/video.rs:59-78`
-- `input_status_1()` эмулирует retrace через wall-clock (Instant::now()), а не через счётчик пикселей/строк. Приемлемо для игр, но не для демок с точным таймингом.
-
-### 13.5. [FIXED] VGA CRTC (0x3D4/0x3D5) — реализован
-- **Файл:** `peripherals/video.rs`
-- CRTC порты 0x3D4/0x3D5 полностью обрабатываются: `crtc_index`, `crtc_regs[0x19]`, cursor address/start, start address, offset.
-- **Статус:** Исправлено в текущей версии.
-
-### 13.6. [~] Планарные режимы — рендеринг с учётом CRTC реализован
-- **Файл:** `peripherals/video.rs`
-- `render_planar()` теперь использует `start_address()` и `offset_bytes()` из CRTC для корректного отображения в режимах 0Eh/10h/12h. Адресация страниц через бит 16 из CRTC reg[0x07].
-
-### 13.7. [FIXED] INT 10h/AH=12h — реализована поддержка BL=10h
-- **Файл:** `interrupts/bios.rs`
-- Подфункции BL=10h возвращают корректную информацию о конфигурации видео. Остальные подфункции BL=10h-34h возвращают AL=12h.
-
-### 13.8. [STUB] VGA palette — цвета 16-255 фейковые
-- **Файл:** `peripherals/video.rs:default_dac_palette()`
-- Indices 32-255 используют приблизительную формулу BIOS ramp, а не реальные VGA-цвета. Для игр и демок, устанавливающих палитру через DAC, это не проблема, но для exact palette reproduction не годится.
-
-### 13.9. [FIXED] VGA Attribute Controller (0x3C0/0x3C1) — реализован
-- **Файл:** `peripherals/video.rs`
-- `ac_index`, `ac_regs[0x15]`, flip-flop чередование индекс/данные, mode-dependent defaults, `ac_dac_index()`, `ac_dac_index_graphics()`, `plane_enable()`, `blink_enabled()`. Чтение порта 0x3DA сбрасывает flip-flop.
+| Категория | Кол-во |
+|-----------|--------|
+| CRITICAL | 2 |
+| HIGH | 6 |
+| MEDIUM | 10 |
+| LOW | 12+ |
+| clippy стиль | ~60 |
+| Частичная реализация | 8 |

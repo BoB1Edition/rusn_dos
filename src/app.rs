@@ -156,7 +156,7 @@ impl App {
         _startdir: PathBuf,
         workdir: PathBuf,
         no_log: bool,
-        no_stdin_keys: bool, // <--- НОВОЕ
+        no_stdin_keys: bool,
         args: Vec<String>,
     ) -> Result<(), Box<dyn Error>> {
         if !(program.exists() && program.is_file()) {
