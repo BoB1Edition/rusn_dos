@@ -11,14 +11,14 @@
 
 - `[x]` IP — сделать 32-битным (`eip`), убрать ограничение `u16`
 - `[x]` Регистры — enable `eip` getter/setter, закомментированные в `registers.rs`
-- `[!]` `mov_ax_address` (0xA1) / `mov_address_ax` (0xA3) — НЕ dead code, вызываются из executor. Но есть дублирующие `mov_ax_address`/`mov_address_ax` в `mov.rs`, которые не вызываются — надо удалить.
-- `[x]` `set_eflags` — до сих пор не форсирует бит 1 в отличие от `set_flags`
+- `[!]` `mov_ax_address` (0xA1) / `mov_address_ax` (0xA3) — НЕ dead code, реализованы в `mov/imm.rs`, вызываются из executor. Устаревший пункт — проверено 03.11.2026.
+- `[x]` `set_eflags` — до сих пор не форсирует бит 1 в отличие от `set_flags` → **не исправлено** (см. ERRORS.md)
 - `[!]` AF в shift/rotate — не передаётся (`false`), хотя реальный x86 меняет AF
-- `[x]` SGDT/SIDT — до сих пор пишут заглушку
+- `[x]` SGDT/SIDT — реализованы (пишут limit+base в память)
 - `[!]` AAA (0x37) и AAS (0x3F) — отсутствуют в `executor.rs`
 - `[!]` INT 08h — PIT не эмулирует реальный счётчик, таймер на wall-clock
 - `[!]` BSR/BSF (0F BD/BC) — не реализованы
-- `[!]` INT1 (0xF1) — заглушка, `halted = true`
+- `[!]` INT1 (0xF1) — заглушка (`halted = true`)
 - `[!]` WAIT (0x9B) — заглушка (no-op), не эмулирует FSTSW/FNSTSW
 
 ## 2. Флаги — Проверка и доработка
@@ -49,12 +49,16 @@
 - `[x]` INT 21h / AH=3Fh — чтение из CON (handle=0) через клавиатурный буфер
 - `[x]` INT 21h / AH=07h — direct char input, no echo (blocking, no Ctrl+C)
 - `[x]` INT 21h / AH=08h — char input, no echo (blocking, with Ctrl+C → INT 23h)
-- `[ ]` INT 21h / AH=2Ah — get system date
-- `[ ]` INT 21h / AH=2Ch — get system time
+- `[x]` INT 21h / AH=2Ah — get system date
+- `[x]` INT 21h / AH=2Ch — get system time
+- `[x]` INT 21h / AH=33h — break check (get/set/swap), boot drive, версия DOS 6.22
+- `[x]` INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов через `start_child()`/`finish_child()`)
+- `[x]` INT 21h / AH=4Dh — получить код возврата ребёнка
 - `[ ]` INT 21h / AH=39h — MKDIR
 - `[ ]` INT 21h / AH=3Ah — RMDIR
 - `[ ]` INT 21h / AH=59h — get extended error
-- `[ ]` INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов)
+- `[ ]` INT 21h / AH=4B01h — EXEC load-only (возвращает CF=1/AX=1)
+- `[ ]` INT 21h / AH=4B03h — EXEC overlay (возвращает CF=1/AX=1)
 - `[ ]` INT 21h / AH=5Ch — file locking
 - `[ ]` INT 21h / AH=71h — long filename (LFN) API
 
@@ -65,7 +69,7 @@
 - `[ ]` PC Speaker — генерация прямоугольных импульсов, порт 0x61
 - `[ ]` Sound Blaster 16 (DSP) — порты 0x220-0x22F, DMA
 - `[ ]` OPL2/3 (AdLib/FM синтез) — порты 0x388-0x389
-- `[ ]` Микширование и вывод через CPAL/Cpal
+- `[ ]` Микширование и вывод через CPAL/CPAL
 
 ### 4.2. Видео (Plugin: Video)
 
@@ -113,84 +117,111 @@
 
 ## 5. Плагинная архитектура
 
-`[ ]` Создать трейт `Plugin` в `bus` с методами `init()`, `tick()`, `port_read/write()`, `mem_read/write()`
-`[ ]` Registry плагинов — загрузка из конфига, инициализация, вызов tick()
-`[ ]` Опциональная компиляция — feature flags: `audio`, `video`, `storage`, `network`
-`[ ]` Отключаемые модули — минимальная сборка без GUI, звука, сети
-`[ ]` Hot-reload плагинов (через dlopen) — возможно, но не приоритет
+- `[ ]` Создать трейт `Plugin` в `bus` с методами `init()`, `tick()`, `port_read/write()`, `mem_read/write()`
+- `[ ]` Registry плагинов — загрузка из конфига, инициализация, вызов tick()
+- `[ ]` Опциональная компиляция — feature flags: `audio`, `video`, `storage`, `network`
+- `[ ]` Отключаемые модули — минимальная сборка без GUI, звука, сети
+- `[ ]` Hot-reload плагинов (через dlopen) — возможно, но не приоритет
 
-## 6. Другие системы — Заглушки и начало реализации
+## 6. BAT-интерпретатор (COMMAND.COM уровень)
 
-### 6.1. NES
+- `[x]` Модуль `crate/dos/src/bat/runner.rs` — вариант B (каждый ребёнок в свежем `DosSystem`)
+- `[x]` `ShellState` — CWD по дискам, текущий диск, env, echo, errorlevel
+- `[x]` Встроенные: echo, cd/chdir, cls, goto, if errorlevel N, if exist, set, pause, call, exit, rem, смена диска
+- `[x]` Раскрытие `%0`–`%9`, `%VAR%`, `%%`→`%`, `@`-подавление эха
+- `[x]` `--max-call-depth` (1..=255, default 20), глубина `if` ≤ 4
+- `[x]` `resolve_command()` — поиск COM/EXE/BAT: cwd → PATH → программа
+- `[x]` `pause` в консоли (pump) и в графике (poll_keys окна)
+- `[ ]` CALL :label (подпрограммы) — на Этапе 4 не поддерживается (печатает сообщение)
+- `[ ]` FOR, SHIFT, ERRORLEVEL как переменная, `if defined VAR`
+- `[ ]` `set /a`, `set /p` (арифметика/ввод)
+- `[ ]` `choice`, `fsubst`, `path`, `prompt` встроенные
+
+## 7. Другие системы — Заглушки и начало реализации
+
+### 7.1. NES
 - `[~]` Заглушка
 - `[ ]` Процессор 6502
 - `[ ]` PPU (2C02)
 - `[ ]` APU (5 каналов)
 - `[ ]` Мапперы (MMC1, MMC3, NROM, UNROM)
 
-### 6.2. Sega Mega Drive
+### 7.2. Sega Mega Drive
 - `[~]` Заглушка
 - `[ ]` Процессор Motorola 68000
 - `[ ]` CPU Z80 (сопроцессор)
 - `[ ]` VDP (видео)
 - `[ ]` YM2612 (FM + PSG)
 
-### 6.3. SNES
+### 7.3. SNES
 - `[~]` Заглушка
 - `[ ]` CPU 65816
 - `[ ]` PPU1/PPU2
 - `[ ]` SPC700 + DSP
 
-### 6.4. Java Virtual Machine
+### 7.4. Java Virtual Machine
 - `[~]` Заглушка (запуск .class/.jar)
 - `[ ]` Интерпретатор байткода (256 опкодов)
 - `[ ]` Класс-лоадер из class/jar файлов
 - `[ ]` GC (Mark&Sweep или generational)
 - `[ ]` Native-интерфейс для вызова API эмулятора
 
-### 6.5. Sega Saturn
+### 7.5. Sega Saturn
 - `[~]` Заглушка
 - `[ ]` Dual SH-2 SMP
 - `[ ]` VDP1 + VDP2
 - `[ ]` SCU + DSP
 
-### 6.6. Sega Dreamcast
+### 7.6. Sega Dreamcast
 - `[~]` Заглушка
 - `[ ]` SH-4 CPU
 - `[ ]` PowerVR2 (CLX2)
 - `[ ]` GD-ROM
 - `[ ]` AICA звук
 
-## 7. Консольный ввод (Stdin Bridge)
+## 8. Консольный ввод (Stdin Bridge)
 
 - `[x]` `src/stdin_bridge.rs` — crossterm raw-mode опрос stdin
 - `[x]` US scancode маппинг (буквы, цифры, F1-F10, стрелки, home/end/pgup/pgdn, ins/del)
 - `[x]` `RawTerminal` RAII-гард — try_enable() для tty, None для пайпов
 - `[x]` `poll_keys()` — неблокирующий опрос всех накопленных событий
 - `[x]` `--no-stdin-keys` отключает stdin bridge
-- `[x]` При `suspended` + `--no-stdin-keys` → ошибка с кодом 2
+- `[x]` При `suspended` + `--no-stdin-keys` → ошибка
+- `[x]` `NO_STDIN_KEYS_ERR` — единая константа сообщения
 
-## 8. Рефакторинг — Разбивка файлов на модули
+## 9. Окружение и поиск программ
+
+- `[x]` `EnvironmentConfig` в `emu_config` (переменные, `get()`, `path_entries()`)
+- `[x]` Секция `[environment]` в config.toml (PATH/COMSPEC/PROMPT)
+- `[x]` `build_environment_block()` строит блок из переменных + динамический сегмент
+- `[x]` `App::resolve_program_path()` — поиск программы по PATH (COM/EXE/BAT)
+- `[x]` `FileSystem::resolve_for_open()` — открытие "голых" имён по search-каталогам
+- `[x]` `find_first()` — перебор каталогов поиска (cwd → каталог программы → PATH)
+- `[ ]` Поиск окружения у родителя при EXEC (env=0 → наследование дерева env)
+
+## 10. Рефакторинг — Разбивка файлов на модули
 
 - `[x]` `alu.rs` → `alu/` с модулями `core`, `util`, `eval`, `inst`, `bcd`, `incdec`, `group`
 - `[x]` `mov.rs` → `mov/` с модулями `rm`, `imm`, `str_ops`
-- `[x]` `dos.rs` → `dos/` с модулями `dispatch`, `console`, `file_ops`, `dir`, `find`, `memory`, `misc`
+- `[x]` `dos.rs` → `dos/` с модулями `dispatch`, `console`, `file_ops`, `dir`, `find`, `memory`, `exec`, `misc`
 - `[x]` `video.rs` → `video/` с модулями `core`, `dac`, `planar`, `render`, `peripheral`, `vbe`, `types`
 - `[ ]` `shift.rs` — разбить на подкаталог
 - `[ ]` `bit.rs` — разбить на подкаталог
 - `[ ]` `control.rs` — разбить на подкаталог
+- `[ ]` `system.rs` (dos) — избавиться от god object (EXEC/снимки могут стать модулями)
 
-## 9. Сборка и CI
+## 11. Сборка и CI
 
 - `[ ]` Feature flags: `full`, `minimal`, `x86-only`, `with-audio`, `with-gui`
-- `[ ]` Бенчмарки для ключевых инструкций x86
+- `[ ]` Бенчмарки для ключественных инструкций x86
 - `[ ]` GitHub Actions — build + test + lint (rustfmt + clippy)
 - `[ ]` Fuzz-тестирование декодера ModRM и опкодов
-- `[ ]` Интеграционные тесты: запуск реальных DOS .COM/.EXE
+- `[ ]` Интеграционные тесты: запуск реальных DOS .COM/.EXE через test.sh в CI
 
-## 8. Документация
+## 12. Документация
 
 - `[x]` AGENTS.md — правила для агентов
+- `[x]` GOALS.md — цели, приоритеты и этапы развития
 - `[x]` TODO.md — дорожная карта
 - `[x]` docs/architecture.md — описание архитектуры
 - `[x]` docs/x86.md — список реализованных инструкций
@@ -199,5 +230,8 @@
 - `[x]` docs/dos-api.md — полный список поддерживаемых INT 21h функций
 - `[x]` docs/build.md — сборка, зависимости, конфигурация
 - `[x]` README.md — главный README
-- `[x]` DESIGN.md — дизайн-документ
+- `[x]` DESIGN.md — дизайн-документ (включая BAT и EXEC)
 - `[x]` SKILL.md — описание навыков
+- `[x]` ERRORS.md — известные ошибки
+- `[x]` MEMORIES.md — проектная память (решения, хронология)
+- `[~]` docs/* синхронизация с последними изменениями (BAT, EXEC, env, PATH, CLI)

@@ -9,6 +9,7 @@ rusn_dos спроектирован как **модульный мультиси
 3. **Zero-cost абстракции**: `NullTracer` оптимизируется компилятором, `#[inline(always)]` на критических путях
 4. **DOS как слой, а не ядро**: DOS обёртка (DosSystem) связывает CPU + шину + файловую систему, но не встроена в CPU
 5. **Неблокирующий ввод через re-dispatch**: При suspend сохраняется только вектор; при появлении клавиши прерывание re-dispatches, а не перематывает стек
+6. **Окружение DOS как конфигурация**: `EnvironmentConfig` (PATH/COMSPEC/PROMPT) живёт в `emu_config` и строится в PSP, а не хардкодится в загрузчике
 
 ## Ключевые архитектурные решения
 
@@ -47,7 +48,15 @@ X86Cpu::step(&mut self, machine: &mut dyn Machine)
 
 IVT вектора с CS=0xF000 считаются внутренними — их обработчики живут в Rust коде (`interrupts/mod.rs`). Вектора с CS≠0xF000 — это установленные программой обработчики, CPU прыгает на них через far call.
 
-### 5. `instruction_bytes` для трассировки
+### 5. BAT-интерпретатор как оболочка (вариант B)
+
+.BAT/.CMD файлы интерпретируются в Rust на уровне COMMAND.COM. Каждая дочерняя программа (COM/EXE) загружается в **свежий** `DosSystem` через `loader::load_executable()`. Состояние оболочки (CWD по дискам, текущий диск, переменные окружения, errorlevel, echo) живёт в `ShellState` (Rust) и переносится в ребёнка перед стартом (`run_external()`), а после завершения читается обратно. Преимущества перед повторным использованием одного `DosSystem`: нет утечек снимков регистров/PSP/памяти между программами, изоляция ошибок ребёнка.
+
+### 6. EXEC (INT 21h/AH=4Bh) — вложенные процессы
+
+DOS-программа может запускать ребёнка через `exec_program()` (регистрирует `ExecRequest`) и `AH=4Dh` (`get_return_code()`). Цикл `step_frame()` обнаруживает `exec_request` и вызывает `start_child()`: снимок родителя (память, CPU, DTA, break_check) сохраняется в `parent_stack`, ребёнок загружается по пути из параметрического блока ES:BX, command tail и FCB копируются в PSP ребёнка. По `halt`/`program_terminated` вызывается `finish_child()` — восстанавливается снимок родителя, возвращается AX=0/CF=0, код ребёнка доступен через `child_exit_code`/`child_exit_type`.
+
+### 7. `instruction_bytes` для трассировки
 
 Каждый `fetch_u8()` не только инкрементирует EIP, но и сохраняет байт в `instruction_bytes`. Это позволяет tracer'у логировать полную последовательность байт инструкции без повторного чтения из памяти.
 
@@ -55,23 +64,35 @@ IVT вектора с CS=0xF000 считаются внутренними — и
 
 ```
 main()
-  ├── Cli::parse()
-  ├── App::load_from_file(config) → config.toml
-  ├── loader::load_executable() → DosSystem
-  │     ├── Motherboard::new(DOS_MEMORY_SIZE)
-  │     ├── init_ivt() — IVT at 0x0000
-  │     ├── Загрузка COM/EXE в память
-  │     ├── Настройка MCB
-  │     └── Инициализация регистров
-   ├── init_drivers() — монтирование дисков (из App.config)
-   ├── setup_program_directory()
-   ├── init_stdin_bridge() — RawTerminal (crossterm raw-mode, если не --no-stdin-keys)
-   └── Цикл: step_frame(display)
-        ├── step() → execute opcode
-         ├── tick_timer() → IRQ0 каждые ~55ms
-         ├── Опрос клавиатуры каждые 256 инструкций
-         ├── При suspend: pump_events() + рендер dirty-кадров + re-dispatch по клавише
-         └── Рендер при VRAM dirty (после цикла, не посередине)
+  ├── Cli::parse()                      (--max-call-depth в 1..=255, --no-stdin-keys, --graphics)
+  ├── App::load_from_file(config) → config.toml (включая [environment])
+  ├── resolve_program_path()            → поиск по PATH (COM/EXE/BAT), если без расширения
+  │
+  ├── ВЕТВЬ BAT (.BAT/.CMD):
+  │     initial_dos_dir(program, workdir) → (диск, каталог) оболочки
+  │     RawTerminal::try_enable()          — crossterm raw-mode (если не --no-stdin-keys)
+  │     dos::bat::run_bat(...)             — интерпретатор (см. раздел BAT выше)
+  │     └── Runner::run_batch(lines, labels, depth)
+  │           ├── Встроенные: echo/cd/cls/goto/if/set/pause/call/exit/rem/смена диска
+  │           └── Внешние: resolve_command() → run_batch (глубина+1) | run_external()
+  │                 run_external():
+  │                   loader::load_executable() → свежий DosSystem
+  │                   перенос CWD/env/дров → child_loop(&mut ds, display, pump)
+  │                   чтение CWD/env обратно в ShellState
+  │
+  ├── ВЕТВЬ EXE/COM:
+  │     loader::load_executable(program, no_log, machine_cfg, environment, args)
+  │     монтирование дисков, set_search_path_from_env(PATH), setup_program_directory()
+  │     init_stdin_bridge() — RawTerminal (crossterm raw-mode, если не --no-stdin-keys)
+  │     Цикл: step_frame(display)
+  │           ├── step() → execute opcode
+  │           ├── exec_request? → start_child() (EXEC внутри DOS-программы)
+  │           ├── halt/program_terminated + parent_stack → finish_child()
+  │           ├── tick_timer() → IRQ0 каждые ~55ms
+  │           ├── Опрос клавиатуры каждые 256 инструкций
+  │           ├── При suspend: pump_events() + рендер dirty-кадров + re-dispatch по клавише
+  │           └── Рендер при VRAM dirty (после цикла, не посередине)
+  └── process::exit(код программы) — после выхода из run_main() (RAII-гарды отработали)
 ```
 
 ## Структуры данных
@@ -104,14 +125,19 @@ a20_gate          — enabled/disabled + command pending
 ```
 machine: Motherboard
 cpu: X86Cpu
-filesystem: FileSystem     — многодисковая FS
-ems: EmsState              — EMS 4.0 состояние
-first_mcb_segment          — начало цепочки MCB
-dta_segment/offset         — Disk Transfer Area
-suspended: Option<SuspendedCall>  — ожидание клавиши
-console_input: ConsoleInputState   — AH=0Ah буферизованный ввод
-exit_code: u8                      — код выхода программы
-program_terminated: bool           — флаг завершения (INT 20h/AH=4Ch)
+filesystem: FileSystem          — многодисковая FS + поиск по PATH (program_drive/program_dir/search_path)
+ems: EmsState                   — EMS 4.0 состояние
+first_mcb_segment               — начало цепочки MCB
+dta_segment/offset              — Disk Transfer Area
+suspended: Option<SuspendedCall> — ожидание клавиши
+console_input: ConsoleInputState — AH=0Ah буферизованный ввод
+exit_code: u8                   — код выхода программы
+program_terminated: bool        — флаг завершения (INT 20h/AH=4Ch)
+environment: EnvironmentConfig   — переменные окружения (PATH/COMSPEC/PROMPT)
+break_check: bool               — INT 21h/AH=33h break check flag
+exec_request: Option<ExecRequest> — запрос EXEC (путь + параметрический блок ES:BX)
+parent_stack: Vec<ParentSnapshot> — снимки родителя для вложенных EXEC
+child_exit_code: u8 / child_exit_type: u8 — INT 21h/AH=4Dh
 ```
 
 ### FileSystem
@@ -120,6 +146,17 @@ drivers: HashMap<char, DiskDriver>       — буква → диск
 current_directories: HashMap<char, String>
 open_files: HashMap<u16, FileHandle>     — хендл → Disk/Device
 search_contexts: HashMap<u32, SearchContext>  — DTA → поиск
+program_drive / program_dir              — каталог запущенной программы
+search_path: Vec<(char, String)>         — каталоги PATH (поиск при открытии "голых" имён)
+```
+
+### ShellState (BAT-интерпретатор)
+```
+cwd: HashMap<char, String>  — CWD по дискам
+current_drive: char
+env: HashMap<String, String> — переменные окружения (рабочая копия, на наследниках через EnvironmentConfig)
+echo_on: bool
+errorlevel: u8
 ```
 
 ## Планируемые улучшения
@@ -127,7 +164,8 @@ search_contexts: HashMap<u32, SearchContext>  — DTA → поиск
 1. **Плагинная периферия**: трейт Plugin с init/tick/port_read-write/mem_read-write, registry в конфиге
 2. **Feature flags**: аудио, сеть, диски как опциональные модули
 3. **Защищённый режим**: полноценная эмуляция сегментации, paging, DPMI
-4. **INT 4B00h (EXEC)**: загрузка дочерних процессов
-5. **VGA SVGA**: VESA BIOS Extensions 2.0+
-6. **CPU speed control**: cycle-accurate PIT и синхронизация
-7. **Отладчик**: встроенный отладчик с брейкпоинтами
+4. **EXEC AL=01h/AL=03h** (load-only/overlay) — пока возвращают CF=1/AX=1
+5. **CALL :label** в BAT-интерпретаторе (подпрограммы) — на Этапе 4 не поддерживается
+6. **VGA SVGA**: VESA BIOS Extensions 2.0+
+7. **CPU speed control**: cycle-accurate PIT и синхронизация
+8. **Отладчик**: встроенный отладчик с брейкпоинтами
