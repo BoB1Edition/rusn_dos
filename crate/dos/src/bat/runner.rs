@@ -1,8 +1,4 @@
-// Ver: 5 File: crate/dos/src/bat/runner.rs
-//! BAT-интерпретатор уровня COMMAND.COM (вариант B):
-//! каждая дочерняя программа получает свежий DosSystem, а состояние оболочки
-//! (CWD, текущий диск, окружение, errorlevel, echo) живёт в Rust и переносится
-//! в ребёнка перед стартом и читается обратно после завершения.
+// Ver: 6 File: crate/dos/src/bat/runner.rs
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -538,6 +534,11 @@ impl Runner {
                     let d = up.chars().next().unwrap();
                     if self.drivers.iter().any(|x| x.letter == d) {
                         self.state.current_drive = d;
+                        log::debug!(
+                            "pwd change {}:{}",
+                            d,
+                            self.state.cwd.get(&d).map(|s| s.as_str()).unwrap_or("\\")
+                        );
                     } else {
                         shell_print("Invalid drive specification");
                     }
@@ -622,6 +623,7 @@ impl Runner {
             shell_print("Invalid directory");
             return;
         }
+        log::debug!("pwd change {}:\\{}", drive, rel);
         self.state.cwd.insert(drive, rel);
     }
 
@@ -816,9 +818,11 @@ impl Runner {
         for d in &self.drivers {
             if let Some(dir) = ds.filesystem.get_current_directory(d.letter) {
                 self.state.cwd.insert(d.letter, dir.to_string());
+                log::debug!("pwd change {}:\\{} (from child)", d.letter, dir);
             }
         }
         self.state.current_drive = ds.filesystem.get_current_drive();
+        log::debug!("pwd change {} (drive from child)", self.state.current_drive);
         Ok(code)
     }
 }
