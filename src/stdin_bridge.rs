@@ -1,10 +1,13 @@
-// Ver: 2 File: ./src/stdin_bridge.rs
+// Ver: 3 File: ./src/stdin_bridge.rs
 //! Мост между терминалом хоста (stdin) и эмулируемой клавиатурой.
 //! Используется только в консольном режиме (без -g).
 use bus::peripherals::keyboard::Keyboard;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal;
 use std::time::Duration;
+
+
+pub const NO_STDIN_KEYS_ERR: &str = "--no_stdin_keys: программа ожидает ввод с клавиатуры; не используйте этот флаг с интерактивными приложениями";
 
 /// RAII-гард «сырого режима» терминала: восстанавливает терминал
 /// при любом выходе (return, ошибка, паника).

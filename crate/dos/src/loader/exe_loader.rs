@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/loader/exe_loader.rs
+// Ver: 3 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
@@ -6,7 +6,7 @@ use crate::mcb::MCB;
 use crate::system::DosSystem;
 use bus::{Machine, Motherboard};
 
-use emu_config::MachineConfig;
+use emu_config::{EnvironmentConfig, MachineConfig};
 use x86::instructions::stack;
 
 pub struct ExeLoader {
@@ -71,13 +71,14 @@ impl ExeLoader {
         &mut self,
         no_log: bool,
         config: &MachineConfig,
+        env: &EnvironmentConfig,  
         args: Vec<String>,
     ) -> Result<DosSystem, Box<dyn std::error::Error>> {
         const LOAD_SEGMENT: u16 = 0x1000;
         const PSP_SEGMENT: u16 = LOAD_SEGMENT - 0x10;
         const ENV_SEGMENT: u16 = PSP_SEGMENT - 0x10;
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
-        crate::loader::psp::build_environment_block(&mut machine, ENV_SEGMENT, PSP_SEGMENT);
+        let env_segment = crate::loader::psp::build_environment_block(&mut machine, PSP_SEGMENT, env);
 
         let header_size = self.header.e_cparhdr as usize * 16;
         let code_data = &self.data[header_size..];
@@ -88,7 +89,7 @@ impl ExeLoader {
         let end_segment = LOAD_SEGMENT + prog_paragraphs;
 
         let mem_paragraphs = MAX_MCB_SEGMENT - PSP_SEGMENT;
-        crate::loader::psp::build_psp(&mut machine, PSP_SEGMENT, ENV_SEGMENT, mem_paragraphs, &args);
+        crate::loader::psp::build_psp(&mut machine, PSP_SEGMENT, env_segment, mem_paragraphs, &args);
 
         let code_base = LOAD_SEGMENT as u32 * 16;
         if code_base as usize + code_data.len() > machine.memory.len() {
@@ -115,7 +116,7 @@ impl ExeLoader {
         self.apply_relocations(&mut machine, LOAD_SEGMENT);
 
         let cpu = crate::loader::make_cpu(no_log)?;
-        let mut sys = DosSystem::new(machine, cpu, config.clone());
+        let mut sys = DosSystem::new(machine, cpu, config.clone(), env.clone());
 
         // Настройка MCB
         sys.first_mcb_segment = PSP_SEGMENT - 1;

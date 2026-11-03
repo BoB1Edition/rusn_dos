@@ -1,10 +1,10 @@
-// Ver: 2 File: crate/dos/src/loader/mod.rs
+// Ver: 3 File: crate/dos/src/loader/mod.rs
 pub mod com_loader;
 pub mod exe_header;
 pub mod exe_loader;
 pub mod psp;
 
-use emu_config::MachineConfig;
+use emu_config::{EnvironmentConfig, MachineConfig};
 use std::path::PathBuf;
 use x86::cpu::X86Cpu;
 
@@ -37,16 +37,17 @@ pub fn load_executable(
     path: PathBuf,
     no_log: bool,
     config: &MachineConfig,
+    env: &EnvironmentConfig,
     args: Vec<String>,
 ) -> Result<DosSystem, Box<dyn std::error::Error>> {
     match detect_executable_type(&path) {
         ExecutableType::Com => {
             let loader = com_loader::ComLoader::from_file(&path)?;
-            loader.exec(no_log, config, args)
+            loader.exec(no_log, config, env, args)
         }
         ExecutableType::Exe => {
             let mut loader = exe_loader::ExeLoader::from_file(&path)?;
-            loader.exec(no_log, config, args)
+            loader.exec(no_log, config, env, args)
         }
     }
 }

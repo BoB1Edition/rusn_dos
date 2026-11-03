@@ -4,6 +4,7 @@
 *.txt
 /test/*
 !*.asm
+!*.bat
 *.todo
 opcodes
 libs/dos_core/src/loader/com.rs

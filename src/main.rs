@@ -1,4 +1,4 @@
-// Ver: 5 File: ./src/main.rs
+// Ver: 6 File: ./src/main.rs
 use clap::{Parser, Subcommand};
 use log::info;
 use std::{env, error::Error, path::PathBuf};
@@ -44,8 +44,23 @@ enum Commands {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let code = match run_main() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            1
+        }
+    };
+    // process::exit ПОСЛЕ возврата из run_main: RAII-гарды (raw mode) уже отработали
+    std::process::exit(code as i32);
+}
+
+fn run_main() -> Result<u8, Box<dyn Error>> {
     env_logger::init();
     let cli = Cli::parse();
+    if cli.max_call_depth == 0 || cli.max_call_depth > 255 {
+        return Err("--max-call-depth must be in 1..=255".into());
+    }
     if let Some(command) = cli.command {
         match command {
             Commands::Win { workdir } => {
@@ -68,7 +83,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         program
                     }
                 };
-                run_program(
+                return run_program(
                     actual_program,
                     startdir,
                     workdir,
@@ -76,14 +91,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     cli.no_log,
                     cli.graphics,
                     cli.no_stdin_keys,
+                    cli.max_call_depth,
                     program_args,
-                )?;
+                );
             }
         }
     } else {
         run_window(cli.config)?;
     }
-    Ok(())
+    Ok(0)
 }
 
 fn run_program(
@@ -94,12 +110,21 @@ fn run_program(
     no_log: bool,
     graphics: bool,
     no_stdin_keys: bool,
+    max_call_depth: u16,
     program_args: Vec<String>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<u8, Box<dyn Error>> {
     let app = app::App::load_from_file(config);
     if graphics {
         log::debug!("graphics");
-        app.run_with_graphics(program, startdir, workdir, no_log, program_args)?;
+        app.run_with_graphics(
+            program,
+            startdir,
+            workdir,
+            no_log,
+            no_stdin_keys,
+            max_call_depth,
+            program_args,
+        )
     } else {
         app.run(
             program,
@@ -107,10 +132,10 @@ fn run_program(
             workdir,
             no_log,
             no_stdin_keys,
+            max_call_depth,
             program_args,
-        )?;
+        )
     }
-    Ok(())
 }
 
 fn run_window(config: PathBuf) -> Result<(), Box<dyn Error>> {

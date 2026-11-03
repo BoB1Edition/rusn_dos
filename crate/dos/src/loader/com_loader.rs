@@ -1,6 +1,6 @@
-// Ver: 2 File: crate/dos/src/loader/com_loader.rs
+// Ver: 3 File: crate/dos/src/loader/com_loader.rs
 use bus::{Machine, Motherboard};
-use emu_config::MachineConfig;
+use emu_config::{EnvironmentConfig, MachineConfig};
 
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
@@ -22,14 +22,16 @@ impl ComLoader {
         self,
         no_log: bool,
         config: &MachineConfig,
-        args: Vec<String>, // <--- ДОБАВЛЕНО
+        env: &EnvironmentConfig,
+        args: Vec<String>,
     ) -> Result<DosSystem, Box<dyn std::error::Error>> {
         const PSP_SEGMENT: u16 = 0x1000;
         const ENV_SEGMENT: u16 = PSP_SEGMENT - 0x10;
         const CODE_OFFSET: u16 = 0x0100;
         const STACK_TOP: u16 = 0xFFFE;
         let mut machine = Motherboard::new(DOS_MEMORY_SIZE);
-        crate::loader::psp::build_environment_block(&mut machine, ENV_SEGMENT, PSP_SEGMENT);
+        let env_segment =
+            crate::loader::psp::build_environment_block(&mut machine, PSP_SEGMENT, env);
 
         let code_base = (PSP_SEGMENT as u32 * 16 + CODE_OFFSET as u32) as usize;
         if code_base + self.data.len() > machine.memory.len() {
@@ -43,11 +45,10 @@ impl ComLoader {
         let end_segment = PSP_SEGMENT + com_paragraphs;
         let mem_paragraphs = MAX_MCB_SEGMENT - PSP_SEGMENT;
 
-        // 2. Формируем PSP с аргументами
         crate::loader::psp::build_psp(
             &mut machine,
             PSP_SEGMENT,
-            ENV_SEGMENT,
+            env_segment,
             mem_paragraphs,
             &args,
         );
@@ -58,7 +59,7 @@ impl ComLoader {
             size: com_paragraphs,
         };
         let cpu = crate::loader::make_cpu(no_log)?;
-        let mut sys = DosSystem::new(machine, cpu, config.clone());
+        let mut sys = DosSystem::new(machine, cpu, config.clone(), env.clone());
         sys.first_mcb_segment = PSP_SEGMENT - 1;
         sys.dta_segment = PSP_SEGMENT;
         sys.dta_offset = 0x0080;

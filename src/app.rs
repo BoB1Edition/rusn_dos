@@ -1,15 +1,19 @@
-// Ver: 6 File: ./src/app.rs
+// Ver: 10 File: ./src/app.rs
+use bus::Display;
+use config::{self, Config, File};
+use dos::{DiskDriver, DosSystem, loader};
+use emu_config::{
+    DriverConfig, EnvironmentConfig, MachineConfig, Resolution, SoundConfig, VideoConfig,
+};
+use gui::EmuWindow;
+use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use bus::Display;
-use config::{self, Config, File};
-use dos::{DiskDriver, DosSystem, loader};
-use emu_config::{DriverConfig, MachineConfig, Resolution, SoundConfig, VideoConfig};
-use gui::EmuWindow;
-use serde::{Deserialize, Serialize};
+use bus::peripherals::keyboard::Keyboard;
+use dos::bat::BatConfig;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct App {
@@ -25,6 +29,8 @@ pub struct App {
     pub sound: SoundConfig,
     #[serde(default)]
     pub drivers: Vec<DriverConfig>,
+    #[serde(default)]
+    pub environment: EnvironmentConfig,
 }
 
 fn default_title() -> String {
@@ -40,11 +46,92 @@ impl Default for App {
             video: VideoConfig::default(),
             sound: SoundConfig::default(),
             drivers: vec![DriverConfig::default()],
+            environment: EnvironmentConfig::default(),
         }
     }
 }
 
 impl App {
+    fn make_drivers(&self) -> Vec<DiskDriver> {
+        self.drivers
+            .iter()
+            .filter_map(|c| {
+                c.letter.chars().next().map(|l| DiskDriver {
+                    letter: l.to_ascii_uppercase(),
+                    root_path: PathBuf::from(&c.path),
+                    read_only: c.read_only,
+                })
+            })
+            .collect()
+    }
+    fn is_bat(p: &Path) -> bool {
+        let result = matches!(
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_uppercase())
+                .as_deref(),
+            Some("BAT") | Some("CMD")
+        );
+        result
+    }
+
+    /// Начальный диск/каталог оболочки: каталог программы, поверх — workdir.
+    fn initial_dos_dir(&self, program: &Path, workdir: &Path) -> (char, String) {
+        let (mut drive, mut dir) = self
+            .determine_program_drive_and_dir(program)
+            .unwrap_or(('C', String::new()));
+        let (wd, wdir) = self.parse_workdir(workdir);
+        if !wdir.is_empty() && wdir != "." {
+            drive = wd;
+            dir = wdir;
+        }
+        (drive, dir)
+    }
+
+    pub fn resolve_program_path(&self, program: &Path) -> Option<PathBuf> {
+        if program.exists() && program.is_file() {
+            return Some(program.to_path_buf());
+        }
+        let name = program.file_name()?.to_string_lossy().to_string();
+        let names: Vec<String> = if name.contains('.') {
+            let name = vec![name];
+            name
+        } else {
+            let name = vec![
+                format!("{}.COM", name),
+                format!("{}.EXE", name),
+                format!("{}.BAT", name),
+            ];
+            name
+        };
+        for (letter, dos_dir) in self.environment.path_entries() {
+            let cfg =
+                if let Some(x) = self.drivers.iter().find(|d| {
+                    d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter)
+                }) {
+                    x
+                } else {
+                    continue;
+                };
+            let mut host_dir = PathBuf::from(&cfg.path);
+            if !dos_dir.is_empty() {
+                host_dir.push(&dos_dir);
+            }
+            for n in &names {
+                if let Ok(rd) = std::fs::read_dir(&host_dir) {
+                    for ent in rd.flatten() {
+                        if ent.file_name().to_string_lossy().eq_ignore_ascii_case(n)
+                            && ent.path().is_file()
+                        {
+                            return Some(ent.path());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn determine_program_drive_and_dir(&self, program_path: &Path) -> Option<(char, String)> {
         let canonical_program = program_path.canonicalize().ok()?;
         for driver_cfg in &self.drivers {
@@ -111,6 +198,7 @@ impl App {
             ds.filesystem
                 .set_current_directory(drive, &dir)
                 .map_err(|e| format!("Failed to set current directory: {}", e))?;
+            ds.filesystem.set_program_location(drive, &dir);
             log::info!("Program launched from {}:\\{}\\", drive, dir);
         } else {
             log::warn!("Could not determine program drive/directory, using root");
@@ -141,11 +229,19 @@ impl App {
         let dos_workdir_raw = workdir.to_string_lossy().replace('/', "\\");
         if dos_workdir_raw.len() >= 2 && dos_workdir_raw.chars().nth(1) == Some(':') {
             let d = dos_workdir_raw.chars().next().unwrap().to_ascii_uppercase();
-            let path = dos_workdir_raw[2..].trim_matches(|c| c == '\\' || c == '/').to_string();
+            let path = dos_workdir_raw[2..]
+                .trim_matches(|c| c == '\\' || c == '/')
+                .to_string();
             (d, path)
         } else {
-            let drive = self.drivers.first().map(|d| d.letter.chars().next().unwrap_or('C')).unwrap_or('C');
-            let path = dos_workdir_raw.trim_matches(|c| c == '\\' || c == '/').to_string();
+            let drive = self
+                .drivers
+                .first()
+                .map(|d| d.letter.chars().next().unwrap_or('C'))
+                .unwrap_or('C');
+            let path = dos_workdir_raw
+                .trim_matches(|c| c == '\\' || c == '/')
+                .to_string();
             (drive, path)
         }
     }
@@ -157,29 +253,71 @@ impl App {
         workdir: PathBuf,
         no_log: bool,
         no_stdin_keys: bool,
+        max_call_depth: u16,
         args: Vec<String>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<u8, Box<dyn Error>> {
+        let program = self.resolve_program_path(&program).unwrap_or(program);
         if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
-        let mut ds = loader::load_executable(program.clone(), no_log, &self.machine, args)?;
-        self.init_drivers(&mut ds)?;
+        // === ВЕТКА BAT ===
+        if Self::is_bat(&program) {
+            let (drive, dir) = self.initial_dos_dir(&program, &workdir);
+            let _raw = if !no_stdin_keys {
+                crate::stdin_bridge::RawTerminal::try_enable()
+            } else {
+                None
+            };
+            let mut pump = |kb: &mut Keyboard| -> Result<(), String> {
+                if _raw.is_some() {
+                    crate::stdin_bridge::poll_keys(kb);
+                }
+                Ok(())
+            };
+            let mut display: Option<&mut dyn Display> = None;
+            let code = dos::bat::run_bat(
+                program,
+                args,
+                self.make_drivers(),
+                self.machine.clone(),
+                self.environment.clone(),
+                drive,
+                dir,
+                BatConfig {
+                    max_depth: max_call_depth,
+                    no_stdin_keys,
+                    no_log,
+                },
+                &mut display,
+                &mut pump,
+            )?;
+            log::info!("Batch exited with code: {}", code);
+            return Ok(code);
+        }
+        // === обычный exe/com (тело Ver 8, возврат кода) ===
+        let mut ds = loader::load_executable(
+            program.clone(),
+            no_log,
+            &self.machine,
+            &self.environment,
+            args,
+        )?;
+        for d in self.make_drivers() {
+            ds.filesystem.add_driver(d)?;
+        }
+        ds.filesystem
+            .set_search_path_from_env(self.environment.get("PATH").unwrap_or(""));
         self.setup_program_directory(&mut ds, &program)?;
         let (target_drive, dos_path) = self.parse_workdir(&workdir);
         if !dos_path.is_empty() && dos_path != "." {
-            match ds.filesystem.set_current_directory(target_drive, &dos_path) {
-                Ok(_) => log::info!("DOS working directory overridden to: {}:\\{}", target_drive, dos_path),
-                Err(e) => log::warn!("Failed to set DOS working directory to {}:{}: {}", target_drive, dos_path, e),
-            }
+            let _ = ds.filesystem.set_current_directory(target_drive, &dos_path);
         }
-
         let _raw = if !no_stdin_keys {
             crate::stdin_bridge::RawTerminal::try_enable()
         } else {
             None
         };
-
         loop {
             if ds.cpu.halted || ds.program_terminated {
                 break;
@@ -190,60 +328,91 @@ impl App {
             ds.step_frame(None);
             if ds.suspended.is_some() {
                 if no_stdin_keys {
-                    return Err(
-                        "--no_stdin_keys: программа ожидает ввод с клавиатуры; не используйте этот флаг с интерактивными приложениями"
-                            .into(),
-                    );
+                    return Err(crate::stdin_bridge::NO_STDIN_KEYS_ERR.into());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
-
         if ds.program_terminated {
             log::info!("Program exited with code: {}", ds.exit_code);
         }
-        Ok(())
+        Ok(ds.exit_code)
     }
 
-    pub fn run_with_graphics(
+        pub fn run_with_graphics(
         &self,
         program: PathBuf,
         _startdir: PathBuf,
         workdir: PathBuf,
         no_log: bool,
+        _no_stdin_keys: bool,
+        max_call_depth: u16,
         args: Vec<String>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<u8, Box<dyn Error>> {
+        let program = self.resolve_program_path(&program).unwrap_or(program);
         if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
-        let mut ds = loader::load_executable(program.clone(), no_log, &self.machine, args)?;
-        self.init_drivers(&mut ds)?;
-        
-        self.setup_program_directory(&mut ds, &program)?;
-        
-        let (target_drive, dos_path) = self.parse_workdir(&workdir);
-        if !dos_path.is_empty() && dos_path != "." {
-            match ds.filesystem.set_current_directory(target_drive, &dos_path) {
-                Ok(_) => log::info!("DOS working directory overridden to: {}:\\{}", target_drive, dos_path),
-                Err(e) => log::warn!("Failed to set DOS working directory to {}:{}: {}", target_drive, dos_path, e),
-            }
-        }
-        
         let mut window = EmuWindow::new(
             &self.title,
             self.resolution.width as usize,
             self.resolution.height as usize,
         )?;
         window.set_target_fps(60);
-        
-        while window.is_open() && !ds.cpu.halted && !ds.program_terminated {
-            ds.step_frame(Some(&mut window));
+
+        // === ВЕТКА BAT: обёртка display живёт ТОЛЬКО внутри этого блока ===
+        if Self::is_bat(&program) {
+            let (drive, dir) = self.initial_dos_dir(&program, &workdir);
+            let mut pump = |_kb: &mut Keyboard| -> Result<(), String> { Ok(()) };
+            let mut display: Option<&mut dyn Display> = Some(&mut window);
+            let code = dos::bat::run_bat(
+                program,
+                args,
+                self.make_drivers(),
+                self.machine.clone(),
+                self.environment.clone(),
+                drive,
+                dir,
+                BatConfig {
+                    max_depth: max_call_depth,
+                    no_stdin_keys: false,
+                    no_log,
+                },
+                &mut display,
+                &mut pump,
+            )?;
+            log::info!("Batch exited with code: {}", code);
+            return Ok(code); // display умирает здесь, borrow окна освобождается
         }
-        
+
+        // === обычный exe/com: окно заимствуется ровно один раз на оператор ===
+        let mut ds = loader::load_executable(
+            program.clone(),
+            no_log,
+            &self.machine,
+            &self.environment,
+            args,
+        )?;
+        for d in self.make_drivers() {
+            ds.filesystem.add_driver(d)?;
+        }
+        ds.filesystem
+            .set_search_path_from_env(self.environment.get("PATH").unwrap_or(""));
+        self.setup_program_directory(&mut ds, &program)?;
+        let (target_drive, dos_path) = self.parse_workdir(&workdir);
+        if !dos_path.is_empty() && dos_path != "." {
+            let _ = ds.filesystem.set_current_directory(target_drive, &dos_path);
+        }
+        while !ds.cpu.halted && !ds.program_terminated {
+            if !window.is_open() {
+                break; // иммутабельный borrow, заканчивается в этом же операторе
+            }
+            ds.step_frame(Some(&mut window)); // единственный мутабельный borrow на итерацию
+        }
         if ds.program_terminated {
             log::info!("Program exited with code: {}", ds.exit_code);
         }
-        Ok(())
+        Ok(ds.exit_code)
     }
 }

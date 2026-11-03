@@ -16,6 +16,11 @@ type = "vga"
 # Если массив пуст, содержит "*" или "all" — доступны все реализованные в эмуляторе типы.
 available_types = ["vga", "svga"] 
 
+[environment]
+PATH = "C:\\;C:\\TASM\\BIN"
+COMSPEC = "C:\\COMMAND.COM"
+PROMPT = "$P$G"
+
 [sound]
 type = "pc_speaker"
 # Доступные звуковые устройства. PC Speaker доступен всегда, если явно не отключен.

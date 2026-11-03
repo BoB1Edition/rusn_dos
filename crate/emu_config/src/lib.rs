@@ -1,4 +1,6 @@
-// Ver: 1 File: ./crate/emu_config/src/lib.rs
+use std::collections::HashMap;
+
+// Ver: 2 File: ./crate/emu_config/src/lib.rs
 use serde::{Deserialize, Serialize};
 
 // ============================================================
@@ -173,5 +175,50 @@ impl Default for CpuConfig {
             r#type: default_cpu_type(),
             features: default_cpu_features(),
         }
+    }
+}
+
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct EnvironmentConfig {
+    pub variables: HashMap<String, String>,
+}
+
+fn default_environment() -> EnvironmentConfig {
+    let mut variables = HashMap::new();
+    variables.insert("PATH".into(), "C:\\".into());
+    variables.insert("COMSPEC".into(), "C:\\COMMAND.COM".into());
+    variables.insert("PROMPT".into(), "$P$G".into());
+    EnvironmentConfig { variables }
+}
+
+impl Default for EnvironmentConfig {
+    fn default() -> Self {
+        default_environment()
+    }
+}
+
+impl EnvironmentConfig {
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.variables.get(&key.to_ascii_uppercase()).map(|s| s.as_str())
+    }
+    /// Каталоги PATH как пары (диск, каталог) — для поиска файлов и программ
+    pub fn path_entries(&self) -> Vec<(char, String)> {
+        self.get("PATH")
+            .unwrap_or("")
+            .split(';')
+            .filter_map(|e| {
+                let e = e.trim();
+                if e.len() >= 2 && e.chars().nth(1) == Some(':') {
+                    Some((
+                        e.chars().next().unwrap().to_ascii_uppercase(),
+                        e[2..].trim_matches(|c| c == '\\' || c == '/').to_string(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }

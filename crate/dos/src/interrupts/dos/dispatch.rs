@@ -1,8 +1,9 @@
-// Ver: 5 File: crate/dos/src/interrupts/dos/dispatch.rs
+// Ver: 7 File: crate/dos/src/interrupts/dos/dispatch.rs
 use x86::flags;
 
+use crate::interrupts::dos::exec;
 use crate::interrupts::dos::file_ops::file_date_time;
-use crate::interrupts::dos::misc::{get_country_info, get_system_date, get_system_time};
+use crate::interrupts::dos::misc::{break_check_handler, get_country_info, get_system_date, get_system_time};
 use crate::system::DosSystem;
 
 use super::console::{print_char, direct_console_io, direct_char_input_no_echo, char_input_no_echo, print_dos_string, buffered_input, read_char_with_echo};
@@ -19,6 +20,7 @@ pub fn handle_int21(sys: &mut DosSystem) {
             log::info!("Program terminated via INT 21h AH=00h, exit code={}", sys.cpu.registers.al());
             sys.exit_code = sys.cpu.registers.al();
             sys.program_terminated = true;
+            sys.cpu.halted = true;
         }
         0x01 => read_char_with_echo(sys),
         0x02 => print_char(sys),
@@ -38,6 +40,7 @@ pub fn handle_int21(sys: &mut DosSystem) {
             sys.cpu.registers.set_cx(0x0000);
             set_carry_flag(sys, false);
         }
+        0x33 => break_check_handler(sys),
         0x35 => get_interrupt_vector(sys),
         0x38 => get_country_info(sys),
         0x3B => set_current_directory(sys),
@@ -54,12 +57,14 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x48 => allocate_memory_handler(sys),
         0x49 => free_memory_handler(sys),
         0x4A => modify_memory_handler(sys),
+        0x4B => exec::exec_program(sys),
         0x4C => {
             log::debug!("Program terminated via INT 21h AH=4Ch, exit code={}", sys.cpu.registers.al());
             sys.exit_code = sys.cpu.registers.al();
             sys.program_terminated = true;
             sys.cpu.halted = true
         }
+        0x4D => exec::get_return_code(sys),
         0x4E => find_first(sys),
         0x4F => find_next(sys),
         0x57 => file_date_time(sys),

@@ -1,3 +1,4 @@
+// Ver: 5 File: crate/dos/src/interrupts/dos/misc.rs
 use bus::Machine;
 use x86::flags;
 
@@ -257,4 +258,51 @@ pub fn get_system_time(sys: &mut DosSystem) {
         seconds,
         hundredths
     );
+}
+
+pub fn break_check_handler(sys: &mut DosSystem) {
+    match sys.cpu.registers.al() {
+        0x00 => {
+            sys.cpu.registers.set_dl(if sys.break_check { 1 } else { 0 });
+            log::info!(
+                "INT 21h / AH=33h/AL=00: get break check -> {}",
+                sys.break_check
+            );
+        }
+        0x01 => {
+            sys.break_check = sys.cpu.registers.dl() != 0;
+            log::info!(
+                "INT 21h / AH=33h/AL=01: set break check -> {}",
+                sys.break_check
+            );
+        }
+        0x02 => {
+            let old = sys.break_check;
+            sys.break_check = sys.cpu.registers.dl() != 0;
+            sys.cpu.registers.set_dl(if old { 1 } else { 0 });
+            log::info!(
+                "INT 21h / AH=33h/AL=02: swap break check old={} new={}",
+                old,
+                sys.break_check
+            );
+        }
+        0x05 => {
+            sys.cpu.registers.set_dl(2);
+            log::info!("INT 21h / AH=33h/AL=05: boot drive -> C: (2)");
+        }
+        0x06 => {
+            sys.cpu.registers.set_bl(6); // major
+            sys.cpu.registers.set_bh(0x16); // minor = 22
+            sys.cpu.registers.set_dl(0); // revision
+            sys.cpu.registers.set_dh(0);
+            sys.cpu.registers.set_cx(0);
+            log::info!("INT 21h / AH=33h/AL=06: true version -> 6.22");
+        }
+        _ => {
+            log::warn!(
+                "INT 21h / AH=33h: unsupported subfunction AL={:02X}",
+                sys.cpu.registers.al()
+            );
+        }
+    }
 }

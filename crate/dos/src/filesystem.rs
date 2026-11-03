@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/filesystem.rs
+// Ver: 5 File: crate/dos/src/filesystem.rs
 use bus::Machine;
 use std::{
     collections::HashMap,
@@ -39,6 +39,9 @@ pub struct FileSystem {
     next_handle: u16,
     search_contexts: HashMap<u32, SearchContext>,
     handle_paths: HashMap<u16, PathBuf>,
+    program_drive: char,
+    program_dir: String,
+    search_path: Vec<(char, String)>,
 }
 
 impl FileSystem {
@@ -51,6 +54,9 @@ impl FileSystem {
             current_drive: 'C',
             search_contexts: HashMap::new(),
             handle_paths: HashMap::new(),
+            program_drive: 'C',
+            program_dir: String::new(),
+            search_path: Vec::new(),
         };
         fs.open_files.insert(0, FileHandle::Device(DeviceKind::Con)); // stdin
         fs.open_files.insert(1, FileHandle::Device(DeviceKind::Con)); // stdout
@@ -186,7 +192,7 @@ impl FileSystem {
             log::info!("Opened virtual device: {:?}", device);
             return Ok(handle);
         }
-        let local_path = self.resolve_path(dos_path)?;
+        let local_path = self.resolve_for_open(dos_path, access_mode)?;
         if access_mode == 0 && !local_path.exists() {
             return Err(format!("File not found: {}", dos_path));
         }
@@ -367,6 +373,7 @@ impl FileSystem {
         dos_path: &str,
         dta_addr: u32,
     ) -> Result<Option<FoundFile>, String> {
+        // --- Шаг 1: диск, путь, маска (как раньше) ---
         let (drive_letter, path_part) =
             if dos_path.len() >= 2 && dos_path.chars().nth(1) == Some(':') {
                 (
@@ -376,65 +383,93 @@ impl FileSystem {
             } else {
                 (self.current_drive, dos_path)
             };
-
-        let driver = self.drivers.get(&drive_letter).ok_or("Drive not found")?;
-        let current_dir = self
-            .current_directories
-            .get(&drive_letter)
-            .map(|s| s.as_str())
-            .unwrap_or("");
         let is_absolute = path_part.starts_with('\\') || path_part.starts_with('/');
         let path_str = path_part.trim_start_matches(|c| c == '\\' || c == '/');
-
-        let mut dir_path = driver.root_path.clone();
-        if !is_absolute && !current_dir.is_empty() {
-            dir_path.push(current_dir);
-        }
-
         let normalized = path_str.replace('\\', "/");
         let parts: Vec<&str> = normalized.split('/').collect();
         let pattern = parts.last().unwrap_or(&"*").to_string();
+        let dir_comps: Vec<String> = parts[..parts.len().saturating_sub(1)]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
-        for &comp in &parts[..parts.len().saturating_sub(1)] {
-            match comp {
-                "" | "." => continue,
-                ".." => {
-                    dir_path.pop();
+        // --- Шаг 2: «голая» маска -> перебор каталогов поиска, иначе один каталог ---
+        let bare = !dos_path.contains('\\')
+            && !dos_path.contains('/')
+            && !(dos_path.len() >= 2 && dos_path.chars().nth(1) == Some(':'));
+
+        // (диск, компоненты каталога, признак «из search_candidates»)
+        let candidates: Vec<(char, Vec<String>, bool)> = if bare {
+            self.search_candidates()
+                .into_iter()
+                .map(|(d, dir)| {
+                    let comps = dir
+                        .split('\\')
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                        .collect();
+                    (d, comps, true)
+                })
+                .collect()
+        } else {
+            let c = vec![(drive_letter, dir_comps, false)];
+            c
+        };
+
+        // --- Шаг 3: первый каталог с совпадениями побеждает ---
+        for (drv, comps, from_search) in candidates {
+            let driver = match self.drivers.get(&drv) {
+                Some(d) => d,
+                None => continue,
+            };
+            let mut dir_path = driver.root_path.clone();
+            if !from_search {
+                // старое поведение для явных/относительных путей
+                let current_dir = self
+                    .current_directories
+                    .get(&drv)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                if !is_absolute && !current_dir.is_empty() {
+                    dir_path.push(current_dir);
                 }
-                _ => dir_path.push(comp),
             }
-        }
-
-        if !dir_path.exists() || !dir_path.is_dir() {
-            self.search_contexts.remove(&dta_addr);
-            return Ok(None);
-        }
-
-        let mut entries = Vec::new();
-        if let Ok(read_dir) = fs::read_dir(&dir_path) {
-            for entry in read_dir.flatten() {
-                let name = entry.file_name().to_string_lossy().to_uppercase();
-                if match_pattern(&name, &pattern.to_uppercase()) {
-                    entries.push(entry);
+            for comp in &comps {
+                match comp.as_str() {
+                    "" | "." => continue,
+                    ".." => {
+                        dir_path.pop();
+                    }
+                    _ => dir_path.push(comp),
                 }
             }
+            if !dir_path.exists() || !dir_path.is_dir() {
+                continue; // каталога нет — пробуем следующего кандидата
+            }
+            let mut entries = Vec::new();
+            if let Ok(read_dir) = fs::read_dir(&dir_path) {
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_uppercase();
+                    if match_pattern(&name, &pattern.to_uppercase()) {
+                        entries.push(entry);
+                    }
+                }
+            }
+            if entries.is_empty() {
+                continue; // в этом каталоге совпадений нет — пробуем дальше
+            }
+            self.search_contexts.insert(
+                dta_addr,
+                SearchContext {
+                    pattern: pattern.clone(),
+                    entries,
+                    index: 0,
+                },
+            );
+            return self.get_found_file(dta_addr, 0);
         }
-
-        if entries.is_empty() {
-            self.search_contexts.remove(&dta_addr);
-            return Ok(None);
-        }
-
-        self.search_contexts.insert(
-            dta_addr,
-            SearchContext {
-                pattern,
-                entries,
-                index: 0,
-            },
-        );
-
-        self.get_found_file(dta_addr, 0)
+        self.search_contexts.remove(&dta_addr);
+        Ok(None)
     }
 
     pub fn find_next(&mut self, dta_addr: u32) -> Result<Option<FoundFile>, String> {
@@ -476,6 +511,68 @@ impl FileSystem {
     }
     pub fn handle_path(&self, handle: u16) -> Option<&PathBuf> {
         self.handle_paths.get(&handle)
+    }
+
+    pub fn set_program_location(&mut self, drive: char, dir: &str) {
+        self.program_drive = drive.to_ascii_uppercase();
+        self.program_dir = dir.trim_matches(|c| c == '\\' || c == '/').to_string();
+    }
+    pub fn set_search_path_from_env(&mut self, path_value: &str) {
+        self.search_path = path_value
+            .split(';')
+            .filter_map(|e| {
+                let e = e.trim();
+                if e.len() >= 2 && e.chars().nth(1) == Some(':') {
+                    Some((
+                        e.chars().next().unwrap().to_ascii_uppercase(),
+                        e[2..].trim_matches(|c| c == '\\' || c == '/').to_string(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+    }
+    fn search_candidates(&self) -> Vec<(char, String)> {
+        let mut v = vec![(
+            self.current_drive,
+            self.current_directories
+                .get(&self.current_drive)
+                .cloned()
+                .unwrap_or_default(),
+        )];
+        if !self.program_dir.is_empty() {
+            v.push((self.program_drive, self.program_dir.clone()));
+        }
+        v.extend(self.search_path.iter().cloned());
+        v
+    }
+    fn is_bare_name(&self, p: &str) -> bool {
+        !(p.len() >= 2 && p.chars().nth(1) == Some(':'))
+            && !p.starts_with('\\')
+            && !p.starts_with('/')
+    }
+
+    pub fn resolve_for_open(&self, dos_path: &str, mode: u8) -> Result<PathBuf, String> {
+        if !self.is_bare_name(dos_path) || mode == 1 {
+            return self.resolve_path(dos_path);
+        }
+        for (drive, dir) in self.search_candidates() {
+            let full = if dir.is_empty() {
+                &format!("{}:\\{}", drive, dos_path)
+            } else {
+                &format!("{}:\\{}\\{}", drive, dir, dos_path)
+            };
+            if let Ok(p) = self.resolve_path(&full) {
+                if p.is_file() {
+                    return Ok(p);
+                }
+            }
+        }
+        if mode == 2 {
+            return self.resolve_path(dos_path); // создавать — в cwd
+        }
+        Err(format!("File not found: {}", dos_path))
     }
 }
 

@@ -1,27 +1,44 @@
-// Ver: 5 File: crate/dos/src/loader/psp.rs
-use bus::Machine;
+// Ver: 6 File: crate/dos/src/loader/psp.rs
 use crate::consts::{MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::mcb::MCB;
+use bus::Machine;
+use emu_config::EnvironmentConfig;
 
 /// Создает блок окружения (Environment Block).
 pub fn build_environment_block(
     machine: &mut dyn Machine,
-    env_segment: u16,
     psp_segment: u16,
-) {
-    let mcb_seg = env_segment - 1;
-    let mcb = MCB {
+    env: &EnvironmentConfig,
+) -> u16 {
+    let mut pairs: Vec<(&String, &String)> = env.variables.iter().collect();
+    pairs.sort_by_key(|(k, _)| k.to_ascii_uppercase());
+    let mut bytes: Vec<u8> = Vec::new();
+    for (k, v) in pairs {
+        bytes.extend_from_slice(k.as_bytes());
+        bytes.push(b'=');
+        bytes.extend_from_slice(v.as_bytes());
+        bytes.push(0);
+    }
+    bytes.push(0); // терминальная пустая строка
+    let paragraphs = ((bytes.len() + 15) / 16).max(1) as u16;
+    let env_segment = psp_segment.wrapping_sub(1).wrapping_sub(paragraphs);
+    MCB {
         signature: MCB_SIGNATURE_NON_LAST,
         owner: psp_segment,
-        size: 4,
-    };
-    mcb.write(machine, mcb_seg);
-
-    let env_base = (env_segment as u32) << 4;
-    let env_str = "PATH=C:\\\0COMSPEC=C:\\COMMAND.COM\0PROMPT=$P$G\0\0";
-    for (i, &byte) in env_str.as_bytes().iter().enumerate() {
-        machine.write_mem_u8(env_base + i as u32, byte);
+        size: paragraphs,
     }
+    .write(machine, env_segment.wrapping_sub(1));
+    let env_base = (env_segment as u32) << 4;
+    for (i, &b) in bytes.iter().enumerate() {
+        machine.write_mem_u8(env_base + i as u32, b);
+    }
+    log::info!(
+        "Environment block at {:04X}: {} bytes, {} paragraphs",
+        env_segment,
+        bytes.len(),
+        paragraphs
+    );
+    env_segment
 }
 
 fn fill_fcb(machine: &mut dyn Machine, psp_base: u32, fcb_off: u32, name: &str, ext: &str) {
