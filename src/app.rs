@@ -1,6 +1,8 @@
-// Ver: 10 File: ./src/app.rs
+// Ver: 11 File: ./src/app.rs
 use bus::Display;
+use bus::peripherals::keyboard::Keyboard;
 use config::{self, Config, File};
+use dos::bat::BatConfig;
 use dos::{DiskDriver, DosSystem, loader};
 use emu_config::{
     DriverConfig, EnvironmentConfig, MachineConfig, Resolution, SoundConfig, VideoConfig,
@@ -12,8 +14,6 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use bus::peripherals::keyboard::Keyboard;
-use dos::bat::BatConfig;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct App {
@@ -88,44 +88,62 @@ impl App {
         (drive, dir)
     }
 
-    pub fn resolve_program_path(&self, program: &Path) -> Option<PathBuf> {
+    pub fn resolve_program_path(&self, program: &Path, startdir: &Path) -> Option<PathBuf> {
+        let prog_str = program.to_string_lossy().to_string();
+        // 0) программа задана DOS-путём: c:\TASM\BIN\TASM.EXE
+        if prog_str.contains('\\') || prog_str.len() >= 2 && prog_str.chars().nth(1) == Some(':') {
+            if let Some(p) = self.dos_path_to_host(&prog_str) {
+                if p.is_file() {
+                    return Some(p);
+                }
+            }
+        }
+        // 1) обычный host-путь
         if program.exists() && program.is_file() {
             return Some(program.to_path_buf());
         }
         let name = program.file_name()?.to_string_lossy().to_string();
+        // 2) startdir (host- или DOS-путь) + имя программы
+        let start_host = self
+            .dos_path_to_host(&startdir.to_string_lossy())
+            .or_else(|| {
+                if startdir.is_dir() {
+                    Some(startdir.to_path_buf())
+                } else {
+                    None
+                }
+            });
+        if let Some(sh) = start_host {
+            if let Some(p) = Self::join_ci(&sh, &name) {
+                return Some(p);
+            }
+        }
         let names: Vec<String> = if name.contains('.') {
-            let name = vec![name];
-            name
+            let r = vec![name];
+            r
         } else {
-            let name = vec![
+            let r = vec![
                 format!("{}.COM", name),
                 format!("{}.EXE", name),
                 format!("{}.BAT", name),
             ];
-            name
+            r
         };
         for (letter, dos_dir) in self.environment.path_entries() {
-            let cfg =
-                if let Some(x) = self.drivers.iter().find(|d| {
-                    d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter)
-                }) {
-                    x
-                } else {
-                    continue;
-                };
+            let cfg = if let Some(x) = self.drivers.iter().find(|d| {
+                d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter)
+            }) {
+                x
+            } else {
+                continue;
+            };
             let mut host_dir = PathBuf::from(&cfg.path);
             if !dos_dir.is_empty() {
                 host_dir.push(&dos_dir);
             }
             for n in &names {
-                if let Ok(rd) = std::fs::read_dir(&host_dir) {
-                    for ent in rd.flatten() {
-                        if ent.file_name().to_string_lossy().eq_ignore_ascii_case(n)
-                            && ent.path().is_file()
-                        {
-                            return Some(ent.path());
-                        }
-                    }
+                if let Some(p) = Self::join_ci(&host_dir, n) {
+                    return Some(p);
                 }
             }
         }
@@ -249,19 +267,20 @@ impl App {
     pub fn run(
         &self,
         program: PathBuf,
-        _startdir: PathBuf,
+        startdir: PathBuf,
         workdir: PathBuf,
         no_log: bool,
         no_stdin_keys: bool,
         max_call_depth: u16,
         args: Vec<String>,
     ) -> Result<u8, Box<dyn Error>> {
-        let program = self.resolve_program_path(&program).unwrap_or(program);
+        let program = self
+            .resolve_program_path(&program, &startdir)
+            .unwrap_or(program);
         if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
-        // === ВЕТКА BAT ===
         if Self::is_bat(&program) {
             let (drive, dir) = self.initial_dos_dir(&program, &workdir);
             let _raw = if !no_stdin_keys {
@@ -339,17 +358,19 @@ impl App {
         Ok(ds.exit_code)
     }
 
-        pub fn run_with_graphics(
+    pub fn run_with_graphics(
         &self,
         program: PathBuf,
-        _startdir: PathBuf,
+        startdir: PathBuf,
         workdir: PathBuf,
         no_log: bool,
         _no_stdin_keys: bool,
         max_call_depth: u16,
         args: Vec<String>,
     ) -> Result<u8, Box<dyn Error>> {
-        let program = self.resolve_program_path(&program).unwrap_or(program);
+        let program = self
+            .resolve_program_path(&program, &startdir)
+            .unwrap_or(program);
         if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
@@ -360,8 +381,6 @@ impl App {
             self.resolution.height as usize,
         )?;
         window.set_target_fps(60);
-
-        // === ВЕТКА BAT: обёртка display живёт ТОЛЬКО внутри этого блока ===
         if Self::is_bat(&program) {
             let (drive, dir) = self.initial_dos_dir(&program, &workdir);
             let mut pump = |_kb: &mut Keyboard| -> Result<(), String> { Ok(()) };
@@ -383,10 +402,8 @@ impl App {
                 &mut pump,
             )?;
             log::info!("Batch exited with code: {}", code);
-            return Ok(code); // display умирает здесь, borrow окна освобождается
+            return Ok(code);
         }
-
-        // === обычный exe/com: окно заимствуется ровно один раз на оператор ===
         let mut ds = loader::load_executable(
             program.clone(),
             no_log,
@@ -406,13 +423,54 @@ impl App {
         }
         while !ds.cpu.halted && !ds.program_terminated {
             if !window.is_open() {
-                break; // иммутабельный borrow, заканчивается в этом же операторе
+                break;
             }
-            ds.step_frame(Some(&mut window)); // единственный мутабельный borrow на итерацию
+            ds.step_frame(Some(&mut window));
         }
         if ds.program_terminated {
             log::info!("Program exited with code: {}", ds.exit_code);
         }
         Ok(ds.exit_code)
+    }
+
+    fn dos_path_to_host(&self, dos: &str) -> Option<PathBuf> {
+        let normalized = dos.replace('/', "\\");
+        if !(normalized.len() >= 2 && normalized.chars().nth(1) == Some(':')) {
+            return None; // без диска не транслируем
+        }
+        let letter = normalized.chars().next().unwrap().to_ascii_uppercase();
+        let cfg = self
+            .drivers
+            .iter()
+            .find(|d| d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter))?;
+        let mut host = PathBuf::from(&cfg.path);
+        for comp in normalized[2..].split('\\').filter(|s| !s.is_empty()) {
+            let direct = host.join(comp);
+            if direct.exists() {
+                host = direct;
+            } else {
+                let rd = std::fs::read_dir(&host).ok()?;
+                let found = rd
+                    .flatten()
+                    .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(comp))?;
+                host = found.path();
+            }
+        }
+        Some(host)
+    }
+
+    fn join_ci(dir: &Path, name: &str) -> Option<PathBuf> {
+        let direct = dir.join(name);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        let rd = std::fs::read_dir(dir).ok()?;
+        for ent in rd.flatten() {
+            if ent.file_name().to_string_lossy().eq_ignore_ascii_case(name) && ent.path().is_file()
+            {
+                return Some(ent.path());
+            }
+        }
+        None
     }
 }

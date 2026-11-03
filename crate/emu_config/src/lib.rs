@@ -203,7 +203,6 @@ impl EnvironmentConfig {
     pub fn get(&self, key: &str) -> Option<&str> {
         self.variables.get(&key.to_ascii_uppercase()).map(|s| s.as_str())
     }
-    /// Каталоги PATH как пары (диск, каталог) — для поиска файлов и программ
     pub fn path_entries(&self) -> Vec<(char, String)> {
         self.get("PATH")
             .unwrap_or("")
