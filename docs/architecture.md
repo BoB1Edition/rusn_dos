@@ -63,7 +63,7 @@ Full 80386+ real-mode CPU implementation (partial protected mode).
 | `modrm.rs` | ModRM decoder with 16/32-bit addressing, SIB, segment defaults |
 | `executor.rs` | `execute(opcode)` and `execute_0f(opcode)` dispatch (single-byte + 0F prefix) |
 | `tracer.rs` | Instruction logging via `Tracer` trait — `FileTracer` + `NullTracer` |
-| `instructions/` | 10 instruction category modules (`alu/` subdir, `mov/` subdir, `bit`, `shift`, `control`, `exchange`, `group`, `stack`, `system`) |
+| `instructions/` | 11 instruction category modules (`alu/` subdir, `mov/` subdir, `system/` subdir, `bit`, `shift`, `control`, `exchange`, `group`, `stack`) |
 
 ### `dos` — DOS Layer
 
@@ -75,7 +75,7 @@ Connects x86 CPU to DOS environment.
 | `ivt.rs` | IVT initialization (0x00000-0x003FF), internal handler routing via CS=0xF000 |
 | `interrupts/` | `dos/` (INT 21h subdir: dispatch, console, file_ops, dir, find, memory, misc), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h EMS 4.0) |
 | `loader/` | COM loader, EXE loader (MZ header), executable detection |
-| `filesystem.rs` | Multi-drive filesystem, `DiskDriver`, `DeviceKind`/`FileHandle`, wildcard matching, 8.3 formatting |
+| `filesystem/` | Multi-drive filesystem (module `mod.rs`: `FileSystem` core; `types.rs`: `DiskDriver`, `DeviceKind`/`FileHandle`, `FoundFile`; `path.rs`: DOS→host path resolution + `resolve_device`; `device.rs`: handle I/O; `find.rs`: wildcard matching + 8.3 formatting + DTA search; `search.rs`: PATH/program-location search helpers) |
 | `mcb.rs` | DOS Memory Control Block allocator (allocate/free/modify/coalesce) |
 | `consts.rs` | Memory size constants (DOS_MEMORY_SIZE, MCB, MAX_MCB_SEGMENT) |
 
@@ -213,7 +213,7 @@ Rendering pipeline:
 4. VBE modes: `VideoMemory::render_vbe()` — renders LFB content to RGBA buffer.
 5. `scale_buffer()` — generic scaler to display resolution (nearest-neighbor).
 
-### File System (`crate/dos/src/filesystem.rs`)
+### File System (`crate/dos/src/filesystem/`)
 
 Multi-drive virtual filesystem with:
 - **`DiskDriver`**: Maps drive letter to host directory

@@ -54,7 +54,7 @@
 ### 7. Дублирование расчёта даты/високосного года (3 копии)
 
 - **Файлы:**
-  - `crate/dos/src/filesystem.rs:695,703` (`system_time_to_dos_datetime`)
+  - `crate/dos/src/filesystem/find.rs` (`system_time_to_dos_datetime`)
   - `crate/dos/src/interrupts/dos/misc.rs:184,194` (`get_system_date`)
 - **Severity:** HIGH
 - **Описание:** Алгоритм `epoch seconds → (year, month, day)` повторён почти дословно в двух местах (а также в `get_system_time` — своя копия перевода времени). Любое исправление бага в одном не применяется к другому.
@@ -91,7 +91,7 @@
 ### 11. Смешанные типы ошибок
 
 - **Severity:** MEDIUM
-- **Описание:** `Result<T, Box<dyn Error>>` в `main.rs`/`app.rs`, `Result<T, String>` в `filesystem.rs`/`bat/runner.rs`, вообще без `Result` в обработчиках прерываний. Нет единого подхода к обработке ошибок.
+- **Описание:** `Result<T, Box<dyn Error>>` в `main.rs`/`app.rs`, `Result<T, String>` в `filesystem/`/`bat/runner/`, вообще без `Result` в обработчиках прерываний. Нет единого подхода к обработке ошибок.
 - **Исправление:** Определить общий тип ошибки для проекта.
 
 ### 12. `cf` переменная в INC — никогда не читается
@@ -112,10 +112,10 @@
 
 - **Severity:** MEDIUM
 - **Описание:**
-  - `crate/dos/src/filesystem.rs:629` — `enum DeviceKind` — `pub` → `pub(crate)`
-  - `crate/dos/src/filesystem.rs:639` — `enum FileHandle` — `pub` → `pub(crate)`
-  - `crate/dos/src/filesystem.rs:644` — `fn resolve_device()` — `pub` → `pub(crate)`
-  - `crate/dos/src/filesystem.rs:686` — `fn system_time_to_dos_datetime()` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem/types.rs` — `enum DeviceKind` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem/types.rs` — `enum FileHandle` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem/path.rs` — `fn resolve_device()` — `pub` → `pub(crate)`
+  - `crate/dos/src/filesystem/find.rs` — `fn system_time_to_dos_datetime()` — `pub` → `pub(crate)`
   - `crate/x86/src/tracer.rs:60` — `struct NullTracer` — `pub` → `pub(crate)`
   - `crate/dos/src/consts.rs:3-8` — все `pub const` — `pub` → `pub(crate)`
   - `crate/x86/src/instructions/alu/core.rs:151,157` — `pub enum Width`, `pub enum Op` — `pub` → `pub(crate)`
@@ -129,9 +129,9 @@
 
 ### 16. Поле `pattern` в `SearchContext` никогда не читается
 
-- **Файл:** `crate/dos/src/filesystem.rs:28`
+- **Файл:** `crate/dos/src/filesystem/types.rs`
 - **Severity:** LOW
-- **Исправление:** Убрать поле `pattern` или использовать его.
+- **Статус:** ИСПРАВЛЕНО (поле убрано при разбиении `filesystem.rs` на модули).
 
 ### 17. `base_val = 0u32` — присвоение, перезаписываемое до чтения
 

@@ -22,7 +22,7 @@
 
 ### 3. Разработка BAT-интерпретатора
 
-- BAT-файлы уровня COMMAND.COM: `crate/dos/src/bat/runner.rs`
+- BAT-файлы уровня COMMAND.COM: `crate/dos/src/bat/runner/` (модули `exec.rs`, `commands.rs`, `resolve.rs`, `flow.rs`, `types.rs`, `util.rs`)
 - Каждая дочерняя программа — свежий `DosSystem` через `loader::load_executable()`, состояние оболочки (`ShellState`: CWD, диск, окружение, errorlevel, echo) живёт в Rust
 - Встроенные команды: echo, cd, cls, goto, if errorlevel/exist, set, pause, call, exit, rem, смена диска
 - Раскрытие `%0`–`%9`, `%VAR%`, `%%`→`%`; кавычки в токенах сохраняются
@@ -78,7 +78,7 @@
 4. Вызывать `tick()` в step_frame если нужно
 
 ### Добавление новой BAT-команды
-1. Добавить ветку в `Runner::exec_line()` в `crate/dos/src/bat/runner.rs` (встроенные) или `Runner::run_command()` (внешние)
+1. Добавить ветку в `Runner::exec_line()` в `crate/dos/src/bat/runner/exec.rs` (встроенные) или `Runner::run_command()` (внешние)
 2. Внешнюю команду не забыть в `resolve_command()` (поиск COM/EXE/BAT)
 3. Обновить TODO.md и CHANGELOG.md
 
