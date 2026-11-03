@@ -1,7 +1,14 @@
 .
+├── add-dos-api.prompt.md
+├── add-opcode.prompt.md
+├── add-peripheral.prompt.md
+├── AGENTS.md
+├── ALFA.md
 ├── app
+├── BETA.md
 ├── Cargo.lock
 ├── Cargo.toml
+├── CHANGELOG.md
 ├── config.json
 ├── config.toml
 ├── crate
@@ -137,6 +144,7 @@
 │           ├── stack_test.rs
 │           ├── string_test.rs
 │           └── system_test.rs
+├── DESIGN.md
 ├── docs
 │   ├── architecture.md
 │   ├── build.md
@@ -144,7 +152,16 @@
 │   ├── dos-api.md
 │   ├── porting.md
 │   └── x86.md
+├── ERRORS.md
+├── fix-bug.prompt.md
+├── GOALS.md
+├── MEMORIES.md
+├── PREALFA.md
+├── README.md
+├── refactor.prompt.md
 ├── shufled.py
+├── SKILL.md
+├── split_module.prompt.md
 ├── src
 │   ├── app.rs
 │   ├── main.rs
@@ -171,5 +188,11 @@
 │   ├── testvga.asm
 │   ├── ttasm.asm
 │   └── working.asm
+├── test-x86.prompt.md
 ├── test.sh
+├── testvga.asm
+├── TODO.md
+├── topopcodes.md
 └── tree.tree
+
+38 directories, 158 files
