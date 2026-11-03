@@ -1,12 +1,7 @@
 .
-├── add-dos-api.prompt.md
-├── add-opcode.prompt.md
-├── add-peripheral.prompt.md
-├── AGENTS.md
 ├── app
 ├── Cargo.lock
 ├── Cargo.toml
-├── CHANGELOG.md
 ├── config.json
 ├── config.toml
 ├── crate
@@ -38,6 +33,9 @@
 │   ├── dos
 │   │   ├── Cargo.toml
 │   │   └── src
+│   │       ├── bat
+│   │       │   ├── mod.rs
+│   │       │   └── runner.rs
 │   │       ├── consts.rs
 │   │       ├── filesystem.rs
 │   │       ├── interrupts
@@ -46,6 +44,7 @@
 │   │       │   │   ├── console.rs
 │   │       │   │   ├── dir.rs
 │   │       │   │   ├── dispatch.rs
+│   │       │   │   ├── exec.rs
 │   │       │   │   ├── file_ops.rs
 │   │       │   │   ├── find.rs
 │   │       │   │   ├── memory.rs
@@ -59,7 +58,8 @@
 │   │       │   ├── com_loader.rs
 │   │       │   ├── exe_header.rs
 │   │       │   ├── exe_loader.rs
-│   │       │   └── mod.rs
+│   │       │   ├── mod.rs
+│   │       │   └── psp.rs
 │   │       ├── mcb.rs
 │   │       └── system.rs
 │   ├── dreamcast
@@ -137,7 +137,6 @@
 │           ├── stack_test.rs
 │           ├── string_test.rs
 │           └── system_test.rs
-├── DESIGN.md
 ├── docs
 │   ├── architecture.md
 │   ├── build.md
@@ -145,20 +144,19 @@
 │   ├── dos-api.md
 │   ├── porting.md
 │   └── x86.md
-├── ERRORS.md
-├── fix-bug.prompt.md
-├── README.md
-├── refactor.prompt.md
 ├── shufled.py
-├── SKILL.md
-├── split_module.prompt.md
 ├── src
 │   ├── app.rs
-│   └── main.rs
+│   ├── main.rs
+│   └── stdin_bridge.rs
 ├── test
+│   ├── build.bat
+│   ├── chain.bat
+│   ├── fail.bat
 │   ├── game1.asm
 │   ├── game2.asm
 │   ├── hard_emuland.asm
+│   ├── recurce.bat
 │   ├── tasm_test3.asm
 │   ├── tasm_test4.asm
 │   ├── tasm_work.asm
@@ -167,15 +165,11 @@
 │   ├── test2.asm
 │   ├── test3.asm
 │   ├── test4.asm
+│   ├── testcmd.asm
+│   ├── testexec.asm
+│   ├── testkey.asm
 │   ├── testvga.asm
 │   ├── ttasm.asm
 │   └── working.asm
-├── test-x86.prompt.md
 ├── test.sh
-├── TODO copy.md
-├── TODO.md
-├── TODO.shared.md
-├── topopcodes.md
 └── tree.tree
-
-37 directories, 142 files

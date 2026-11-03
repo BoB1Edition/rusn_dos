@@ -1,4 +1,4 @@
-// Ver: 4 File: ./crate/x86/src/instructions/control.rs
+// Ver: 5 File: ./crate/x86/src/instructions/control.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -267,9 +267,15 @@ pub fn enter(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
 }
 
 pub fn leave(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
-    cpu.registers.set_sp(cpu.registers.bp());
-    let bp = stack::pop16(cpu, machine);
-    cpu.registers.set_bp(bp);
+    if cpu.prefixes.has_operand_size {
+        cpu.registers.set_esp(cpu.registers.ebp());
+        let ebp = stack::pop32(cpu, machine);
+        cpu.registers.set_ebp(ebp);
+    } else {
+        cpu.registers.set_sp(cpu.registers.bp());
+        let bp = stack::pop16(cpu, machine);
+        cpu.registers.set_bp(bp);
+    }
 }
 
 pub fn bound(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
