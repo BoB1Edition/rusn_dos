@@ -306,16 +306,52 @@ impl Runner {
             v.extend(self.path_entries());
             v
         };
+
         for (drive, base) in bases {
             let driver = match self.drivers.iter().find(|d| d.letter == drive) {
                 Some(d) => d,
                 None => continue,
             };
+
             let rel_dir = join_dos(&base, &dirpart);
-            let mut host_dir = driver.root_path.clone();
-            if !rel_dir.is_empty() {
-                host_dir.push(rel_dir);
+
+            // 🔧 ИСПРАВЛЕНИЕ: резолвим путь к каталогу компонент за компонентом с учётом регистра
+            let mut current_host = driver.root_path.clone();
+            let mut valid_dir = true;
+            for comp in rel_dir.split(|c| c == '\\' || c == '/') {
+                if comp.is_empty() {
+                    continue;
+                }
+                let direct = current_host.join(comp);
+                if direct.exists() {
+                    current_host = direct;
+                } else {
+                    let rd = match std::fs::read_dir(&current_host) {
+                        Ok(r) => r,
+                        Err(_) => {
+                            valid_dir = false;
+                            break;
+                        }
+                    };
+                    let found = match rd
+                        .flatten()
+                        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(comp))
+                    {
+                        Some(f) => f,
+                        None => {
+                            valid_dir = false;
+                            break;
+                        }
+                    };
+                    current_host = found.path();
+                }
             }
+            if !valid_dir {
+                continue;
+            }
+
+            let host_dir = current_host;
+
             for n in &names {
                 if let Some(p) = find_ci(&host_dir, n) {
                     let is_bat = p
@@ -797,7 +833,11 @@ fn child_loop<'d>(
 ) -> (Result<u8, String>, Option<&'d mut dyn Display>) {
     let result = loop {
         if ds.cpu.halted || ds.program_terminated {
-            break Ok(if ds.program_terminated { ds.exit_code } else { 1 });
+            break Ok(if ds.program_terminated {
+                ds.exit_code
+            } else {
+                1
+            });
         }
         if let Err(e) = pump(&mut ds.machine.keyboard) {
             break Err(e);

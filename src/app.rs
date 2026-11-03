@@ -1,4 +1,4 @@
-// Ver: 11 File: ./src/app.rs
+// Ver: 12 File: ./src/app.rs
 use bus::Display;
 use bus::peripherals::keyboard::Keyboard;
 use config::{self, Config, File};
@@ -64,6 +64,7 @@ impl App {
             })
             .collect()
     }
+
     fn is_bat(p: &Path) -> bool {
         let result = matches!(
             p.extension()
@@ -75,7 +76,6 @@ impl App {
         result
     }
 
-    /// Начальный диск/каталог оболочки: каталог программы, поверх — workdir.
     fn initial_dos_dir(&self, program: &Path, workdir: &Path) -> (char, String) {
         let (mut drive, mut dir) = self
             .determine_program_drive_and_dir(program)
@@ -88,9 +88,57 @@ impl App {
         (drive, dir)
     }
 
-    pub fn resolve_program_path(&self, program: &Path, startdir: &Path) -> Option<PathBuf> {
+    /// Трансляция DOS-пути в host-путь через смонтированные диски.
+    fn dos_path_to_host(&self, dos: &str) -> Option<PathBuf> {
+        let normalized = dos.replace('/', "\\");
+        if !(normalized.len() >= 2 && normalized.chars().nth(1) == Some(':')) {
+            return None;
+        }
+        let letter = normalized.chars().next().unwrap().to_ascii_uppercase();
+        let cfg = self
+            .drivers
+            .iter()
+            .find(|d| d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter))?;
+        let mut host = PathBuf::from(&cfg.path);
+        for comp in normalized[2..].split('\\').filter(|s| !s.is_empty()) {
+            let direct = host.join(comp);
+            if direct.exists() {
+                host = direct;
+            } else {
+                let rd = std::fs::read_dir(&host).ok()?;
+                let found = rd
+                    .flatten()
+                    .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(comp))?;
+                host = found.path();
+            }
+        }
+        Some(host)
+    }
+
+    fn join_ci(dir: &Path, name: &str) -> Option<PathBuf> {
+        let direct = dir.join(name);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        let rd = std::fs::read_dir(dir).ok()?;
+        for ent in rd.flatten() {
+            if ent.file_name().to_string_lossy().eq_ignore_ascii_case(name) && ent.path().is_file()
+            {
+                return Some(ent.path());
+            }
+        }
+        None
+    }
+
+    pub fn resolve_program_path(
+        &self,
+        program: &Path,
+        startdir: &Path,
+        workdir: &Path,
+    ) -> Option<PathBuf> {
         let prog_str = program.to_string_lossy().to_string();
-        // 0) программа задана DOS-путём: c:\TASM\BIN\TASM.EXE
+
+        // 0) программа задана DOS-путём: c:\TASM\BIN\grep.com
         if prog_str.contains('\\') || prog_str.len() >= 2 && prog_str.chars().nth(1) == Some(':') {
             if let Some(p) = self.dos_path_to_host(&prog_str) {
                 if p.is_file() {
@@ -98,13 +146,16 @@ impl App {
                 }
             }
         }
-        // 1) обычный host-путь
+
+        // 1) обычный host-путь (например, ./app/TASM/BIN/grep.com)
         if program.exists() && program.is_file() {
             return Some(program.to_path_buf());
         }
+
         let name = program.file_name()?.to_string_lossy().to_string();
+
         // 2) startdir (host- или DOS-путь) + имя программы
-        let start_host = self
+        if let Some(sh) = self
             .dos_path_to_host(&startdir.to_string_lossy())
             .or_else(|| {
                 if startdir.is_dir() {
@@ -112,12 +163,30 @@ impl App {
                 } else {
                     None
                 }
-            });
-        if let Some(sh) = start_host {
+            })
+        {
             if let Some(p) = Self::join_ci(&sh, &name) {
                 return Some(p);
             }
         }
+
+        // 3) workdir (host- или DOS-путь) + имя программы  <--- НОВОЕ: ищем в рабочем каталоге DOS
+        if let Some(wh) = self
+            .dos_path_to_host(&workdir.to_string_lossy())
+            .or_else(|| {
+                if workdir.is_dir() {
+                    Some(workdir.to_path_buf())
+                } else {
+                    None
+                }
+            })
+        {
+            if let Some(p) = Self::join_ci(&wh, &name) {
+                return Some(p);
+            }
+        }
+
+        // 4) PATH из окружения + пробинг расширений COM/EXE/BAT
         let names: Vec<String> = if name.contains('.') {
             let r = vec![name];
             r
@@ -129,14 +198,16 @@ impl App {
             ];
             r
         };
+
         for (letter, dos_dir) in self.environment.path_entries() {
-            let cfg = if let Some(x) = self.drivers.iter().find(|d| {
-                d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter)
-            }) {
-                x
-            } else {
-                continue;
-            };
+            let cfg =
+                if let Some(x) = self.drivers.iter().find(|d| {
+                    d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter)
+                }) {
+                    x
+                } else {
+                    continue;
+                };
             let mut host_dir = PathBuf::from(&cfg.path);
             if !dos_dir.is_empty() {
                 host_dir.push(&dos_dir);
@@ -147,6 +218,7 @@ impl App {
                 }
             }
         }
+
         None
     }
 
@@ -242,7 +314,6 @@ impl App {
         }
     }
 
-    /// Вспомогательная функция для парсинга workdir (отделение буквы диска от пути)
     fn parse_workdir(&self, workdir: &Path) -> (char, String) {
         let dos_workdir_raw = workdir.to_string_lossy().replace('/', "\\");
         if dos_workdir_raw.len() >= 2 && dos_workdir_raw.chars().nth(1) == Some(':') {
@@ -275,12 +346,14 @@ impl App {
         args: Vec<String>,
     ) -> Result<u8, Box<dyn Error>> {
         let program = self
-            .resolve_program_path(&program, &startdir)
+            .resolve_program_path(&program, &startdir, &workdir)
             .unwrap_or(program);
+
         if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
+
         if Self::is_bat(&program) {
             let (drive, dir) = self.initial_dos_dir(&program, &workdir);
             let _raw = if !no_stdin_keys {
@@ -314,7 +387,7 @@ impl App {
             log::info!("Batch exited with code: {}", code);
             return Ok(code);
         }
-        // === обычный exe/com (тело Ver 8, возврат кода) ===
+
         let mut ds = loader::load_executable(
             program.clone(),
             no_log,
@@ -368,19 +441,23 @@ impl App {
         max_call_depth: u16,
         args: Vec<String>,
     ) -> Result<u8, Box<dyn Error>> {
+        // ✅ ТЕПЕРЬ ПЕРЕДАЕМ workdir В ПОИСК
         let program = self
-            .resolve_program_path(&program, &startdir)
+            .resolve_program_path(&program, &startdir, &workdir)
             .unwrap_or(program);
+
         if !(program.exists() && program.is_file()) {
             let name = program.file_name().unwrap_or(OsStr::new("None")).display();
             return Err(format!("program: {} not found or this no file", name).into());
         }
+
         let mut window = EmuWindow::new(
             &self.title,
             self.resolution.width as usize,
             self.resolution.height as usize,
         )?;
         window.set_target_fps(60);
+
         if Self::is_bat(&program) {
             let (drive, dir) = self.initial_dos_dir(&program, &workdir);
             let mut pump = |_kb: &mut Keyboard| -> Result<(), String> { Ok(()) };
@@ -404,6 +481,7 @@ impl App {
             log::info!("Batch exited with code: {}", code);
             return Ok(code);
         }
+
         let mut ds = loader::load_executable(
             program.clone(),
             no_log,
@@ -431,46 +509,5 @@ impl App {
             log::info!("Program exited with code: {}", ds.exit_code);
         }
         Ok(ds.exit_code)
-    }
-
-    fn dos_path_to_host(&self, dos: &str) -> Option<PathBuf> {
-        let normalized = dos.replace('/', "\\");
-        if !(normalized.len() >= 2 && normalized.chars().nth(1) == Some(':')) {
-            return None; // без диска не транслируем
-        }
-        let letter = normalized.chars().next().unwrap().to_ascii_uppercase();
-        let cfg = self
-            .drivers
-            .iter()
-            .find(|d| d.letter.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter))?;
-        let mut host = PathBuf::from(&cfg.path);
-        for comp in normalized[2..].split('\\').filter(|s| !s.is_empty()) {
-            let direct = host.join(comp);
-            if direct.exists() {
-                host = direct;
-            } else {
-                let rd = std::fs::read_dir(&host).ok()?;
-                let found = rd
-                    .flatten()
-                    .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(comp))?;
-                host = found.path();
-            }
-        }
-        Some(host)
-    }
-
-    fn join_ci(dir: &Path, name: &str) -> Option<PathBuf> {
-        let direct = dir.join(name);
-        if direct.is_file() {
-            return Some(direct);
-        }
-        let rd = std::fs::read_dir(dir).ok()?;
-        for ent in rd.flatten() {
-            if ent.file_name().to_string_lossy().eq_ignore_ascii_case(name) && ent.path().is_file()
-            {
-                return Some(ent.path());
-            }
-        }
-        None
     }
 }

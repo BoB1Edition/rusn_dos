@@ -43,10 +43,10 @@ echo ./app/test/build.bat
 ./target/debug/rusn_dos --graphics run ./app/test/build.bat
 echo ./app/test/fail.bat
 ./target/debug/rusn_dos --graphics run ./app/test/fail.bat
-echo -d 3 ./app/test/recurse.bat
-./target/debug/rusn_dos --graphics run -d 3 ./app/test/recurse.bat
-echo -d 300 ./app/test/recurse.bat
-./target/debug/rusn_dos --graphics run -d 300 ./app/test/recurse.bat
+echo --max_call_depth 3 ./app/test/recurse.bat
+./target/debug/rusn_dos --graphics --max-call-depth 3 run ./app/test/recurce.bat
+echo --max_call_depth 300 ./app/test/recurse.bat
+./target/debug/rusn_dos --graphics --max-call-depth 300 run ./app/test/recurse.bat
 echo  ./app/test/chain.bat hello
 ./target/debug/rusn_dos --graphics run ./app/test/chain.bat hello
 echo  -w c:\\tasm\\bin grep.com ?
