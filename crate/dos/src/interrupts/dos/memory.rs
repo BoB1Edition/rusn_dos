@@ -1,5 +1,6 @@
-// Ver: 1 File: ./crate/dos/src/interrupts/dos/memory.rs
-use crate::mcb;
+// Ver: 2 File: ./crate/dos/src/interrupts/dos/memory.rs
+
+use crate::mcb::{self};
 use crate::system::DosSystem;
 
 use super::misc::set_carry_flag;
@@ -22,6 +23,7 @@ pub fn allocate_memory_handler(sys: &mut DosSystem) {
             sys.cpu.registers.set_ax(0x08);
             sys.cpu.registers.set_bx(max);
             set_carry_flag(sys, true);
+            mcb::dump_chain(&sys.machine, first);
         }
     }
 }
@@ -34,6 +36,7 @@ pub fn free_memory_handler(sys: &mut DosSystem) {
         Err(code) => {
             set_carry_flag(sys, true);
             sys.cpu.registers.set_ax(code);
+            mcb::dump_chain(&sys.machine, first);
         }
     }
 }
@@ -48,6 +51,8 @@ pub fn modify_memory_handler(sys: &mut DosSystem) {
             set_carry_flag(sys, true);
             sys.cpu.registers.set_ax(0x08);
             sys.cpu.registers.set_bx(max);
+            mcb::dump_chain(&sys.machine, first);
         }
     }
 }
+
