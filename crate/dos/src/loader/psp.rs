@@ -1,4 +1,4 @@
-// Ver: 6 File: crate/dos/src/loader/psp.rs
+// Ver: 1 File: crate/dos/src/loader/psp.rs
 use crate::consts::{MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::mcb::MCB;
 use bus::Machine;

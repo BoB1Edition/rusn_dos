@@ -4,6 +4,7 @@ use crate::system::{DosSystem, ExecRequest};
 
 /// INT 21h / AH=4Bh — EXEC: загрузить и выполнить программу
 pub fn exec_program(sys: &mut DosSystem) {
+    log::trace!("INT 21h / AH=4Bh: {}", sys.process_manager.log_prefix);
     match sys.cpu.registers.al() {
         0x00 => {
             let ds = sys.cpu.registers.ds();
@@ -28,8 +29,14 @@ pub fn exec_program(sys: &mut DosSystem) {
             );
             match sys.filesystem.resolve_path(&filename) {
                 Ok(p) if p.is_file() => {
+                    let host_path = p.to_string_lossy().into_owned();
+                    log::info!(
+                        "INT 21h / AH=4Bh/AL=00: EXEC '{}' resolved to host path '{}'",
+                        filename,
+                        host_path
+                    );
                     sys.exec_request = Some(ExecRequest {
-                        path: filename,
+                        path: host_path,
                         env_seg,
                         cmdline_seg: cmd_seg,
                         cmdline_off: cmd_off,
@@ -38,7 +45,6 @@ pub fn exec_program(sys: &mut DosSystem) {
                         fcb2_seg: f2_seg,
                         fcb2_off: f2_off,
                     });
-                    // CF/AX будут установлены после возврата ребёнка (finish_child)
                 }
                 _ => {
                     log::error!("EXEC: file not found '{}'", filename);

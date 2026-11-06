@@ -1,4 +1,4 @@
-// Ver: 6 File: crate/dos/src/system.rs
+// Ver: 4 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{VideoMode, letterbox43, scale_into_rect};
 use bus::{Cpu, Display, Machine, Motherboard};
@@ -8,6 +8,7 @@ use x86::flags;
 
 use crate::filesystem::FileSystem;
 use crate::ivt;
+use crate::process::ProcessManager;
 
 #[derive(Debug, Clone)]
 pub struct SuspendedCall {
@@ -59,9 +60,9 @@ pub struct DosSystem {
     pub environment: EnvironmentConfig,
     pub break_check: bool,
     pub exec_request: Option<ExecRequest>,
-    pub parent_stack: Vec<ParentSnapshot>,
     pub child_exit_code: u8,
     pub child_exit_type: u8,
+    pub process_manager: ProcessManager,
 }
 
 impl DosSystem {
@@ -92,10 +93,18 @@ impl DosSystem {
             environment: environment,
             break_check: false,
             exec_request: None,
-            parent_stack: Vec::new(),
             child_exit_code: 0,
             child_exit_type: 0,
+            process_manager: ProcessManager::default(),
         }
+    }
+
+    #[inline(always)]
+    pub fn push16(&mut self, value: u16) {
+        let mut bus = CpuBus {
+            mem: &mut self.machine,
+        };
+        x86::instructions::stack::push16(&mut self.cpu, &mut bus, value);
     }
 
     #[inline(always)]
@@ -288,7 +297,9 @@ impl DosSystem {
             self.step();
             executed += 1;
             if self.exec_request.is_some() {
-                match self.start_child() {
+                // Временно извлекаем process_manager, чтобы освободить self для передачи в метод
+                let mut pm = std::mem::take(&mut self.process_manager);
+                match pm.start_child(self) {
                     Ok(()) => {}
                     Err(code) => {
                         log::error!("EXEC failed, error code {}", code);
@@ -296,11 +307,17 @@ impl DosSystem {
                         self.cpu.registers.set_ax(code as u16);
                     }
                 }
+                self.process_manager = pm; // Возвращаем обратно
                 continue;
             }
-            // Ребёнок завершился -> восстанавливаем родителя
-            if !self.parent_stack.is_empty() && (self.cpu.halted || self.program_terminated) {
-                self.finish_child();
+
+            if !self.process_manager.parent_stack.is_empty()
+                && (self.cpu.halted || self.program_terminated)
+            {
+                // Аналогично для finish_child
+                let mut pm = std::mem::take(&mut self.process_manager);
+                pm.finish_child(self);
+                self.process_manager = pm;
                 continue;
             }
             self.tick_timer();
@@ -340,95 +357,6 @@ impl DosSystem {
             ss: 0, // больше не используются
         });
         log::debug!("Suspended INT {:02X}h for key wait", vector);
-    }
-    pub fn start_child(&mut self) -> Result<(), u8> {
-        let req = self.exec_request.take().ok_or(0x01u8)?;
-        // 1. Копируем command tail и FCB из памяти родителя ДО подмены
-        let tail_len = self.read_u8(req.cmdline_seg, req.cmdline_off) as usize;
-        let mut tail = Vec::with_capacity(tail_len);
-        for i in 0..tail_len as u16 {
-            tail.push(self.read_u8(req.cmdline_seg, req.cmdline_off.wrapping_add(1 + i)));
-        }
-        let mut fcb1 = [0u8; 16];
-        let mut fcb2 = [0u8; 16];
-        for i in 0..16u16 {
-            fcb1[i as usize] = self.read_u8(req.fcb1_seg, req.fcb1_off.wrapping_add(i));
-            fcb2[i as usize] = self.read_u8(req.fcb2_seg, req.fcb2_off.wrapping_add(i));
-        }
-        // 2. Загружаем ребёнка во временный DosSystem
-        let mut child = crate::loader::load_executable(
-            std::path::PathBuf::from(&req.path),
-            true,
-            &self.machine_config,
-            &self.environment,
-            Vec::new(),
-        )
-        .map_err(|_| 0x0Bu8)?;
-        // 3. Снимок родителя в стек (поддержка вложенных EXEC)
-        self.parent_stack.push(ParentSnapshot {
-            memory: self.machine.memory.as_slice().to_vec(),
-            cpu: std::mem::replace(&mut self.cpu, child.cpu),
-            dta_segment: self.dta_segment,
-            dta_offset: self.dta_offset,
-            first_mcb_segment: self.first_mcb_segment,
-            console_input: self.console_input.clone(),
-            break_check: self.break_check,
-        });
-        // 4. Пересаживаем память ребёнка (периферия остаётся общей)
-        self.machine.memory = std::mem::replace(&mut child.machine.memory, bus::Memory::new(0));
-        self.first_mcb_segment = child.first_mcb_segment;
-        self.dta_segment = child.dta_segment;
-        self.dta_offset = child.dta_offset;
-        // 5. Вставляем tail и FCB родителя в PSP ребёнка
-        let psp = self.cpu.registers.ds();
-        self.write_u8(psp, 0x80, tail_len as u8);
-        for (i, &b) in tail.iter().enumerate() {
-            self.write_u8(psp, 0x81u16.wrapping_add(i as u16), b);
-        }
-        self.write_u8(psp, 0x81u16.wrapping_add(tail_len as u16), 0x0D);
-        for i in 0..16u16 {
-            self.write_u8(psp, 0x5C + i, fcb1[i as usize]);
-            self.write_u8(psp, 0x6C + i, fcb2[i as usize]);
-        }
-        // 6. Сброс рантайм-состояния под ребёнка
-        self.program_terminated = false;
-        self.exit_code = 0;
-        self.cpu.halted = false;
-        self.suspended = None;
-        self.console_input = ConsoleInputState::default();
-        log::info!("EXEC: child '{}' started (tail len={})", req.path, tail_len);
-        Ok(())
-    }
-
-    pub fn finish_child(&mut self) {
-        if let Some(mut snap) = self.parent_stack.pop() {
-            self.child_exit_code = self.exit_code;
-            self.child_exit_type = if self.program_terminated { 0 } else { 1 };
-            let bytes = std::mem::take(&mut snap.memory);
-            self.machine.memory = bus::Memory::from_slice(bytes.into_boxed_slice());
-            self.cpu = snap.cpu;
-            self.cpu.halted = false;
-            self.cpu.pending_interrupt = None;
-            self.cpu.prefixes.clear();
-            self.cpu.inhibit_interrupts = false;
-            self.dta_segment = snap.dta_segment;
-            self.dta_offset = snap.dta_offset;
-            self.first_mcb_segment = snap.first_mcb_segment;
-            self.console_input = snap.console_input;
-            self.break_check = snap.break_check;
-            self.program_terminated = false;
-            self.exit_code = 0;
-            self.suspended = None;
-            // Возврат родителю: CF=0, AX разрушен
-            let mut f = self.cpu.registers.flags();
-            f &= !x86::flags::CF;
-            self.cpu.registers.set_flags(f);
-            self.cpu.registers.set_ax(0);
-            log::info!(
-                "EXEC: child finished (code={}), parent resumed",
-                self.child_exit_code
-            );
-        }
     }
 }
 
@@ -509,14 +437,4 @@ pub struct ExecRequest {
     pub fcb1_off: u16,
     pub fcb2_seg: u16,
     pub fcb2_off: u16,
-}
-
-pub struct ParentSnapshot {
-    memory: Vec<u8>,
-    cpu: X86Cpu,
-    dta_segment: u16,
-    dta_offset: u16,
-    first_mcb_segment: u16,
-    console_input: ConsoleInputState,
-    break_check: bool,
 }

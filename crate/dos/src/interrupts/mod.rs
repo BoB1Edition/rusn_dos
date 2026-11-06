@@ -1,10 +1,8 @@
-// Ver: 1 File: crate/dos/src/interrupts/mod.rs
+// Ver: 2 File: crate/dos/src/interrupts/mod.rs
 
 pub mod bios;
 pub mod dos;
 pub mod ems;
-
-
 
 use bus::Machine;
 
@@ -24,7 +22,11 @@ pub fn dispatch(sys: &mut DosSystem, vector: u8) {
         0x16 => bios::handle_int16(sys),
         0x1A => bios::handle_int1a(sys),
         0x1C => log::info!("INT 1Ch (User Timer) called"),
-        0x20 => sys.cpu.halted = true,
+        0x20 => {
+            sys.exit_code = 0;
+            sys.program_terminated = true;
+            sys.cpu.halted = true;
+        },
         0x21 => dos::handle_int21(sys),
         0x2F => dos::handle_int2f(sys),
         0x67 => ems::handle_int67(sys),

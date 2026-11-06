@@ -1,4 +1,4 @@
-// Ver: 3 File: ./src/stdin_bridge.rs
+// Ver: 1 File: ./src/stdin_bridge.rs
 //! Мост между терминалом хоста (stdin) и эмулируемой клавиатурой.
 //! Используется только в консольном режиме (без -g).
 use bus::peripherals::keyboard::Keyboard;

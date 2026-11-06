@@ -1,4 +1,4 @@
-// Ver: 12 File: ./src/app.rs
+// Ver: 4 File: ./src/app.rs
 use bus::Display;
 use bus::peripherals::keyboard::Keyboard;
 use config::{self, Config, File};
@@ -395,6 +395,23 @@ impl App {
             &self.environment,
             args,
         )?;
+
+        let main_name = program
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("main")
+            .to_string();
+
+        ds.process_manager.log_prefix = main_name.clone();
+        ds.process_manager.trace_enabled = !no_log;
+
+        if !no_log {
+            let log_filename = format!("logopcode_{}.txt", main_name);
+            if let Ok(t) = x86::tracer::FileTracer::new(&log_filename) {
+                ds.cpu.tracer = Box::new(t);
+                log::info!("Main tracer created: {}", log_filename);
+            }
+        }
         for d in self.make_drivers() {
             ds.filesystem.add_driver(d)?;
         }
@@ -489,6 +506,21 @@ impl App {
             &self.environment,
             args,
         )?;
+        let main_name = program
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("main")
+            .to_string();
+
+        ds.process_manager.log_prefix = main_name.clone();
+        ds.process_manager.trace_enabled = !no_log;
+        if !no_log {
+            let log_filename = format!("logopcode_{}.txt", main_name);
+            if let Ok(t) = x86::tracer::FileTracer::new(&log_filename) {
+                ds.cpu.tracer = Box::new(t);
+                log::info!("Main tracer created: {}", log_filename);
+            }
+        }
         for d in self.make_drivers() {
             ds.filesystem.add_driver(d)?;
         }

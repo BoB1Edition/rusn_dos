@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/dos/src/bat/runner/commands.rs
+// Ver: 2 File: crate/dos/src/bat/runner/commands.rs
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -179,7 +179,9 @@ impl super::Runner {
                 }
                 if v.is_empty() {
                     self.state.env.remove(&k);
+                    log::debug!("Environment: UNSET {}", k);
                 } else {
+                    log::debug!("Environment: SET {}={}", k, v.trim());
                     self.state.env.insert(k, v.trim().to_string());
                 }
             }

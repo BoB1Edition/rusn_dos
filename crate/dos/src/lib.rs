@@ -16,3 +16,4 @@ pub use bus::Display;
 pub use filesystem::{DiskDriver, FileSystem};
 pub use system::{DosSystem, EmsState};
 pub mod bat;
+pub mod process;
