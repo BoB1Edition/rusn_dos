@@ -159,6 +159,7 @@ fn string_cmp(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
                 cf,
                 of,
                 af,
+                false
             ));
         } else if width == 2 {
             let src = machine.read_mem_u16(src_addr);
@@ -170,6 +171,7 @@ fn string_cmp(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
                 cf,
                 of,
                 af,
+                false
             ));
         } else {
             let src = machine.read_mem_u32(src_addr);
@@ -181,6 +183,7 @@ fn string_cmp(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
                 cf,
                 of,
                 af,
+                false
             ));
         }
 
@@ -295,6 +298,7 @@ fn string_scas(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
                 cf,
                 of,
                 af,
+                false
             ));
         } else if width == 2 {
             let src = machine.read_mem_u16(dst_addr);
@@ -305,6 +309,7 @@ fn string_scas(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
                 cf,
                 of,
                 af,
+                false
             ));
         } else {
             let src = machine.read_mem_u32(dst_addr);
@@ -315,6 +320,7 @@ fn string_scas(cpu: &mut X86Cpu, machine: &mut dyn Machine, width: u16) {
                 cf,
                 of,
                 af,
+                false
             ));
         }
 

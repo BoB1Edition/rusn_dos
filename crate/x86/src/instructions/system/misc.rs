@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/x86/src/instructions/system/misc.rs
+// Ver: 2 File: crate/x86/src/instructions/system/misc.rs
 
 use crate::cpu::X86Cpu;
 use crate::flags;
@@ -99,7 +99,7 @@ pub fn aam(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
     cpu.registers.set_ah(al / base);
     let new_al = al % base;
     cpu.registers.set_al(new_al);
-    let f = flags::compute_flags_u8(cpu.registers.flags(), new_al, false, false, false);
+    let f = flags::compute_flags_u8(cpu.registers.flags(), new_al, false, false, false, false);
     let old_cf = cpu.registers.flags() & flags::CF;
     let old_of = cpu.registers.flags() & flags::OF;
     let old_af = cpu.registers.flags() & flags::AF;
@@ -115,7 +115,7 @@ pub fn aad(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
         .wrapping_mul(base)
         .wrapping_add(cpu.registers.al());
     cpu.registers.set_ax(al as u16);
-    let f = flags::compute_flags_u8(cpu.registers.flags(), al, false, false, false);
+    let f = flags::compute_flags_u8(cpu.registers.flags(), al, false, false, false, false);
     let kept = cpu.registers.flags() & (flags::CF | flags::OF | flags::AF);
     cpu.registers
         .set_flags((f & !(flags::CF | flags::OF | flags::AF)) | kept);

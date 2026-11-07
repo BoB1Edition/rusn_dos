@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/instructions/group.rs
+// Ver: 2 File: ./crate/x86/src/instructions/group.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::instructions::stack;
@@ -17,8 +17,10 @@ pub fn group_f6(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
         0 | 1 => {
             let imm = cpu.fetch_u8(machine);
             let result = value & imm;
-            cpu.registers
-                .set_flags(flags::compute_logical_flags_u8(cpu.registers.flags(), result));
+            cpu.registers.set_flags(flags::compute_logical_flags_u8(
+                cpu.registers.flags(),
+                result,
+            ));
         }
         2 => write8(cpu, machine, modrm, addr, !value),
         3 => {
@@ -32,6 +34,7 @@ pub fn group_f6(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
                 cf,
                 of,
                 af,
+                false,
             ));
             write8(cpu, machine, modrm, addr, result);
         }
@@ -99,8 +102,10 @@ fn group_f7_16(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         0 | 1 => {
             let imm = cpu.fetch_u16(machine);
             let result = value & imm;
-            cpu.registers
-                .set_flags(flags::compute_logical_flags_u16(cpu.registers.flags(), result));
+            cpu.registers.set_flags(flags::compute_logical_flags_u16(
+                cpu.registers.flags(),
+                result,
+            ));
         }
         2 => write16(cpu, machine, modrm, addr, !value),
         3 => {
@@ -114,6 +119,7 @@ fn group_f7_16(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
                 cf,
                 of,
                 af,
+                false,
             ));
             write16(cpu, machine, modrm, addr, result);
         }
@@ -173,8 +179,10 @@ fn group_f7_32(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         0 | 1 => {
             let imm = cpu.fetch_u32(machine);
             let result = value & imm;
-            cpu.registers
-                .set_flags(flags::compute_logical_flags_u32(cpu.registers.flags(), result));
+            cpu.registers.set_flags(flags::compute_logical_flags_u32(
+                cpu.registers.flags(),
+                result,
+            ));
         }
         2 => write32(cpu, machine, modrm, addr, !value),
         3 => {
@@ -188,6 +196,7 @@ fn group_f7_32(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
                 cf,
                 of,
                 af,
+                false,
             ));
             write32(cpu, machine, modrm, addr, result);
         }
@@ -224,7 +233,8 @@ fn group_f7_32(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
                 crate::instructions::system::software_interrupt(cpu, machine, 0);
                 return;
             }
-            let dividend = (((cpu.registers.edx() as u64) << 32) | cpu.registers.eax() as u64) as i64;
+            let dividend =
+                (((cpu.registers.edx() as u64) << 32) | cpu.registers.eax() as u64) as i64;
             let d = value as i32 as i64;
             if dividend == i64::MIN && d == -1 {
                 crate::instructions::system::software_interrupt(cpu, machine, 0);
@@ -256,7 +266,7 @@ pub fn group_fe(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             let result = value.wrapping_add(1);
             let of = value == 0x7F;
             let af = (value & 0x0F) == 0x0F;
-            let mut f = flags::compute_flags_u8(cpu.registers.flags(), result, false, of, af);
+            let mut f = flags::compute_flags_u8(cpu.registers.flags(), result, false, of, af, false);
             f = (f & !flags::CF) | old_cf;
             cpu.registers.set_flags(f);
             write8(cpu, machine, modrm, addr, result);
@@ -265,7 +275,7 @@ pub fn group_fe(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             let result = value.wrapping_sub(1);
             let of = value == 0x80;
             let af = (value & 0x0F) == 0;
-            let mut f = flags::compute_flags_u8(cpu.registers.flags(), result, false, of, af);
+            let mut f = flags::compute_flags_u8(cpu.registers.flags(), result, false, of, af, false);
             f = (f & !flags::CF) | old_cf;
             cpu.registers.set_flags(f);
             write8(cpu, machine, modrm, addr, result);
@@ -297,19 +307,43 @@ fn incdec_wide(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm, inc: b
     let old_cf = cpu.registers.flags() & flags::CF;
     if cpu.prefixes.has_operand_size {
         let (value, addr) = read32(cpu, machine, modrm);
-        let result = if inc { value.wrapping_add(1) } else { value.wrapping_sub(1) };
-        let of = if inc { value == 0x7FFF_FFFF } else { value == 0x8000_0000 };
-        let af = if inc { (value & 0x0F) == 0x0F } else { (value & 0x0F) == 0 };
-        let mut f = flags::compute_flags_u32(cpu.registers.flags(), result, false, of, af);
+        let result = if inc {
+            value.wrapping_add(1)
+        } else {
+            value.wrapping_sub(1)
+        };
+        let of = if inc {
+            value == 0x7FFF_FFFF
+        } else {
+            value == 0x8000_0000
+        };
+        let af = if inc {
+            (value & 0x0F) == 0x0F
+        } else {
+            (value & 0x0F) == 0
+        };
+        let mut f = flags::compute_flags_u32(cpu.registers.flags(), result, false, of, af, false);
         f = (f & !flags::CF) | old_cf;
         cpu.registers.set_flags(f);
         write32(cpu, machine, modrm, addr, result);
     } else {
         let (value, addr) = read16(cpu, machine, modrm);
-        let result = if inc { value.wrapping_add(1) } else { value.wrapping_sub(1) };
-        let of = if inc { value == 0x7FFF } else { value == 0x8000 };
-        let af = if inc { (value & 0x0F) == 0x0F } else { (value & 0x0F) == 0 };
-        let mut f = flags::compute_flags_u16(cpu.registers.flags(), result, false, of, af);
+        let result = if inc {
+            value.wrapping_add(1)
+        } else {
+            value.wrapping_sub(1)
+        };
+        let of = if inc {
+            value == 0x7FFF
+        } else {
+            value == 0x8000
+        };
+        let af = if inc {
+            (value & 0x0F) == 0x0F
+        } else {
+            (value & 0x0F) == 0
+        };
+        let mut f = flags::compute_flags_u16(cpu.registers.flags(), result, false, of, af, false);
         f = (f & !flags::CF) | old_cf;
         cpu.registers.set_flags(f);
         write16(cpu, machine, modrm, addr, result);
@@ -336,17 +370,17 @@ fn call_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         return;
     }
     let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-    
+
     if cpu.prefixes.has_operand_size {
         // 32-битный режим: читаем 32-битный EIP и 16-битный CS из памяти
         let eip = machine.read_mem_u32(addr);
         let cs = machine.read_mem_u16(addr.wrapping_add(4));
         let ret_cs = cpu.registers.cs();
         let ret_eip = cpu.registers.eip();
-        
+
         stack::push16(cpu, machine, ret_cs);
         stack::push32(cpu, machine, ret_eip);
-        
+
         cpu.registers.set_cs(cs);
         cpu.registers.set_eip(eip);
     } else {
@@ -355,10 +389,10 @@ fn call_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         let cs = machine.read_mem_u16(addr.wrapping_add(2));
         let ret_cs = cpu.registers.cs();
         let ret_ip = cpu.registers.ip();
-        
+
         stack::push16(cpu, machine, ret_cs);
         stack::push16(cpu, machine, ret_ip);
-        
+
         cpu.registers.set_cs(cs);
         cpu.registers.set_ip(ip);
     }
@@ -380,7 +414,7 @@ fn jmp_far(cpu: &mut X86Cpu, machine: &mut dyn Machine, modrm: ModRm) {
         return;
     }
     let addr = modrm.resolve_address(cpu, machine, cpu.prefixes.has_address_size);
-    
+
     if cpu.prefixes.has_operand_size {
         // 32-битный режим
         let eip = machine.read_mem_u32(addr);

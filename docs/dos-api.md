@@ -90,12 +90,14 @@
 | 19h | Get current drive | `[x]` | always returns 2 (C:) |
 | 1Ah | Set DTA | `[x]` | segment:offset |
 | 25h | Set interrupt vector | `[x]` | пишет в IVT |
-| 2Ah | Get system date | `[ ]` | |
-| 2Ch | Get system time | `[ ]` | |
+| 2Ah | Get system date | `[x]` | epoch → (year, month, day) |
+| 2Ch | Get system time | `[x]` | |
 | 30h | Get DOS version | `[x]` | returns 6.22 |
+| 33h | Break check / boot drive / DOS version | `[x]` | AL=00/01/02/05/06 |
 | 35h | Get interrupt vector | `[x]` | читает из IVT |
-| 39h | Create directory (MKDIR) | `[ ]` | |
-| 3Ah | Remove directory (RMDIR) | `[ ]` | |
+| 38h | Get country info | `[x]` | GET (DS:DX→буфер, AX=1/USA); SET (DX=FFFF) игнорируется |
+| 39h | Create directory (MKDIR) | `[ ]` | CF=1/AX=1 |
+| 3Ah | Remove directory (RMDIR) | `[ ]` | CF=1/AX=1 |
 | 3Bh | Change directory (CHDIR) | `[x]` | |
 | 3Ch | Create file | `[x]` | |
 | 3Dh | Open file | `[x]` | |
@@ -107,15 +109,21 @@
 | 43h | Get/set file attributes | `[~]` | get: OK, set: stub |
 | 44h | IOCTL | `[~]` | только AL=00h (get device info) |
 | 47h | Get current directory | `[x]` | возвращает путь для указанного диска |
-| 48h | Allocate memory (MCB) | `[x]` | |
+| 48h | Allocate memory (MCB) | `[x]` | BX=0 даёт неверный результат (ERRORS.md #13) |
 | 49h | Free memory (MCB) | `[x]` | |
-| 4Ah | Modify memory (MCB) | `[x]` | |
-| 4Bh | EXEC (load and execute) | `[ ]` | |
+| 4Ah | Modify memory (MCB) | `[x]` | grow-Err занижен (ERRORS.md #14) |
+| 4Bh | EXEC (load and execute) | `[x]` | AL=00; снимок родителя в `ParentSnapshot` (process.rs); AL=01/03 → CF=1/AX=1 |
 | 4Ch | Terminate with exit code | `[x]` | stopped = true |
-| 4Eh | Find First | `[x]` | 8.3 DTA заполнение |
+| 4Dh | Get child return code | `[x]` | через `child_exit_code`/`child_exit_type` |
+| 4Eh | Find First | `[x]` | 8.3 DTA заполнение, поиск по каталогам поиска |
 | 4Fh | Find Next | `[x]` | |
+| 50h | Set PSP | `[x]` | `process_manager.current_psp` |
+| 51h | Get PSP | `[x]` | |
+| 52h | Get List of Lists | `[x]` | SYSVARS: `sysvars_segment:offset` (инициализирован `init_sysvars()`) |
+| 57h | Get/set file date-time | `[x]` | AL=00/02/04: реальные timestamps; AL=01/03/05: no-op, CF=0 |
 | 59h | Get extended error | `[ ]` | |
 | 5Ch | File locking | `[ ]` | |
+| 62h | Get PSP | `[x]` | дубликат 51h |
 | 71h | Long filename (LFN) | `[ ]` | |
 | прочие | | `[~]` | CF=1, AX=1, halted |
 

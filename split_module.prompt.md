@@ -70,3 +70,7 @@ cargo test
 - `use crate::...` пути могут сломаться, если глубина изменилась; проверяй импорты
 - `git mv` сохраняет историю файла
 - Тесты остаются рабочими — если тесты используют приватные функции, добавь `#[cfg(test)] pub(crate) use ...` в `mod.rs`
+- Обнови документацию (уже было: `loader/`→`com_loader`+`exe_loader`+`exe_header`+`psp`, `bat/runner.rs`→`bat/runner/`, `dos/system.rs`→`process.rs`, `filesystem/`→`types`+`path`+`device`+`find`+`search`):
+  - `docs/architecture.md`, `AGENTS.md` — таблицы модулей
+  - `README.md` — дерево проекта
+  - `TODO.md` (раздел «Рефакторинг»), `CHANGELOG.md`, при необходимости `MEMORIES.md` (R9)

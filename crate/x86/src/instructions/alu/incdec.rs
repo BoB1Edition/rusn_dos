@@ -1,3 +1,4 @@
+// Ver: 1 File: ./crate/x86/src/instructions/alu/incdec.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 
@@ -12,7 +13,7 @@ fn inc_width(cpu: &mut X86Cpu, reg: u8, bits32: bool) {
         let cf = old == 0xFFFF_FFFF;
         let of = old == 0x7FFF_FFFF;
         let af = (old & 0x0F) == 0x0F;
-        let mut f = flags::compute_flags_u32(cpu.registers.flags(), new, cf, of, af);
+        let mut f = flags::compute_flags_u32(cpu.registers.flags(), new, cf, of, af, false);
         f = (f & !flags::CF) | old_cf;
         set_flags(cpu, f);
     } else {
@@ -22,7 +23,7 @@ fn inc_width(cpu: &mut X86Cpu, reg: u8, bits32: bool) {
         let cf = old == 0xFFFF;
         let of = old == 0x7FFF;
         let af = (old & 0x0F) == 0x0F;
-        let mut f = flags::compute_flags_u16(cpu.registers.flags(), new, cf, of, af);
+        let mut f = flags::compute_flags_u16(cpu.registers.flags(), new, cf, of, af, false);
         f = (f & !flags::CF) | old_cf;
         set_flags(cpu, f);
     }
@@ -36,7 +37,7 @@ fn dec_width(cpu: &mut X86Cpu, reg: u8, bits32: bool) {
         cpu.write_reg32(reg, new);
         let of = old == 0x8000_0000;
         let af = (old & 0x0F) == 0;
-        let mut f = flags::compute_flags_u32(cpu.registers.flags(), new, false, of, af);
+        let mut f = flags::compute_flags_u32(cpu.registers.flags(), new, false, of, af, false);
         f = (f & !flags::CF) | old_cf;
         set_flags(cpu, f);
     } else {
@@ -45,7 +46,7 @@ fn dec_width(cpu: &mut X86Cpu, reg: u8, bits32: bool) {
         cpu.write_reg16(reg, new);
         let of = old == 0x8000;
         let af = (old & 0x0F) == 0;
-        let mut f = flags::compute_flags_u16(cpu.registers.flags(), new, false, of, af);
+        let mut f = flags::compute_flags_u16(cpu.registers.flags(), new, false, of, af, false);
         f = (f & !flags::CF) | old_cf;
         set_flags(cpu, f);
     }

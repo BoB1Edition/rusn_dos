@@ -66,16 +66,16 @@ impl Peripheral for Mouse {
 
 ## Adding a DOS Device Name
 
-DOS applications reference character devices by name (CON, NUL, PRN, etc.) via INT 21h file operations. To add a new device:
+DOS applications reference character devices by name (CON, NUL, PRN, etc.) via INT 21h file operations. The filesystem now lives in `crate/dos/src/filesystem/`:
 
-1. Add a variant to `DeviceKind` in `crate/dos/src/filesystem.rs`:
+1. Add a variant to `DeviceKind` in `crate/dos/src/filesystem/types.rs`:
    ```rust
    pub enum DeviceKind {
        Con, Nul, Com(u8), Lpt(u8), Clock, Ems, MyDevice,
    }
    ```
-2. Add the name to `resolve_device()` function match block
-3. Handle reads/writes in `read_file()` / `write_file()` for the new device
+2. Add the name to `resolve_device()` match block in `crate/dos/src/filesystem/path.rs`
+3. Handle reads/writes in `read_file()` / `write_file()` for the new device (filesystem core)
 4. Handle IOCTL in `ioctl()` (INT 21h / AH=44h) if the device needs special status
 
 Device names are case-insensitive, ignore extensions (CON.TXT == CON), and strip trailing colons (LPT1: == LPT1).
@@ -110,7 +110,7 @@ if let Some(key) = sys.machine.keyboard.pop_key() {
 }
 ```
 
-The `suspend_for_key()` mechanism saves the interrupted call's state and rewinds the CPU registers. The main loop polls keys and resumes execution when a key is pressed.
+The `suspend_for_key()` mechanism saves only the interrupt vector (`SuspendedCall`). The main loop (`step_frame()`) detects the suspended state, calls `pump_events()` to keep the window alive, and re-dispatches the original INT when a key arrives.
 
 ## Implementing Buffered Input
 
@@ -122,6 +122,14 @@ For INT 21h / AH=0Ah (used by most text programs):
 4. Call `sys.suspend_for_key(0x21)` to wait for the next key
 
 `ConsoleInputState` in `system.rs` tracks: `active`, `buffer_seg`, `buffer_off`, `max_chars`, `current_count`.
+
+## EXEC (INT 21h/AH=4Bh) — дочерние процессы
+
+1. Парсинг параметрического блока ES:BX (`exec_program()` в `crate/dos/src/interrupts/dos/exec.rs`) → `ExecRequest`.
+2. `step_frame()` ловит `exec_request` → `ProcessManager::start_child()` (crate/dos/src/process.rs).
+3. Ребёнок грузится in-place (`loader::load_executable_in_place` → `prepare_child_psp`/`finalize_child_context`).
+4. Завершение ребёнка → `finish_child()` (восстановление снимка родителя из `parent_stack`).
+5. Код возврата — через INT 21h/AH=4Dh (`get_return_code`).
 
 ## Adding a New Emulated System
 

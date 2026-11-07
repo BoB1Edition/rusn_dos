@@ -10,10 +10,12 @@
 4. Обновить ERRORS.md (отметить как исправленное или изменить статус)
 5. Обновить TODO.md если relevant
 6. Написать/обновить тест
+7. Обновить CHANGELOG.md (Unreleased → Fixed) и MEMORIES.md при значимых изменениях
 
 ## Проверка
 ```bash
-cargo test
+cargo build
+cargo test    # x86-тесты: RUST_MIN_STACK=16777216 при stack overflow
 cargo clippy
 RUST_LOG=debug cargo run Run <test_program>
 ```

@@ -71,11 +71,13 @@ Connects x86 CPU to DOS environment.
 
 | Module | Contents |
 |--------|----------|
-| `system.rs` | `DosSystem` — Motherboard + X86Cpu + FileSystem + EMS + DTA + suspend + `ConsoleInputState` |
+| `system.rs` | `DosSystem` — Motherboard + X86Cpu + FileSystem + EMS + DTA + suspend + `ProcessManager` + SYSVARS |
+| `process.rs` | `ProcessManager` — жизненный цикл EXEC: `start_child()`/`finish_child()`, `ParentSnapshot` (память+CPU+DTA+break_check+tracer), `current_psp` |
 | `ivt.rs` | IVT initialization (0x00000-0x003FF), internal handler routing via CS=0xF000 |
-| `interrupts/` | `dos/` (INT 21h subdir: dispatch, console, file_ops, dir, find, memory, misc), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h EMS 4.0) |
-| `loader/` | COM loader, EXE loader (MZ header), executable detection |
-| `filesystem/` | Multi-drive filesystem (module `mod.rs`: `FileSystem` core; `types.rs`: `DiskDriver`, `DeviceKind`/`FileHandle`, `FoundFile`; `path.rs`: DOS→host path resolution + `resolve_device`; `device.rs`: handle I/O; `find.rs`: wildcard matching + 8.3 formatting + DTA search; `search.rs`: PATH/program-location search helpers) |
+| `interrupts/` | `dos/` (INT 21h subdir: dispatch, console, file_ops, dir, find, memory, exec, misc), `bios.rs` (INT 10h/12h/15h/16h/1Ah/08h), `ems.rs` (INT 67h EMS 4.0) |
+| `loader/` | `mod.rs` (dispatch COM/EXE, `load_executable`, `load_executable_in_place`, PSP-хелперы, `init_sysvars`), `com_loader`, `exe_loader`, `exe_header`, `psp` |
+| `filesystem/` | Multi-drive filesystem (`mod.rs`: `FileSystem` core; `types.rs`: `DiskDriver`, `DeviceKind`/`FileHandle`, `FoundFile`; `path.rs`: DOS→host path resolution + `resolve_device`; `device.rs`: handle I/O; `find.rs`: wildcard matching + 8.3 formatting + DTA search; `search.rs`: PATH/program-location search helpers) |
+| `bat/runner/` | BAT-интерпретатор: `exec.rs` (run_batch/exec_line/run_command/run_external), `commands.rs` (встроенные команды), `resolve.rs` (resolve_command, PATH), `flow.rs` (Flow), `types.rs` (BatConfig/ShellState/PumpFn), `util.rs` |
 | `mcb.rs` | DOS Memory Control Block allocator (allocate/free/modify/coalesce) |
 | `consts.rs` | Memory size constants (DOS_MEMORY_SIZE, MCB, MAX_MCB_SEGMENT) |
 
@@ -84,6 +86,16 @@ Connects x86 CPU to DOS environment.
 - **`dta_segment` / `dta_offset`** — configurable Disk Transfer Area address (set via INT 21h / AH=1Ah). Default: PSP segment, offset 0x0080.
 - **`suspended: Option<SuspendedCall>`** — non-blocking keyboard wait. When a DOS/BIOS function needs a key but the buffer is empty, the call is suspended and the main loop polls keys instead of busy-waiting.
 - **`console_input: ConsoleInputState`** — state for INT 21h / AH=0Ah (buffered input), tracks active flag, buffer address, max chars, current count.
+- **`process_manager: ProcessManager`** — EXEC state: `parent_stack: Vec<ParentSnapshot>`, `current_psp`, tracer management (`log_prefix`, `trace_enabled`). `start_child()` snapshots the parent (registers, tracer, DTA, MCB, console_input, break_check), loads the child in-place, creates a per-child tracer (`logopcode_<name>.txt`); `finish_child()` restores the parent and sets AX/CF for AH=4Dh.
+- **`sysvars_segment` / `sysvars_offset`** — List of Lists pointer (INT 21h/AH=52h). Filled by `init_sysvars()` (called from `loader::load_executable`): MCB chain segment, DPB/SFT/CDS pointers (stubs 0xFFFF:0xFFFF), sector size, boot drive, etc. at `60:0026`.
+
+#### EXEC flow (`ProcessManager`)
+
+1. INT 21h/AH=4Bh/AL=00 parses the parameter block ES:BX → `ExecRequest` (path, env, command tail, FCBs).
+2. `step_frame()` sees `exec_request` → `ProcessManager::start_child()`.
+3. Child loaded in place: `load_executable_in_place()` allocates MCB from parent's memory, builds PSP (command tail/FCBs), zeroes BSS, applies relocations, sets CS:IP/SS:SP.
+4. Child runs; on terminate → `finish_child()`: frees child's MCB, restores parent snapshot, sets `child_exit_code/type`, AX=exit code, CF=0.
+5. INT 21h/AH=4Dh exposes the code via `get_return_code()`.
 
 #### `FileHandle` — Disk vs Device
 
@@ -109,6 +121,7 @@ Config types with serde deserialization:
 - `SoundConfig` — type + available_types
 - `CpuConfig` — name, type, features
 - `DriverConfig` — letter, path, read_only
+- `EnvironmentConfig` — DOS environment variables (PATH/COMSPEC/PROMPT): `get()` (case-insensitive), `path_entries()` (PATH → `(drive, dir)` pairs)
 
 ## Interrupt Handling Flow
 
@@ -130,10 +143,22 @@ Software Interrupt (INT n)
         ├── INT 1Ah → bios.rs (Clock)
         ├── INT 1Ch → logged
         ├── INT 20h → halt
-        ├── INT 21h → dos.rs (DOS API)
+        ├── INT 21h → dos.rs (DOS API, см. docs/dos-api.md)
         ├── INT 2Fh → dos.rs (Multiplex)
         ├── INT 67h → ems.rs (EMS 4.0)
         └── other → far call via IVT
+```
+
+### EXEC (INT 21h/AH=4Bh) в цикле
+
+```
+step_frame():
+  ...
+  if exec_request.is_some():
+    process_manager.start_child(self)   // снимок родителя, загрузка ребёнка in-place
+  if program_terminated || halted:
+    if !parent_stack.is_empty():
+      process_manager.finish_child(self) // восстановление родителя, AX=exit code
 ```
 
 ### Suspend/Resume for Keyboard Input
@@ -161,6 +186,10 @@ step_frame(display):
         render dirty frame
     else:
       step()              // 1 CPU instruction + dispatch pending SWI
+    if exec_request:      // EXEC (AH=4Bh) из DOS-программы
+      start_child()
+    if program_terminated/halted AND parent pending:
+      finish_child()
     tick_timer()        // every 910 ticks → check 54ms → IRQ0
     every 256 steps: poll display for keys
   if VRAM dirty: render frame, return
@@ -179,6 +208,8 @@ step_frame(display):
 | 0xFE000-0xFE1FF | VBE BIOS ROM |
 | 0x100000-0xEFFFFFF | Extended Memory (XMS) |
 | 0xE0000000-0xE03FFFF | VBE LFB (Linear Frame Buffer) |
+
+SYSVARS (List of Lists) `60:0026` — инициализируется `DosSystem::init_sysvars()`: сегмент первого MCB (−2), DPB/SFT/CLOCK$/CON/CDS указатели (заглушки), размер сектора, boot drive=3, extended memory (KB).
 
 ## Video System
 

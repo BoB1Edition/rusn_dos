@@ -56,11 +56,11 @@ cargo run Run test/simple.com
 # С графическим окном
 cargo run Run test/simple.exe --graphics
 
-# С отладочными логами
+# С отладчиком — трассировка опкодов
 RUST_LOG=debug cargo run Run test/simple.com
 
-# С указанием рабочей директории
-cargo run Run test/prog.exe --workdir /path/to
+# С указанием рабочей директории (DOS-вид, например для -w c:\\xcom)
+cargo run Run test/prog.exe -w c:\\xcom
 
 # С альтернативным конфигом
 cargo run Run test/prog.exe -c myconfig.toml
@@ -70,6 +70,9 @@ cargo run Run test/simple.com --no-stdin-keys
 
 # С аргументами для DOS-программы
 cargo run Run test/prog.exe -- arg1 arg2
+
+# Лимит глубины вложенных CALL в .BAT
+cargo run Run test/recurce.bat --graphics --max-call-depth 3
 ```
 
 ## CLI
@@ -79,29 +82,32 @@ Usage: rusn_dos [OPTIONS] <COMMAND>
 
 Commands:
   Run   Запуск DOS-программы
-  Win   Запуск в оконном режиме (TODO)
+  Win   Запуск в оконном режиме (заглушка, не реализована)
 
 Options:
   -c, --config <FILE>        Путь к config.toml [default: config.toml]
       --no-log               Отключить трассировку опкодов
-  -s, --startdir <DIR>       Поиск программы [default: ./]
-  -w, --workdir <DIR>        Рабочая директория [default: ./]
       --graphics             Включить графическое окно
       --no-stdin-keys        Не читать stdin как клавиши (headless)
-      --mount <L=path[:ro]>  Монтирование диска (C=./app:ro)
+      --mount <L=path[:ro]>  Монтирование диска (объявлено, не обрабатывается)
       --max-call-depth <N>   Лимит глубины CALL в батчах [default: 20]
 
-Run usage: rusn_dos Run <PROGRAM> [--startdir <DIR>] [--workdir <DIR>] [OPTIONS] [-- <args>...]
+Run usage: rusn_dos Run <PROGRAM> [-s <DIR>] [-w <DIR>] [OPTIONS] [-- <args>...]
+  -s, --startdir <DIR>   Поиск программы [default: ./]
+  -w, --workdir <DIR>    DOS-рабочая директория [default: ./]
 
-Win usage: rusn_dos Win [--workdir <DIR>] [OPTIONS]
-
-Коды выхода:
-  0   Успешное завершение
-  1   Ошибка эмулятора
-  2   Headless-ввод (программа ждёт клавишу без stdin)
-  3   Ошибка CLI/конфига/путей
-  101 Паника Rust
+Win usage: rusn_dos Win [-w <DIR>] [OPTIONS]
 ```
+
+Примечания:
+- `run_window()` (`Commands::Win` и запуск без подкоманды) — заглушка, возвращает `Ok(())` (паника `todo!` убрана). Реализация — отдельная задача (см. ERRORS.md #5).
+- `--mount` объявлен, но не используется (см. ERRORS.md #20).
+
+Коды выхода (src/main.rs):
+- `0` — успешное завершение программы
+- `1` — ошибка эмулятора (CLI, конфиг, путей, валидации `--max-call-depth`)
+- `<код программы>` — код выхода DOS-программы (после `run_main()` вызывается `process::exit`)
+- `101` — паника Rust
 
 ## Конфигурация (config.toml)
 
@@ -122,9 +128,14 @@ dpmi = false              # DPMI host enable
 type = "vga"
 available_types = ["vga", "svga"]
 
+[environment]
+PATH = "C:\\;C:\\TASM\\BIN"
+COMSPEC = "C:\\COMMAND.COM"
+PROMPT = "$P$G"
+
 [sound]
 type = "pc_speaker"
-available_types = ["pc_speaker", "sb16"]
+available_types = ["pc_speaker", "sb16", "sb", "ultrasound", "pas", "pas16"]
 
 [[drivers]]
 letter = "C"              # Буква диска
@@ -136,6 +147,10 @@ letter = "Z"
 path = "/tmp/mgk/"
 read_only = true
 ```
+
+### Секция `[environment]`
+
+Переменные окружения DOS (`EnvironmentConfig` из `crate/emu_config`). **PATH** — список каталогов (через `;`) для поиска .COM/.EXE/.BAT при запуске и для открытия «голых» имён (INT 21h/AH=3Dh). **COMSPEC** / **PROMPT** — стандартные переменные MS-DOS. Блок окружения строится в PSP при загрузке через `build_environment_block()`.
 
 ### Драйверы дисков
 
@@ -153,7 +168,7 @@ read_only = true
 ├── crate/
 │   ├── bus/          # Трейты + Motherboard + PIC/PIT/VGA/Keyboard
 │   ├── x86/          # 80386+ CPU (регистры, флаги, все инструкции)
-│   ├── dos/          # DOS-оболочка (INT 21h, BIOS, EMS, MCB, FS)
+│   ├── dos/          # DOS-оболочка (INT 21h, BIOS, EMS, MCB, FS, BAT, EXEC)
 │   ├── gui/          # Графическое окно (minifb)
 │   ├── emu_config/   # Типы конфигурации (Resolution, MachineConfig и др.)
 │   ├── nes/          # NES (заглушка)
@@ -165,6 +180,7 @@ read_only = true
 ├── src/              # Точка входа (clap CLI)
 ├── docs/             # Документация
 ├── test/             # Тестовые DOS-программы
+├── app/              # Монтируется как диск C:
 └── config.toml       # Пример конфигурации
 ```
 

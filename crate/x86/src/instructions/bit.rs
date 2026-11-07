@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/instructions/bit.rs
+// Ver: 3 File: ./crate/x86/src/instructions/bit.rs
 use crate::cpu::X86Cpu;
 use crate::modrm::ModRm;
 use bus::Machine;
@@ -14,7 +14,7 @@ pub fn shld_imm(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             machine.read_mem_u32(addr)
         };
         let result = if imm > 31 { src } else { src.wrapping_shl(imm as u32) | (cpu.read_reg32(modrm.reg_field) >> (32 - imm)) };
-        set_flags_shift(cpu, result, src, imm);
+        set_flags_shld(cpu, result, src, imm);
         if modrm.is_register_mode() {
             cpu.write_reg32(modrm.rm_field, result);
         } else {
@@ -29,7 +29,7 @@ pub fn shld_imm(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             machine.read_mem_u16(addr)
         };
         let result = if imm > 15 { src } else { src.wrapping_shl(imm as u32) as u16 | (cpu.read_reg16(modrm.reg_field) >> (16 - imm)) };
-        set_flags_shift16(cpu, result, src, imm);
+        set_flags_shld16(cpu, result, src, imm);
         if modrm.is_register_mode() {
             cpu.write_reg16(modrm.rm_field, result);
         } else {
@@ -50,7 +50,7 @@ pub fn shld_cl(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             machine.read_mem_u32(addr)
         };
         let result = if shift > 31 { src } else { src.wrapping_shl(shift as u32) | (cpu.read_reg32(modrm.reg_field) >> (32 - shift)) };
-        set_flags_shift(cpu, result, src, shift);
+        set_flags_shld(cpu, result, src, shift);
         if modrm.is_register_mode() {
             cpu.write_reg32(modrm.rm_field, result);
         } else {
@@ -65,7 +65,7 @@ pub fn shld_cl(cpu: &mut X86Cpu, machine: &mut dyn Machine) {
             machine.read_mem_u16(addr)
         };
         let result = if shift > 15 { src } else { src.wrapping_shl(shift as u32) as u16 | (cpu.read_reg16(modrm.reg_field) >> (16 - shift)) };
-        set_flags_shift16(cpu, result, src, shift);
+        set_flags_shld16(cpu, result, src, shift);
         if modrm.is_register_mode() {
             cpu.write_reg16(modrm.rm_field, result);
         } else {
@@ -151,7 +151,7 @@ fn set_flags_shift(cpu: &mut X86Cpu, result: u32, src: u32, shift: u8) {
     use crate::flags;
     let mut f = cpu.registers.flags();
     f &= !(flags::CF | flags::OF | flags::SF | flags::ZF | flags::PF);
-    f = flags::compute_flags_u32(f, result, false, false, false);
+    f = flags::compute_flags_u32(f, result, false, false, false, false);
     if shift > 0 {
         let cf = ((src >> (shift as u32 - 1)) & 1) != 0;
         if cf { f |= flags::CF; }
@@ -167,7 +167,7 @@ fn set_flags_shift16(cpu: &mut X86Cpu, result: u16, src: u16, shift: u8) {
     use crate::flags;
     let mut f = cpu.registers.flags();
     f &= !(flags::CF | flags::OF | flags::SF | flags::ZF | flags::PF);
-    f = flags::compute_flags_u16(f, result, false, false, false);
+    f = flags::compute_flags_u16(f, result, false, false, false, false);
     if shift > 0 {
         let cf = ((src >> (shift - 1)) & 1) != 0;
         if cf { f |= flags::CF; }
@@ -434,6 +434,38 @@ fn set_cf(cpu: &mut X86Cpu, cf: bool) {
         f |= crate::flags::CF;
     } else {
         f &= !crate::flags::CF;
+    }
+    cpu.registers.set_flags(f);
+}
+
+fn set_flags_shld(cpu: &mut X86Cpu, result: u32, src: u32, shift: u8) {
+    use crate::flags;
+    let mut f = cpu.registers.flags();
+    f &= !(flags::CF | flags::OF | flags::SF | flags::ZF | flags::PF);
+    f = flags::compute_flags_u32(f, result, false, false, false, false);
+    if shift > 0 {
+        let cf = ((src >> (32 - shift as u32)) & 1) != 0;  // ← width - shift
+        if cf { f |= flags::CF; }
+        if shift == 1 {
+            let of = ((result >> 31) & 1) != cf as u32;
+            if of { f |= flags::OF; } else { f &= !flags::OF; }
+        }
+    }
+    cpu.registers.set_flags(f);
+}
+
+fn set_flags_shld16(cpu: &mut X86Cpu, result: u16, src: u16, shift: u8) {
+    use crate::flags;
+    let mut f = cpu.registers.flags();
+    f &= !(flags::CF | flags::OF | flags::SF | flags::ZF | flags::PF);
+    f = flags::compute_flags_u16(f, result, false, false, false, false);
+    if shift > 0 {
+        let cf = ((src >> (16 - shift)) & 1) != 0;  // ← width - shift
+        if cf { f |= flags::CF; }
+        if shift == 1 {
+            let of = ((result >> 15) & 1) != cf as u16;
+            if of { f |= flags::OF; } else { f &= !flags::OF; }
+        }
     }
     cpu.registers.set_flags(f);
 }

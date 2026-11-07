@@ -118,17 +118,17 @@ pub fn sbb32(dst: u32, src: u32, carry: bool) -> (u32, bool, bool, bool) {
 }
 
 pub fn apply_arith8(cpu: &mut X86Cpu, result: u8, cf: bool, of: bool, af: bool) {
-    let flags = flags::compute_flags_u8(cpu.registers.flags(), result, cf, of, af);
+    let flags = flags::compute_flags_u8(cpu.registers.flags(), result, cf, of, af, false);
     set_flags(cpu, flags);
 }
 
 pub fn apply_arith16(cpu: &mut X86Cpu, result: u16, cf: bool, of: bool, af: bool) {
-    let flags = flags::compute_flags_u16(cpu.registers.flags(), result, cf, of, af);
+    let flags = flags::compute_flags_u16(cpu.registers.flags(), result, cf, of, af, false);
     set_flags(cpu, flags);
 }
 
 pub fn apply_arith32(cpu: &mut X86Cpu, result: u32, cf: bool, of: bool, af: bool) {
-    let flags = flags::compute_flags_u32(cpu.registers.flags(), result, cf, of, af);
+    let flags = flags::compute_flags_u32(cpu.registers.flags(), result, cf, of, af, false);
     set_flags(cpu, flags);
 }
 

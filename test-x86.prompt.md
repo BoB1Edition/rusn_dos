@@ -18,5 +18,6 @@
 
 ## Проверка
 ```bash
-cargo test -p x86
+cargo test -p x86        # при stack overflow добавь RUST_MIN_STACK=16777216 перед командой
+cargo clippy -p x86
 ```

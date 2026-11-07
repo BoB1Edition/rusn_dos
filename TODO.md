@@ -14,7 +14,7 @@
 - `[!]` `mov_ax_address` (0xA1) / `mov_address_ax` (0xA3) — НЕ dead code, реализованы в `mov/imm.rs`, вызываются из executor. Устаревший пункт — проверено 03.11.2026.
 - `[x]` `set_eflags` — до сих пор не форсирует бит 1 в отличие от `set_flags` → **не исправлено** (см. ERRORS.md)
 - `[!]` AF в shift/rotate — не передаётся (`false`), хотя реальный x86 меняет AF
-- `[x]` SGDT/SIDT — реализованы (пишут limit+base в память)
+- `[x]` SGDT/SIDT — реализованы (пишут limit+base в память) в `system/control.rs`
 - `[!]` AAA (0x37) и AAS (0x3F) — отсутствуют в `executor.rs`
 - `[!]` INT 08h — PIT не эмулирует реальный счётчик, таймер на wall-clock
 - `[!]` BSR/BSF (0F BD/BC) — не реализованы
@@ -51,9 +51,13 @@
 - `[x]` INT 21h / AH=08h — char input, no echo (blocking, with Ctrl+C → INT 23h)
 - `[x]` INT 21h / AH=2Ah — get system date
 - `[x]` INT 21h / AH=2Ch — get system time
+- `[x]` INT 21h / AH=38h — get country info (GET/SET, текущий code = 1/USA)
 - `[x]` INT 21h / AH=33h — break check (get/set/swap), boot drive, версия DOS 6.22
-- `[x]` INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов через `start_child()`/`finish_child()`)
+- `[x]` INT 21h / AH=4B00h — EXEC (загрузка дочерних процессов через `ProcessManager::start_child()`/`finish_child()`)
 - `[x]` INT 21h / AH=4Dh — получить код возврата ребёнка
+- `[x]` INT 21h / AH=50h/51h/62h — Set/Get PSP (два геттера — 51h и 62h)
+- `[x]` INT 21h / AH=52h — Get List of Lists (SYSVARS, инициализируется `sys.init_sysvars()` в loader/mod.rs)
+- `[x]` INT 21h / AH=57h — get/set file date/time (get: реальные timestamps; set: no-op с CF=0)
 - `[ ]` INT 21h / AH=39h — MKDIR
 - `[ ]` INT 21h / AH=3Ah — RMDIR
 - `[ ]` INT 21h / AH=59h — get extended error
@@ -125,13 +129,13 @@
 
 ## 6. BAT-интерпретатор (COMMAND.COM уровень)
 
-- `[x]` Модуль `crate/dos/src/bat/runner.rs` — вариант B (каждый ребёнок в свежем `DosSystem`)
+- `[x]` Модуль `crate/dos/src/bat/runner/` — подкаталог с модулями `exec.rs`, `commands.rs`, `resolve.rs`, `flow.rs`, `types.rs`, `util.rs` (вариант B: каждый ребёнок в свежем `DosSystem`)
 - `[x]` `ShellState` — CWD по дискам, текущий диск, env, echo, errorlevel
 - `[x]` Встроенные: echo, cd/chdir, cls, goto, if errorlevel N, if exist, set, pause, call, exit, rem, смена диска
 - `[x]` Раскрытие `%0`–`%9`, `%VAR%`, `%%`→`%`, `@`-подавление эха
 - `[x]` `--max-call-depth` (1..=255, default 20), глубина `if` ≤ 4
 - `[x]` `resolve_command()` — поиск COM/EXE/BAT: cwd → PATH → программа
-- `[x]` `pause` в консоли (pump) и в графике (poll_keys окна)
+- `[x]` `pause` в консоли (pump) и в графике (poll_keys окна); `PumpFn` для неблокирующего pump'а из BAT
 - `[ ]` CALL :label (подпрограммы) — на Этапе 4 не поддерживается (печатает сообщение)
 - `[ ]` FOR, SHIFT, ERRORLEVEL как переменная, `if defined VAR`
 - `[ ]` `set /a`, `set /p` (арифметика/ввод)
@@ -197,6 +201,7 @@
 - `[x]` `App::resolve_program_path()` — поиск программы по PATH (COM/EXE/BAT)
 - `[x]` `FileSystem::resolve_for_open()` — открытие "голых" имён по search-каталогам
 - `[x]` `find_first()` — перебор каталогов поиска (cwd → каталог программы → PATH)
+- `[x]` Наследование окружения при EXEC: `resolve_child_env_seg()` читает PSP+0x2C родителя при env=0 (loader/mod.rs)
 - `[ ]` Поиск окружения у родителя при EXEC (env=0 → наследование дерева env)
 
 ## 10. Рефакторинг — Разбивка файлов на модули
@@ -205,10 +210,14 @@
 - `[x]` `mov.rs` → `mov/` с модулями `rm`, `imm`, `str_ops`
 - `[x]` `dos.rs` → `dos/` с модулями `dispatch`, `console`, `file_ops`, `dir`, `find`, `memory`, `exec`, `misc`
 - `[x]` `video.rs` → `video/` с модулями `core`, `dac`, `planar`, `render`, `peripheral`, `vbe`, `types`
+- `[x]` `dos.rs` → `dos/` + `filesystem/` разбит на `mod`, `types`, `path`, `device`, `find`, `search`; `loader/` на `com_loader`, `exe_loader`, `exe_header`, `psp`
+- `[x]` `system.rs` → выделен `crate/dos/src/process.rs` (`ProcessManager`, `ParentSnapshot` — EXEC-жизненный цикл)
+- `[x]` `bat/runner.rs` → подкаталог `bat/runner/` (`exec`, `commands`, `resolve`, `flow`, `types`, `util`)
+- `[x]` `system.rs` (x86) → `system/` (`control`, `flags`, `interrupt`, `io`, `misc`, `regs`)
 - `[ ]` `shift.rs` — разбить на подкаталог
 - `[ ]` `bit.rs` — разбить на подкаталог
-- `[ ]` `control.rs` — разбить на подкаталог
-- `[ ]` `system.rs` (dos) — избавиться от god object (EXEC/снимки могут стать модулями)
+- `[ ]` `control.rs` (x86) — разбить на подкаталог
+- `[ ]` `system.rs` (dos) — избавиться от god object (EXEC/снимки уже в process.rs; остальное — на усмотрение)
 
 ## 11. Сборка и CI
 
@@ -217,6 +226,7 @@
 - `[ ]` GitHub Actions — build + test + lint (rustfmt + clippy)
 - `[ ]` Fuzz-тестирование декодера ModRM и опкодов
 - `[ ]` Интеграционные тесты: запуск реальных DOS .COM/.EXE через test.sh в CI
+- `[!]` `RUST_MIN_STACK` для x86-тестов (контроль/group/system переполняют стек без него, см. ERRORS.md #38)
 
 ## 12. Документация
 

@@ -130,11 +130,12 @@ impl Memory {
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `ram` | `Memory` | RAM |
+| `memory` | `Memory` | RAM |
 | `video` | `VideoMemory` | VGA (текст/Mode13h/planar), DAC, CRTC, AC |
 | `keyboard` | `Keyboard` | 8042 + BIOS буфер |
 | `pic` | `Pic` | 8259 (master+slave) |
 | `pit` | `Pit` | 8253 (3 канала, wall-clock stub) |
+| `halted` | `bool` | флаг останова машины |
 | `a20_enabled` | `bool` | A20 gate |
 | `a20_command_pending` | `bool` | Флаг ожидания команды A20 |
 
@@ -197,9 +198,11 @@ MMIO (video):
 
 Три канала, заглушка на wall-clock:
 
+- `channel_0/1/2: u16` — значения каналов (регистры-заглушки).
 - `tick()` — всегда возвращает `true` (IRQ).
-- `port_read(0x40–0x42)` — возвращает младшие миллисекунды.
-- `channel[3]` — режимы каналов (не эмулируются).
+- `port_read(0x40–0x42)` — младший байт значения канала.
+- `port_write(0x40–0x42)` — запись канала (старший/младший байт без режимных разрядов).
+- Реальные счётчики и режимы 8253 не эмулируются — IRQ0 выставляется на wall-clock в `DosSystem::tick_timer()` (~54ms).
 
 ### Keyboard (8042)
 

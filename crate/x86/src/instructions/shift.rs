@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/x86/src/instructions/shift.rs
+// Ver: 3 File: ./crate/x86/src/instructions/shift.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::modrm::ModRm;
@@ -77,6 +77,7 @@ fn rotate8(op: u8, value: u8, count: u8, flags_in: u16) -> (u8, u16) {
         return (value, flags_in);
     }
     let cf_in = flags::test_cf(flags_in);
+    let is_rotate = matches!(op, 0 | 1 | 2 | 3);
     let (result, cf, of) = match op {
         0 => rol(value as u32, count, 8),
         1 => ror(value as u32, count, 8),
@@ -88,7 +89,7 @@ fn rotate8(op: u8, value: u8, count: u8, flags_in: u16) -> (u8, u16) {
         _ => (value as u32, false, false),
     };
     let result = result as u8;
-    let out = flags::compute_flags_u8(flags_in, result, cf, of, false);
+    let out = flags::compute_flags_u8(flags_in, result, cf, of, false, is_rotate);
     (result, out)
 }
 
@@ -98,6 +99,7 @@ fn rotate16(op: u8, value: u16, count: u8, flags_in: u16) -> (u16, u16) {
         return (value, flags_in);
     }
     let cf_in = flags::test_cf(flags_in);
+    let is_rotate = matches!(op, 0 | 1 | 2 | 3);
     let (result, cf, of) = match op {
         0 => rol(value as u32, count, 16),
         1 => ror(value as u32, count, 16),
@@ -109,10 +111,7 @@ fn rotate16(op: u8, value: u16, count: u8, flags_in: u16) -> (u16, u16) {
         _ => (value as u32, false, false),
     };
     let result = result as u16;
-    (
-        result,
-        flags::compute_flags_u16(flags_in, result, cf, of, false),
-    )
+    (result, flags::compute_flags_u16(flags_in, result, cf, of, false, is_rotate))
 }
 
 fn rotate32(op: u8, value: u32, count: u8, flags_in: u16) -> (u32, u16) {
@@ -121,6 +120,7 @@ fn rotate32(op: u8, value: u32, count: u8, flags_in: u16) -> (u32, u16) {
         return (value, flags_in);
     }
     let cf_in = flags::test_cf(flags_in);
+    let is_rotate = matches!(op, 0 | 1 | 2 | 3);
     let (result, cf, of) = match op {
         0 => rol(value, count, 32),
         1 => ror(value, count, 32),
@@ -131,10 +131,7 @@ fn rotate32(op: u8, value: u32, count: u8, flags_in: u16) -> (u32, u16) {
         7 => sar(value, count, 32),
         _ => (value, false, false),
     };
-    (
-        result,
-        flags::compute_flags_u32(flags_in, result, cf, of, false),
-    )
+    (result, flags::compute_flags_u32(flags_in, result, cf, of, false, is_rotate))
 }
 
 fn rol(value: u32, count: u8, width: u32) -> (u32, bool, bool) {

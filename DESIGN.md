@@ -50,11 +50,11 @@ IVT вектора с CS=0xF000 считаются внутренними — и
 
 ### 5. BAT-интерпретатор как оболочка (вариант B)
 
-.BAT/.CMD файлы интерпретируются в Rust на уровне COMMAND.COM. Каждая дочерняя программа (COM/EXE) загружается в **свежий** `DosSystem` через `loader::load_executable()`. Состояние оболочки (CWD по дискам, текущий диск, переменные окружения, errorlevel, echo) живёт в `ShellState` (Rust) и переносится в ребёнка перед стартом (`run_external()`), а после завершения читается обратно. Преимущества перед повторным использованием одного `DosSystem`: нет утечек снимков регистров/PSP/памяти между программами, изоляция ошибок ребёнка.
+.BAT/.CMD файлы интерпретируются в Rust на уровне COMMAND.COM (`crate/dos/src/bat/runner/` — подкаталог с модулями `exec`, `commands`, `resolve`, `flow`, `types`, `util`). Каждая дочерняя программа (COM/EXE) загружается в **свежий** `DosSystem` через `loader::load_executable()`. Состояние оболочки (CWD по дискам, текущий диск, переменные окружения, errorlevel, echo) живёт в `ShellState` (Rust) и переносится в ребёнка перед стартом (`run_external()`), а после завершения читается обратно. Преимущества перед повторным использованием одного `DosSystem`: нет утечек снимков регистров/PSP/памяти между программами, изоляция ошибок ребёнка.
 
 ### 6. EXEC (INT 21h/AH=4Bh) — вложенные процессы
 
-DOS-программа может запускать ребёнка через `exec_program()` (регистрирует `ExecRequest`) и `AH=4Dh` (`get_return_code()`). Цикл `step_frame()` обнаруживает `exec_request` и вызывает `start_child()`: снимок родителя (память, CPU, DTA, break_check) сохраняется в `parent_stack`, ребёнок загружается по пути из параметрического блока ES:BX, command tail и FCB копируются в PSP ребёнка. По `halt`/`program_terminated` вызывается `finish_child()` — восстанавливается снимок родителя, возвращается AX=0/CF=0, код ребёнка доступен через `child_exit_code`/`child_exit_type`.
+DOS-программа может запускать ребёнка через `exec_program()` (регистрирует `ExecRequest`) и `AH=4Dh` (`get_return_code()`). Цикл `step_frame()` обнаруживает `exec_request` и вызывает `ProcessManager::start_child()` (crate/dos/src/process.rs): снимок родителя (память, CPU, DTA, break_check, tracer) сохраняется в `parent_stack` (тип `ParentSnapshot`), ребёнок загружается in-place по пути из параметрического блока ES:BX, command tail и FCB копируются в PSP ребёнка. По `halt`/`program_terminated` вызывается `finish_child()` — восстанавливается снимок родителя, освобождается MCB ребёнка, возвращается AX=exit code/CF=0, код ребёнка доступен через `child_exit_code`/`child_exit_type`. Для трассировки ребёнку назначается отдельный tracer (`logopcode_<имя>.txt`).
 
 ### 7. `instruction_bytes` для трассировки
 
@@ -81,12 +81,12 @@ main()
   │                   чтение CWD/env обратно в ShellState
   │
   ├── ВЕТВЬ EXE/COM:
-  │     loader::load_executable(program, no_log, machine_cfg, environment, args)
+  │     loader::load_executable(program, no_log, machine_cfg, environment, args) → инициализирует SYSVARS
   │     монтирование дисков, set_search_path_from_env(PATH), setup_program_directory()
   │     init_stdin_bridge() — RawTerminal (crossterm raw-mode, если не --no-stdin-keys)
   │     Цикл: step_frame(display)
   │           ├── step() → execute opcode
-  │           ├── exec_request? → start_child() (EXEC внутри DOS-программы)
+  │           ├── exec_request? → process_manager.start_child() (EXEC внутри DOS-программы)
   │           ├── halt/program_terminated + parent_stack → finish_child()
   │           ├── tick_timer() → IRQ0 каждые ~55ms
   │           ├── Опрос клавиатуры каждые 256 инструкций
@@ -136,7 +136,8 @@ program_terminated: bool        — флаг завершения (INT 20h/AH=4C
 environment: EnvironmentConfig   — переменные окружения (PATH/COMSPEC/PROMPT)
 break_check: bool               — INT 21h/AH=33h break check flag
 exec_request: Option<ExecRequest> — запрос EXEC (путь + параметрический блок ES:BX)
-parent_stack: Vec<ParentSnapshot> — снимки родителя для вложенных EXEC
+process_manager: ProcessManager  — EXEC: parent_stack (Vec<ParentSnapshot>), current_psp, tracer'ы
+sysvars_segment/offset          — SYSVARS (List of Lists) для INT 21h/AH=52h
 child_exit_code: u8 / child_exit_type: u8 — INT 21h/AH=4Dh
 ```
 
@@ -158,6 +159,8 @@ env: HashMap<String, String> — переменные окружения (раб
 echo_on: bool
 errorlevel: u8
 ```
+
+(`types.rs` в `bat/runner/`; вместе с `BatConfig` и `PumpFn`)
 
 ## Планируемые улучшения
 

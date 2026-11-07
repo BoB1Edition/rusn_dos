@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/executor.rs
+// Ver: 2 File: ./crate/x86/src/executor.rs
 use crate::cpu::X86Cpu;
 use crate::instructions::{alu, bit, control, exchange, group, mov, shift, stack, system};
 use bus::Machine;
@@ -183,6 +183,7 @@ pub fn execute(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
                 alu::xor_ax_imm16(cpu, machine);
             }
         }
+        0x37 => alu::aaa(cpu, machine), 
         0x38 => alu::cmp_rm8_r8(cpu, machine),
         0x39 => {
             if is_32bit_op {
@@ -207,6 +208,7 @@ pub fn execute(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
                 alu::cmp_ax_imm16(cpu, machine);
             }
         }
+        0x3F => alu::aas(cpu, machine),  
         0x40..=0x47 => alu::inc_reg(cpu, opcode - 0x40),
         0x48..=0x4F => alu::dec_reg(cpu, opcode - 0x48),
         0x50..=0x57 => stack::push_reg(cpu, machine, opcode - 0x50),

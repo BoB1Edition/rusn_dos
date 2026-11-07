@@ -1,3 +1,4 @@
+// Ver: 1 File: ./crate/x86/src/instructions/alu/mod.rs
 mod core;
 mod util;
 mod eval;
@@ -35,6 +36,6 @@ pub use inst::{
     cmp_r8_rm8, cmp_r16_rm16, cmp_r32_rm32,
     cmp_al_imm8, cmp_ax_imm16, cmp_eax_imm32,
 };
-pub use bcd::{daa, das};
+pub use bcd::{daa, das, aaa, aas};
 pub use incdec::{inc_reg, dec_reg};
 pub use group::{group80, group81, group83};
