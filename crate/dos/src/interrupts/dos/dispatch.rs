@@ -2,7 +2,7 @@
 use crate::interrupts::dos::exec;
 use crate::interrupts::dos::file_ops::file_date_time;
 use crate::interrupts::dos::misc::{
-    break_check_handler, get_country_info, get_system_date, get_system_time,
+    break_check_handler, get_country_info, get_system_date, get_system_time, parse_filename,
 };
 use crate::system::DosSystem;
 use x86::flags;
@@ -33,7 +33,6 @@ pub fn handle_int21(sys: &mut DosSystem) {
     let es = sys.cpu.registers.es();
     let cs = sys.cpu.registers.cs();
     let ip = sys.cpu.registers.ip();
-
     log::trace!(
         "INT21 AH={:02X} AL={:02X} BX={:04X} CX={:04X} DX={:04X} SI={:04X} DI={:04X} BP={:04X} DS={:04X} ES={:04X} CS:IP={:04X}:{:04X}",
         ah,
@@ -75,7 +74,7 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x1A => set_dta(sys),
 
         0x25 => set_interrupt_vector(sys),
-
+        0x29 => parse_filename(sys),
         0x2A => get_system_date(sys),
         0x2C => get_system_time(sys),
 
@@ -85,7 +84,6 @@ pub fn handle_int21(sys: &mut DosSystem) {
             sys.cpu.registers.set_cx(0x0000);
             set_carry_flag(sys, false);
         }
-
         0x33 => break_check_handler(sys),
         0x35 => get_interrupt_vector(sys),
         0x38 => get_country_info(sys),

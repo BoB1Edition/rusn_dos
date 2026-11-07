@@ -263,7 +263,9 @@ pub fn get_system_time(sys: &mut DosSystem) {
 pub fn break_check_handler(sys: &mut DosSystem) {
     match sys.cpu.registers.al() {
         0x00 => {
-            sys.cpu.registers.set_dl(if sys.break_check { 1 } else { 0 });
+            sys.cpu
+                .registers
+                .set_dl(if sys.break_check { 1 } else { 0 });
             log::info!(
                 "INT 21h / AH=33h/AL=00: get break check -> {}",
                 sys.break_check
@@ -305,4 +307,139 @@ pub fn break_check_handler(sys: &mut DosSystem) {
             );
         }
     }
+}
+
+pub fn parse_filename(sys: &mut DosSystem) {
+    let control = sys.cpu.registers.al();
+    let skip_separators = (control & 0x01) != 0;
+    let parse_drive = (control & 0x02) != 0;
+    let parse_name = (control & 0x04) != 0;
+    let parse_ext = (control & 0x08) != 0;
+
+    let src_seg = sys.cpu.registers.ds();
+    let mut src_off = sys.cpu.registers.si();
+    let fcb_seg = sys.cpu.registers.es();
+    let fcb_off = sys.cpu.registers.di();
+
+    // Пропуск ведущих разделителей (бит 0)
+    if skip_separators {
+        loop {
+            let b = sys.read_u8(src_seg, src_off);
+            if is_leading_sep(b) {
+                src_off = src_off.wrapping_add(1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    let mut drive: u8 = 0;
+    let mut name = [b' '; 8];
+    let mut ext = [b' '; 3];
+    let mut has_wildcard = false;
+
+    if parse_drive {
+        let c0 = sys.read_u8(src_seg, src_off);
+        let c1 = sys.read_u8(src_seg, src_off.wrapping_add(1));
+        if c1 == b':' && c0.is_ascii_alphabetic() {
+            drive = c0.to_ascii_uppercase() - b'A' + 1;
+            src_off = src_off.wrapping_add(2);
+        }
+    }
+    if parse_name {
+        let mut i = 0usize;
+        loop {
+            let b = sys.read_u8(src_seg, src_off);
+            if b == 0 || is_parse_terminator(b) {
+                break;
+            }
+            if b == b'*' {
+                has_wildcard = true;
+                while i < 8 {
+                    name[i] = b'?';
+                    i += 1;
+                }
+                src_off = src_off.wrapping_add(1);
+                break;
+            }
+            if b == b'?' {
+                has_wildcard = true;
+            }
+            if i < 8 {
+                name[i] = b.to_ascii_uppercase();
+                i += 1;
+            }
+            src_off = src_off.wrapping_add(1);
+        }
+    }
+
+    if parse_ext {
+        let b = sys.read_u8(src_seg, src_off);
+        if b == b'.' {
+            src_off = src_off.wrapping_add(1);
+            let mut i = 0usize;
+            loop {
+                let b = sys.read_u8(src_seg, src_off);
+                if b == 0 || is_parse_terminator(b) {
+                    break;
+                }
+                if b == b'*' {
+                    has_wildcard = true;
+                    while i < 3 {
+                        ext[i] = b'?';
+                        i += 1;
+                    }
+                    src_off = src_off.wrapping_add(1);
+                    break;
+                }
+                if b == b'?' {
+                    has_wildcard = true;
+                }
+                if i < 3 {
+                    ext[i] = b.to_ascii_uppercase();
+                    i += 1;
+                }
+                src_off = src_off.wrapping_add(1);
+            }
+        }
+    }
+
+    sys.write_u8(fcb_seg, fcb_off, drive);
+    for i in 0..8u16 {
+        sys.write_u8(fcb_seg, fcb_off.wrapping_add(1 + i), name[i as usize]);
+    }
+    for i in 0..3u16 {
+        sys.write_u8(fcb_seg, fcb_off.wrapping_add(9 + i), ext[i as usize]);
+    }
+
+    sys.cpu.registers.set_si(src_off);
+
+    let result = if has_wildcard { 0x01u8 } else { 0x00u8 };
+    sys.cpu.registers.set_al(result);
+    set_carry_flag(sys, false);
+
+    log::trace!(
+        "INT21 AH=29 parse: drive={} name='{}' ext='{}' wildcard={} next_off={:04X}",
+        drive,
+        String::from_utf8_lossy(&name).trim_end(),
+        String::from_utf8_lossy(&ext).trim_end(),
+        has_wildcard,
+        src_off
+    );
+}
+
+fn is_parse_terminator(b: u8) -> bool {
+    let result = matches!(
+        b,
+        0x00 | 0x09 | 0x0A | 0x0D | 0x20 |
+        0x22 | 0x2B | 0x2C | 0x2E | 0x2F |
+        0x3B | 0x3C | 0x3D | 0x3E |
+        0x5B | 0x5C | 0x5D | 0x7C
+    );
+    result
+}
+
+fn is_leading_sep(b: u8) -> bool {
+    let result = matches!(b, 0x09 | 0x20 | 0x2C | 0x3B);
+    result
 }
