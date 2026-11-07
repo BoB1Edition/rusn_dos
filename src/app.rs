@@ -170,7 +170,6 @@ impl App {
             }
         }
 
-        // 3) workdir (host- или DOS-путь) + имя программы  <--- НОВОЕ: ищем в рабочем каталоге DOS
         if let Some(wh) = self
             .dos_path_to_host(&workdir.to_string_lossy())
             .or_else(|| {
@@ -186,7 +185,6 @@ impl App {
             }
         }
 
-        // 4) PATH из окружения + пробинг расширений COM/EXE/BAT
         let names: Vec<String> = if name.contains('.') {
             let r = vec![name];
             r
@@ -395,7 +393,7 @@ impl App {
             &self.environment,
             args,
         )?;
-
+        ds.process_manager.current_psp = ds.cpu.registers.ds();
         let main_name = program
             .file_name()
             .and_then(|n| n.to_str())
@@ -506,6 +504,7 @@ impl App {
             &self.environment,
             args,
         )?;
+        ds.process_manager.current_psp = ds.cpu.registers.ds();
         let main_name = program
             .file_name()
             .and_then(|n| n.to_str())

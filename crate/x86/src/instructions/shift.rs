@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/instructions/shift.rs
+// Ver: 2 File: ./crate/x86/src/instructions/shift.rs
 use crate::cpu::X86Cpu;
 use crate::flags;
 use crate::modrm::ModRm;
@@ -109,7 +109,10 @@ fn rotate16(op: u8, value: u16, count: u8, flags_in: u16) -> (u16, u16) {
         _ => (value as u32, false, false),
     };
     let result = result as u16;
-    (result, flags::compute_flags_u16(flags_in, result, cf, of, false))
+    (
+        result,
+        flags::compute_flags_u16(flags_in, result, cf, of, false),
+    )
 }
 
 fn rotate32(op: u8, value: u32, count: u8, flags_in: u16) -> (u32, u16) {
@@ -128,11 +131,18 @@ fn rotate32(op: u8, value: u32, count: u8, flags_in: u16) -> (u32, u16) {
         7 => sar(value, count, 32),
         _ => (value, false, false),
     };
-    (result, flags::compute_flags_u32(flags_in, result, cf, of, false))
+    (
+        result,
+        flags::compute_flags_u32(flags_in, result, cf, of, false),
+    )
 }
 
 fn rol(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
-    let mask = if width == 32 { u32::MAX } else { (1u32 << width) - 1 };
+    let mask = if width == 32 {
+        u32::MAX
+    } else {
+        (1u32 << width) - 1
+    };
     let c = (count as u32) % width;
     let v = value & mask;
     let result = ((v << c) | (v >> (width - c))) & mask;
@@ -142,7 +152,11 @@ fn rol(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
 }
 
 fn ror(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
-    let mask = if width == 32 { u32::MAX } else { (1u32 << width) - 1 };
+    let mask = if width == 32 {
+        u32::MAX
+    } else {
+        (1u32 << width) - 1
+    };
     let c = (count as u32) % width;
     let v = value & mask;
     let result = ((v >> c) | (v << (width - c))) & mask;
@@ -152,46 +166,48 @@ fn ror(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
 }
 
 fn rcl(value: u32, count: u8, width: u32, cf_in: bool) -> (u32, bool, bool) {
-    let modu = width + 1;
-    let c = (count as u32) % modu;
+    let n = width + 1;
+    let c = (count as u32) % n;
     if c == 0 {
         return (value, cf_in, false);
     }
-    let wide = if width == 32 { 64 } else { width + 1 };
-    let mut bits = value as u64;
+    let mut bits = value as u128;
     if cf_in {
-        bits |= 1u64 << width;
+        bits |= 1u128 << width;
     }
-    let mask = (1u64 << wide) - 1;
-    let rotated = ((bits << c) | (bits >> (wide - c))) & mask;
-    let result = (rotated & ((1u64 << width) - 1)) as u32;
+    let mask = (1u128 << n) - 1;
+    let rotated = ((bits << c) | (bits >> (n - c))) & mask;
+    let result = (rotated & ((1u128 << width) - 1)) as u32;
     let cf = ((rotated >> width) & 1) != 0;
-    let of = count == 1 && ((result >> (width - 1)) & 1) != (if cf { 1 } else { 0 });
+    let of = count == 1 && ((result >> (width - 1)) & 1) != (cf as u32);
     (result, cf, of)
 }
 
 fn rcr(value: u32, count: u8, width: u32, cf_in: bool) -> (u32, bool, bool) {
-    let modu = width + 1;
-    let c = (count as u32) % modu;
+    let n = width + 1;
+    let c = (count as u32) % n;
     if c == 0 {
         return (value, cf_in, false);
     }
     let old_sign = (value >> (width - 1)) & 1;
-    let wide = if width == 32 { 64 } else { width + 1 };
-    let mut bits = value as u64;
+    let mut bits = value as u128;
     if cf_in {
-        bits |= 1u64 << width;
+        bits |= 1u128 << width;
     }
-    let mask = (1u64 << wide) - 1;
-    let rotated = ((bits >> c) | (bits << (wide - c))) & mask;
-    let result = (rotated & ((1u64 << width) - 1)) as u32;
+    let mask = (1u128 << n) - 1;
+    let rotated = ((bits >> c) | (bits << (n - c))) & mask;
+    let result = (rotated & ((1u128 << width) - 1)) as u32;
     let cf = ((rotated >> width) & 1) != 0;
     let of = count == 1 && old_sign != ((result >> (width - 1)) & 1);
     (result, cf, of)
 }
 
 fn shl(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
-    let mask = if width == 32 { u32::MAX } else { (1u32 << width) - 1 };
+    let mask = if width == 32 {
+        u32::MAX
+    } else {
+        (1u32 << width) - 1
+    };
     let v = value & mask;
     let c = count as u32;
     if c > width {
@@ -208,7 +224,11 @@ fn shl(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
 }
 
 fn shr(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
-    let mask = if width == 32 { u32::MAX } else { (1u32 << width) - 1 };
+    let mask = if width == 32 {
+        u32::MAX
+    } else {
+        (1u32 << width) - 1
+    };
     let v = value & mask;
     let c = count as u32;
     if c >= width {
@@ -222,7 +242,11 @@ fn shr(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
 }
 
 fn sar(value: u32, count: u8, width: u32) -> (u32, bool, bool) {
-    let mask = if width == 32 { u32::MAX } else { (1u32 << width) - 1 };
+    let mask = if width == 32 {
+        u32::MAX
+    } else {
+        (1u32 << width) - 1
+    };
     let v = value & mask;
     let sign = (v >> (width - 1)) & 1;
     let c = count as u32;

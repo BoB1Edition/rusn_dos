@@ -1,4 +1,4 @@
-// Ver: 2 File: crate/dos/src/interrupts/dos/dispatch.rs
+// Ver: 3 File: crate/dos/src/interrupts/dos/dispatch.rs
 use crate::interrupts::dos::exec;
 use crate::interrupts::dos::file_ops::file_date_time;
 use crate::interrupts::dos::misc::{
@@ -118,8 +118,41 @@ pub fn handle_int21(sys: &mut DosSystem) {
         0x4D => exec::get_return_code(sys),
         0x4E => find_first(sys),
         0x4F => find_next(sys),
+        0x50 => {
+            // Set PSP
+            sys.process_manager.current_psp = sys.cpu.registers.bx();
+            log::trace!(
+                "INT 21h / AH=50h: Set PSP to {:04X}",
+                sys.process_manager.current_psp
+            );
+        }
+        0x51 => {
+            // Get PSP
+            sys.cpu.registers.set_bx(sys.process_manager.current_psp);
+            log::trace!(
+                "INT 21h / AH=51h: Get PSP -> {:04X}",
+                sys.process_manager.current_psp
+            );
+        }
+        0x52 => {
+            // Get List of Lists (SYSVARS)
+            sys.cpu.registers.set_es(sys.sysvars_segment);
+            sys.cpu.registers.set_bx(sys.sysvars_offset);
+            log::trace!(
+                "INT 21h / AH=52h: Get List of Lists -> {:04X}:{:04X}",
+                sys.sysvars_segment,
+                sys.sysvars_offset
+            );
+        }
         0x57 => file_date_time(sys),
-
+        0x62 => {
+            // Get PSP (дубликат 51h)
+            sys.cpu.registers.set_bx(sys.process_manager.current_psp);
+            log::trace!(
+                "INT 21h / AH=62h: Get PSP -> {:04X}",
+                sys.process_manager.current_psp
+            );
+        }
         _ => {
             log::warn!(
                 "Unsupported DOS call 21h/{:02X}h at CS:IP={:04X}:{:04X}",

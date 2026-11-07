@@ -1,4 +1,4 @@
-// Ver: 4 File: crate/dos/src/system.rs
+// Ver: 5 File: crate/dos/src/system.rs
 
 use bus::peripherals::video::{VideoMode, letterbox43, scale_into_rect};
 use bus::{Cpu, Display, Machine, Motherboard};
@@ -63,6 +63,8 @@ pub struct DosSystem {
     pub child_exit_code: u8,
     pub child_exit_type: u8,
     pub process_manager: ProcessManager,
+    pub sysvars_segment: u16,
+    pub sysvars_offset: u16,
 }
 
 impl DosSystem {
@@ -96,6 +98,8 @@ impl DosSystem {
             child_exit_code: 0,
             child_exit_type: 0,
             process_manager: ProcessManager::default(),
+            sysvars_segment: 0,
+            sysvars_offset: 0,
         }
     }
 
@@ -357,6 +361,70 @@ impl DosSystem {
             ss: 0, // больше не используются
         });
         log::debug!("Suspended INT {:02X}h for key wait", vector);
+    }
+
+    pub fn init_sysvars(&mut self) {
+        const SYSVARS_SEG: u16 = 0x0060;
+        const SYSVARS_OFF: u16 = 0x0026;
+
+        self.sysvars_segment = SYSVARS_SEG;
+        self.sysvars_offset = SYSVARS_OFF;
+
+        let base = ((SYSVARS_SEG as u32) << 4) + SYSVARS_OFF as u32;
+
+        // -2: Segment of first MCB
+        self.machine
+            .write_mem_u16(base.wrapping_sub(2), self.first_mcb_segment);
+
+        // 0: Pointer to first DPB (заглушка — 0xFFFF:0xFFFF)
+        self.machine.write_mem_u32(base, 0xFFFFFFFF);
+
+        // 4: Pointer to SFT (заглушка)
+        self.machine.write_mem_u32(base + 4, 0xFFFFFFFF);
+
+        // 8: Pointer to CLOCK$ device (заглушка)
+        self.machine.write_mem_u32(base + 8, 0xFFFFFFFF);
+
+        // 12: Pointer to CON device (заглушка)
+        self.machine.write_mem_u32(base + 12, 0xFFFFFFFF);
+
+        // 16: Max bytes per sector
+        self.machine.write_mem_u16(base + 16, 512);
+
+        // 18: Pointer to disk buffer info (заглушка)
+        self.machine.write_mem_u32(base + 18, 0xFFFFFFFF);
+
+        // 22: Pointer to CDS array (заглушка)
+        self.machine.write_mem_u32(base + 22, 0xFFFFFFFF);
+
+        // 26: Pointer to FCB SFT (заглушка)
+        self.machine.write_mem_u32(base + 26, 0xFFFFFFFF);
+
+        // 30: Number of FCB entries
+        self.machine.write_mem_u16(base + 30, 16);
+
+        // 32: Number of buffers
+        self.machine.write_mem_u16(base + 32, 20);
+
+        // 34: Number of lookahead buffers
+        self.machine.write_mem_u16(base + 34, 0);
+
+        // 36: Boot drive (3 = C:)
+        self.machine.write_mem_u8(base + 36, 3);
+
+        // 37: Dword-move flag
+        self.machine.write_mem_u8(base + 37, 0);
+
+        // 38: Extended memory size (KB)
+        let ext_mem_kb = (crate::consts::DOS_MEMORY_SIZE / 1024).saturating_sub(1024) as u16;
+        self.machine.write_mem_u16(base + 38, ext_mem_kb);
+
+        log::info!(
+            "SysVars initialized at {:04X}:{:04X}, first MCB = {:04X}",
+            SYSVARS_SEG,
+            SYSVARS_OFF,
+            self.first_mcb_segment
+        );
     }
 }
 

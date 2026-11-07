@@ -1,4 +1,4 @@
-// Ver: 6 File: crate/dos/src/loader/exe_loader.rs
+// Ver: 8 File: crate/dos/src/loader/exe_loader.rs
 use crate::consts::{DOS_MEMORY_SIZE, MAX_MCB_SEGMENT, MCB_SIGNATURE_LAST, MCB_SIGNATURE_NON_LAST};
 use crate::ivt::init_ivt;
 use crate::loader::exe_header::MzHeader;
@@ -125,8 +125,6 @@ impl ExeLoader {
 
         let cpu = crate::loader::make_cpu(no_log)?;
         let mut sys = DosSystem::new(machine, cpu, config.clone(), env.clone());
-
-        // Настройка MCB
         sys.first_mcb_segment = PSP_SEGMENT - 1;
         sys.dta_segment = PSP_SEGMENT;
         sys.dta_offset = 0x0080;
@@ -215,93 +213,84 @@ impl ExeLoader {
 pub fn load_in_place(
     sys: &mut crate::system::DosSystem,
     req: &crate::system::ExecRequest,
+    parent_psp: u16,
     tail: &[u8],
     fcb1: &[u8; 16],
     fcb2: &[u8; 16],
 ) -> Result<u16, u8> {
-    let data = std::fs::read(&req.path).map_err(|_| 0x02u8)?; // File not found
+    let data = std::fs::read(&req.path).map_err(|_| 0x02u8)?;
+
     if data.len() < 64 || u16::from_le_bytes([data[0], data[1]]) != 0x5A4D {
-        return Err(0x0B); // Bad format
+        return Err(0x0B);
     }
 
     let header_size = (u16::from_le_bytes([data[8], data[9]]) as usize) * 16;
     if header_size > data.len() {
         return Err(0x0B);
     }
+
     let code_data = &data[header_size..];
+
     let bss_bytes = (u16::from_le_bytes([data[10], data[11]]) as usize) * 16;
     let total_prog_bytes = code_data.len() + bss_bytes;
     let prog_paragraphs = ((total_prog_bytes + 15) / 16) as u16;
-
-    // Наследование окружения: если req.env_seg == 0, берем из PSP родителя
-    let parent_psp = sys.cpu.registers.ds();
-    let parent_env_seg = sys.read_u16(parent_psp, 0x2C);
-
-    // Выделяем память: PSP (0x10) + код/данные
     let required_paragraphs = 0x10 + prog_paragraphs;
-    let psp_segment =
-        crate::mcb::allocate(&mut sys.machine, sys.first_mcb_segment, required_paragraphs)
-            .ok_or(0x08)?; // Not enough memory
+
+    let psp_segment = crate::mcb::allocate(
+        &mut sys.machine,
+        sys.first_mcb_segment,
+        required_paragraphs,
+    )
+    .ok_or(0x08)?;
 
     let load_segment = psp_segment + 0x10;
 
-    // Создаем Environment Block (если нужно новый)
-    let actual_env_seg = if req.env_seg == 0 {
-        parent_env_seg
-    } else {
-        req.env_seg
-    };
-
-    for off in 0..0x100u16 {
-        sys.write_u8(psp_segment, off, 0);
-    }
-    // Создаем PSP
-    crate::loader::psp::build_psp(
-        &mut sys.machine,
+    crate::loader::prepare_child_psp(
+        sys,
         psp_segment,
-        actual_env_seg,
         required_paragraphs,
-        &[],
+        parent_psp,
+        req.env_seg,
+        tail,
+        fcb1,
+        fcb2,
     );
-
-    let tail_len = tail.len().min(126);
-    sys.write_u8(psp_segment, 0x80, tail_len as u8);
-    for (i, &b) in tail.iter().take(tail_len).enumerate() {
-        sys.write_u8(psp_segment, 0x81u16.wrapping_add(i as u16), b);
-    }
-    sys.write_u8(psp_segment, 0x81u16.wrapping_add(tail_len as u16), 0x0D);
-
-    for i in 0..16u16 {
-        sys.write_u8(psp_segment, 0x5C + i, fcb1[i as usize]);
-        sys.write_u8(psp_segment, 0x6C + i, fcb2[i as usize]);
-    }
-
-    // Записываем код и данные
     let code_base = (load_segment as u32) << 4;
     for (i, &byte) in code_data.iter().enumerate() {
         sys.write_phys_u8(code_base + i as u32, byte);
     }
+
     if bss_bytes > 0 {
         let bss_start = code_base + code_data.len() as u32;
         for i in 0..bss_bytes {
             sys.write_phys_u8(bss_start + i as u32, 0);
         }
     }
-
-    // Применяем релокации
     let reloc_table_offset = u16::from_le_bytes([data[24], data[25]]) as usize;
     let reloc_count = u16::from_le_bytes([data[6], data[7]]) as usize;
+
+    log::debug!(
+        "Applying {} relocations at offset {:#x}",
+        reloc_count,
+        reloc_table_offset
+    );
+
     for i in 0..reloc_count {
         let entry_offset = reloc_table_offset + i * 4;
         if entry_offset + 4 > data.len() {
+            log::warn!("Relocation table truncated at entry {}", i);
             break;
         }
+
         let offset = u16::from_le_bytes([data[entry_offset], data[entry_offset + 1]]);
         let segment = u16::from_le_bytes([data[entry_offset + 2], data[entry_offset + 3]]);
+
         let fixup_addr = ((load_segment as u32 + segment as u32) << 4) + offset as u32;
         let current = sys.read_phys_u16(fixup_addr);
         let corrected = current.wrapping_add(load_segment);
+
         sys.write_phys_u16(fixup_addr, corrected);
+
         log::trace!(
             "Reloc #{i}: {:#04x}:{:#04x} → {:#06x}: {:#04x}→{:#04x}",
             segment,
@@ -311,13 +300,6 @@ pub fn load_in_place(
             corrected
         );
     }
-
-    // Обновляем владельца MCB
-    let mut mcb = crate::mcb::MCB::read(&sys.machine, psp_segment - 1);
-    mcb.owner = psp_segment;
-    mcb.write(&mut sys.machine, psp_segment - 1);
-
-    // Настраиваем регистры
     let cs = load_segment.wrapping_add(u16::from_le_bytes([data[22], data[23]]));
     let ip = u16::from_le_bytes([data[20], data[21]]);
     let ss = load_segment.wrapping_add(u16::from_le_bytes([data[14], data[15]]));
@@ -327,24 +309,17 @@ pub fn load_in_place(
     sys.cpu.registers.set_ip(ip);
     sys.cpu.registers.set_ss(ss);
     sys.cpu.registers.set_sp(sp);
-    sys.cpu.registers.set_ds(psp_segment);
-    sys.cpu.registers.set_es(psp_segment);
-    sys.cpu.registers.set_fs(psp_segment);
-    sys.cpu.registers.set_gs(psp_segment);
 
-    sys.dta_segment = psp_segment;
-    sys.dta_offset = 0x0080;
-
-    sys.push16(psp_segment);
-    sys.push16(0x0000);
+    crate::loader::finalize_child_context(sys, psp_segment);
 
     log::info!(
         "Loaded .EXE in-place: CS:IP={:04X}:{:04X}, SS:SP={:04X}:{:04X}, DS={:04X}",
         cs,
         ip,
         ss,
-        sp,
+        sys.cpu.registers.sp(),
         psp_segment
     );
+
     Ok(psp_segment)
 }

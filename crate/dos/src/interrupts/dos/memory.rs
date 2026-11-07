@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/dos/src/interrupts/dos/memory.rs
+// Ver: 3 File: ./crate/dos/src/interrupts/dos/memory.rs
 
 use crate::mcb::{self};
 use crate::system::DosSystem;
@@ -12,7 +12,7 @@ pub fn allocate_memory_handler(sys: &mut DosSystem) {
         Some(segment) => {
             let mcb_seg = segment.wrapping_sub(1);
             let mut mcb = mcb::MCB::read(&sys.machine, mcb_seg);
-            mcb.owner = sys.cpu.registers.ds();
+            mcb.owner = sys.process_manager.current_psp;
             mcb.write(&mut sys.machine, mcb_seg);
 
             sys.cpu.registers.set_ax(segment);
