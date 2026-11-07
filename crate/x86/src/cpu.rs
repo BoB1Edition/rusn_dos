@@ -1,4 +1,4 @@
-// Ver: 1 File: ./crate/x86/src/cpu.rs
+// Ver: 2 File: ./crate/x86/src/cpu.rs
 use crate::tracer::{FileTracer, Tracer};
 use crate::{registers::Registers, tracer::NullTracer};
 use bus::{Cpu, Machine};
@@ -24,10 +24,7 @@ pub struct X86Cpu {
     pub registers: Registers,
     pub prefixes: PrefixState,
     pub halted: bool,
-    /// Подавление прерываний на одну инструкцию (после MOV SS / POP SS)
     pub inhibit_interrupts: bool,
-    /// Вектор программного прерывания, которое шина обязалась обработать
-    /// внутренне (DOS/BIOS). Обрабатывается драйвером после возврата из `step`.
     pub pending_interrupt: Option<u8>,
     pub gdtr_limit: u16,
     pub gdtr_base: u32,
@@ -37,6 +34,7 @@ pub struct X86Cpu {
     pub tracer: Box<dyn Tracer>,
     pub(crate) instruction_bytes: Vec<u8>,
     pub(crate) instruction_start_ip: u32,
+    pub(crate) instruction_start_cs: u16,
 }
 
 impl Default for X86Cpu {
@@ -62,10 +60,10 @@ impl X86Cpu {
             tracer: Box::new(NullTracer),
             instruction_bytes: Vec::with_capacity(16),
             instruction_start_ip: 0,
+            instruction_start_cs: 0,
         }
     }
 
-    /// Создает CPU и включает запись лога в указанный файл
     pub fn new_with_tracer(log_path: &str) -> std::io::Result<Self> {
         let mut cpu = Self::new();
         cpu.tracer = Box::new(FileTracer::new(log_path)?);
@@ -77,26 +75,19 @@ impl X86Cpu {
         ((self.registers.cs() as u32) << 4) + (self.registers.eip() & 0xFFFF)
     }
 
-    // === Доступ для внешнего диспетчера (мост гибридного режима) ===
-
-    /// Начинает сбор байтов инструкции с указанным стартовым IP
-    /// (используется, когда опкод читает внешний цикл, а не `step`).
     pub fn begin_trace(&mut self, start_ip: u32) {
         self.instruction_bytes.clear();
         self.instruction_start_ip = start_ip;
     }
 
-    /// Дописывает байт (префикс/опкод) в буфер трассировки.
     pub fn push_trace_byte(&mut self, b: u8) {
         self.instruction_bytes.push(b);
     }
 
-    /// Собранные байты последней инструкции.
     pub fn trace_bytes(&self) -> &[u8] {
         &self.instruction_bytes
     }
 
-    /// IP начала последней инструкции.
     pub fn trace_start_ip(&self) -> u32 {
         self.instruction_start_ip
     }
@@ -142,6 +133,7 @@ impl Cpu for X86Cpu {
         }
         self.instruction_bytes.clear();
         self.instruction_start_ip = self.registers.eip();
+        self.instruction_start_cs = self.registers.cs();
         loop {
             let addr = self.phys_ip();
             let opcode = machine.read_mem_u8(addr);
@@ -155,7 +147,7 @@ impl Cpu for X86Cpu {
                     self.registers.step(None);
                     crate::executor::execute_0f(self, machine, ext);
                     self.tracer.log_instruction(
-                        self.registers.cs(),
+                        self.instruction_start_cs,
                         self.instruction_start_ip,
                         &self.instruction_bytes,
                     );
@@ -182,7 +174,7 @@ impl Cpu for X86Cpu {
                 _ => {
                     crate::executor::execute(self, machine, opcode);
                     self.tracer.log_instruction(
-                        self.registers.cs(),
+                        self.instruction_start_cs,
                         self.instruction_start_ip,
                         &self.instruction_bytes,
                     );
