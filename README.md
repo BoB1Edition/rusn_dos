@@ -1,111 +1,166 @@
-# rusn_dos — эмулятор DOS на Rust
+# rusn_dos — Мультисистемный эмулятор на Rust
 
-**rusn_dos** — это эмулятор реального режима x86 (8086/80286/386) с поддержкой DOS API, графики VGA (Mode 13h), файловой системы и базового ввода-вывода. Проект написан на Rust и позволяет запускать старые DOS-программы: игры, компиляторы, системные утилиты.
+rusn_dos — это мультисистемный эмулятор, написанный на Rust (edition 2024). Основная цель — эмуляция IBM PC-совместимых DOS-систем с полным процессором 80386+ и окружением DOS.
 
-## Текущая стадия
+## Возможности
 
-- **Ядро эмуляции:** реализовано около 70% основных инструкций 16/32-бит (MOV, ADD, SUB, INC, DEC, JMP, CALL, RET, PUSH/POP, логические операции, сдвиги, циклические сдвиги, BCD-коррекция, умножение/деление и т.д.).
-- **Прерывания:** поддерживаются INT 10h (видео), INT 16h (клавиатура – заглушка), INT 15h (память/A20), INT 21h (DOS API – частично: вывод символов, работа с файлами через хендлы), INT 2Fh (мультиплекс), INT 67h (EMS – эмуляция LIM 4.0).
-- **Файловая система:** эмулируются диски (через сопоставление каталогов хоста), открытие/чтение/запись/закрытие файлов, перемещение указателя.
-- **Видео:** текстовый режим 80x25 и графический 320x200 (Mode 13h) с отрисовкой через minifb.
-- **Загрузчики:** поддержка .COM и .EXE (MZ) файлов, включая релокации.
-- **Ограничения:**
-  - Отсутствуют многие расширенные инструкции 386+ (SIB реализован, но некоторые комбинации могут давать сбои).
-  - Нет FPU, эмуляции таймера, аппаратных прерываний (IRQ0, клавиатура – только заглушки).
-  - Не все функции DOS API реализованы (создание/удаление файлов, поиск, работа с каталогами и т.д.).
-  - Клавиатурный ввод работает только в тестовом режиме (INT 16h возвращает фиктивные сканкоды).
-  - Звук, мышь, сеть не поддерживаются.
+- **CPU**: 80386+ real mode, полный набор инструкций (300+ опкодов), ModRM с SIB, префиксы 0x66/0x67/REP/seg, флаги, SGDT/SIDT/LGDT/LIDT/SMSW/LMSW, 32-bit LEAVE/NULL BOUND
+- **DOS**: Загрузка COM/EXE (MZ), INT 21h (AH=00h-6Ch; реализованы 00h–4Fh, 50h–52h, 57h, 62h; не реализованы 39h/3Ah/59h/5Ch/71h), INT 2Fh, INT 33h (break check, boot drive, версия DOS), EXEC (AH=4Bh/4Dh) с восстановлением родителя через `ParentSnapshot`, SYSVARS/List of Lists (AH=52h), файловая система с несколькими дисками, устройства DOS (CON/NUL/COM/LPT/CLOCK$/EMMXXXX0), поиск файлов и программ по PATH
+- **BAT-интерпретатор**: `.BAT`/`.CMD` уровня COMMAND.COM — echo, cd/cls/goto (вперёд и назад), `if errorlevel N`, `if exist`, set, pause, call, exit, rem, смена диска, раскрытие `%1`–`%9` и `%VAR%`, глубина вложенности через `--max-call-depth`; разбит на модули `bat/runner/{exec,commands,resolve,flow,types,util}`
+- **EXEC**: INT 21h/AH=4Bh/AL=00 (запуск дочерних процессов из DOS-программ) + AH=4Dh (код возврата); жизнь ребёнка — `ProcessManager` в `crate/dos/src/process.rs` (`start_child`/`finish_child`, `ParentSnapshot`, тracer ребёнка в `logopcode_<имя>.txt`); регистры ребёнка (AX/BX/CX/DX/SI/DI/BP) не обнуляются — см. ERRORS.md #33
+- **BIOS**: INT 10h (AH=00h–0Fh, 12h: видеорежимы, курсор, скроллинг, вывод символов, альтернативные функции), INT 16h (клавиатура), INT 15h (A20, расширенная память), INT 1Ah (часы), INT 08h/1Ch (таймер)
+- **EMS 4.0**: INT 67h (выделение/освобождение/маппинг страниц)
+- **VGA**: Текстовый режим 80x25, Mode 13h (320x200x8), планарные режимы 0Dh/0Eh/10h/12h (16 цветов), DAC 18-bit палитра (256 цветов), VGA sequencer + graphics controller + CRTC + attribute controller, VBE (VESA BIOS Extensions: 640x480x256 / 800x600x256 / 1024x768x256 / 24-bit), порты 0x3C0-0x3DA, Input Status 1 (retrace timing), attribute flip-flop, рендеринг через minifb
+- **Клавиатура**: 8042, Set 1 scancodes, буфер BIOS, prev_keys (только новые нажатия), suspend/resume (re-dispatch) для неблокирующего ввода
+- **Окружение DOS**: переменные PATH/COMSPEC/PROMPT из `[environment]` в config.toml, блок окружения строится в PSP при загрузке
+- **MCB**: DOS Memory Control Block — выделение/освобождение/изменение блоков памяти, коалесценция соседних свободных блоков; `init_sysvars()` инициализирует SYSVARS (List of Lists) в `0000:0040`
+- **Графическое окно**: minifb, 60 FPS, маппинг клавиш
+- **Stdin Bridge**: crossterm raw-mode опрос клавиатуры через stdin в консольном режиме, маппинг US scancodes
 
-Проект активно развивается.
+## Быстрый старт
 
-## Архитектура и структура файлов
-
-### Корневая директория
-
-- **Cargo.toml** — основной манифест проекта, определяет зависимости (clap, config, log, minifb, serde и др.).
-- **config.toml** / **config.json** — конфигурация приложения (разрешение окна, монтируемые диски).
-- **src/main.rs** — точка входа: парсинг аргументов командной строки, вызов запуска приложения.
-- **src/app.rs** — инициализация эмулятора, настройка дисков, загрузка исполняемого файла.
-- **libs/dos_core/Cargo.toml** — манифест библиотеки эмулятора.
-
-### Основная библиотека эмулятора (`libs/dos_core/src/`)
-
-- **lib.rs** — корневой модуль: реэкспорт основных типов и модулей.
-- **machine.rs** — структура `DosMachine`, объединяющая память, регистры, видеосистему, файловую систему, префиксы и состояние.
-- **memory.rs** — эмуляция физической памяти (массив 16 МБ, доступ по 8/16/32 бита с проверкой границ).
-- **registers.rs** — структура регистров x86 (EAX, EBX, ECX, EDX, ESP, EBP, ESI, EDI, IP, сегменты, флаги).
-- **modrm.rs** — разбор байта ModR/M, вычисление эффективного адреса с поддержкой SIB (32-бита).
-- **consts.rs** — константы (размер памяти, параметры PSP и т.д.).
-- **utils/logging.rs** — вспомогательные функции логирования (опционально).
-
-#### Модуль CPU (`cpu/`)
-
-- **cpu/mod.rs** — объявляет подмодули `flags` и `executor`.
-- **cpu/flags.rs** — константы флагов, функции обновления флагов (`compute_flags_u8/u16/u32`, логические варианты).
-- **cpu/executor.rs** — главный цикл выполнения инструкций: чтение опкодов, обработка префиксов, диспетчеризация базовых и расширенных (0x0F) инструкций.
-
-#### Инструкции (`instructions/`)
-
-- **instructions/mod.rs** — список подмодулей (группы инструкций).
-- **mov.rs**, **mov32.rs** — инструкции MOV, LEA, строковые операции (MOVSB, STOSB, LODSB, CMPSB/CMPSW).
-- **alu/arithmetic.rs** — арифметика 8/16 бит (ADD, ADC, SUB, SBB, CMP, INC, DEC, IMUL, CBW/CWD).
-- **alu/group.rs** — групповые операции 8/16 бит (80h, 83h, F6h, F7h, FEh) с поддержкой памяти.
-- **alu/logical.rs** — логические 8/16 бит (AND, OR, XOR, TEST, NOT, NEG, MUL/DIV/IDIV).
-- **alu/shift.rs** — сдвиги 8/16 бит (ROL, ROR, RCL, RCR, SHL/SAL, SHR, SAR) с переменным количеством сдвигов (CL).
-- **alu32/arithmetic.rs** — арифметика 32 бит.
-- **alu32/group.rs** — групповые операции 32 бит.
-- **alu32/logical.rs** — логические 32 бит.
-- **alu32/shift.rs** — сдвиги 32 бит.
-- **control.rs**, **control32.rs** — переходы (JMP, CALL, RET, LOOP, условные переходы, BOUND, SMSW).
-- **system.rs** — системные инструкции (INT, IN, OUT, HLT, CLC, STC, STD, SAHF, LAHF, IRET, WAIT).
-- **stack.rs** — работа со стеком (PUSH, POP, PUSHA/POPA, PUSHAD/POPAD, PUSHF/POPF).
-- **segment.rs** — загрузка сегментов (LES).
-- **exchange.rs** — XCHG.
-- **extended.rs**, **extended32.rs** — MOVZX, MOVSX, работа с CR-регистрами (заглушки).
-- **bcd.rs** — DAS.
-
-#### Прерывания (`interrupts/`)
-
-- **interrupts/mod.rs** — объявление модулей.
-- **interrupts/dos.rs** — INT 21h (вывод строк, работа с файлами, завершение).
-- **interrupts/bios.rs** — INT 10h (видео), INT 15h (A20/память), INT 16h (клавиатура – заглушка).
-- **interrupts/ems.rs** — INT 67h (EMS).
-
-#### Загрузчики (`loader/`)
-
-- **loader/mod.rs** — выбор загрузчика по сигнатуре файла.
-- **loader/com_loader.rs** — загрузка .COM-файлов (PSP, инициализация сегментов, стека).
-- **loader/exe_header.rs** — структура MZ-заголовка.
-- **loader/exe_loader.rs** — загрузка MZ-EXE, применение релокаций.
-
-#### Файловая система
-
-- **filesystem.rs** — эмуляция дисков (сопоставление каталогов), открытие/чтение/запись/закрытие файлов, безопасное разрешение путей.
-
-#### Видео
-
-- **video/mod.rs** — структуры `VideoSystem` и `FrameBuffer`, настройка режимов, палитра VGA, функция масштабирования для вывода на экран.
-
-## Сборка и запуск
-
-### Требования
-- Rust 1.70+ (рекомендуется nightly)
-- Зависимости: Cargo автоматически загрузит все крейты
-
-### Сборка
 ```bash
-git clone https://github.com/BoB1Edition/rusn_dos.git
-cd rusn_dos
-cargo build --release
+cargo build
+cargo run Run test/test1
+cargo run Run test/test2 --graphics
+cargo run Run test/build.bat --graphics      # TASM-сборка внутри DOS
+cargo run Run app/XCOM/GO.COM --graphics -w C:\\XCOM
+RUST_LOG=debug cargo run Run test/test1
+```
 
-# Запуск программы (например, .COM)
-cargo run -- run путь/к/программе.com
+## Структура проекта
 
-# С графическим окном
-cargo run -- run --graphics true путь/к/программе.com
+```
+├── crate/
+│   ├── bus/          # Трейты (Machine, Cpu, Display, Peripheral) + Motherboard + PIC/PIT/VGA/Keyboard
+│   │   └── peripherals/video/  # VGA — core, dac, planar, render, peripheral, vbe, types
+│   ├── x86/          # 80386+ CPU (регистры, флаги, ModRM, декодер)
+│   │   └── instructions/  # alu/ (core, util, eval, inst, bcd, incdec, group), mov/ (rm, imm, str_ops), bit, shift, control, exchange, group, stack, system/ (control, flags, interrupt, io, misc, regs)
+│   ├── dos/          # DOS-слой (загрузчики, BAT-интерпретатор, INT 21h/10h/16h/67h, EMS, MCB, файловая система)
+│   │   ├── bat/          # BAT-интерпретатор уровня COMMAND.COM
+│   │   │   └── runner/   # exec, commands, resolve, flow, types, util
+│   │   ├── interrupts/dos/  # dispatch, console, file_ops, dir, find, memory, exec, misc
+│   │   ├── loader/      # com_loader, exe_loader, exe_header, psp, mod
+│   │   ├── filesystem/  # mod, types, path, device, find, search
+│   │   └── process.rs   # ProcessManager (EXEC: start_child/finish_child, ParentSnapshot)
+│   ├── emu_config/   # Типы конфигурации (включая EnvironmentConfig, CpuConfig)
+│   ├── nes/          # (заглушка)
+│   ├── megadrive/    # (заглушка)
+│   ├── snes/         # (заглушка)
+│   ├── jvm/          # (заглушка)
+│   ├── saturn/       # (заглушка)
+│   └── dreamcast/    # (заглушка)
+├── src/              # Точка входа (clap CLI), конфигурация, монтирование дисков, stdin_bridge, маршрутизация .BAT
+├── docs/             # Документация
+├── test/             # Тестовые DOS-программы (.asm) и .BAT
+├── app/              # Монтируется как диск C: (примеры: XCOM, biing, TASM, test)
+├── test.sh           # Скрипт прогона целевых программ
+└── config.toml       # Конфигурация эмулятора
+```
+## Текущее состояние (07.11.2026)
 
-# Просмотр справки
-cargo run -- --help
-Конфигурация дисков задаётся в config.toml.
+- `rusn_dos Win` и запуск без подкоманды → `run_window()` всё ещё заглушка (см. ERRORS.md #5)
+- `--mount` объявлен в CLI, но не обрабатывается (ERRORS.md #20)
+- `init_drivers()` (src/app.rs:248) — мёртвый код, не вызывается
+- AAA/AAS, BSF/BSR — не реализованы (см. docs/x86.md и ERRORS.md)
+- SHLD/SHRD — UB при imm=0 (ERRORS.md #2, CRITICAL); RCL/RCR исправлены
+- Сводка ошибок по состоянию кода — в `ERRORS.md`
 
-Эмулятор создаётся для удовольствия и обучения, не претендует на высокую производительность или полную совместимость.
+## Конфигурация
+
+Эмулятор настраивается через `config.toml`:
+
+```toml
+title = "Biing!"
+
+[resolution]
+width = 1024
+height = 768
+
+[machine]
+a20_enable = false
+ems = false
+dpmi = false
+
+[video]
+type = "vga"
+available_types = ["vga", "svga"]
+
+[environment]
+PATH = "C:\\;C:\\TASM\\BIN"
+COMSPEC = "C:\\COMMAND.COM"
+PROMPT = "$P$G"
+
+[sound]
+type = "pc_speaker"
+available_types = ["pc_speaker", "sb16"]
+
+[[drivers]]
+letter = "C"
+path = "./app"
+read_only = false
+
+[[drivers]]
+letter = "Z"
+path = "/tmp/mgk/"
+read_only = true
+```
+
+## CLI
+
+```bash
+rusn_dos [OPTIONS] <SUBCOMMAND>
+
+SUBCOMMANDS:
+  Run <PROGRAM> [--startdir <DIR>] [--workdir <DIR>] [--] [<args>...]
+  Win [--workdir <DIR>]
+
+OPTIONS:
+  -c, --config <FILE>        Путь к config.toml [default: config.toml]
+      --no-log               Отключить трассировку опкодов
+      --graphics             Включить графическое окно
+      --no-stdin-keys        Не читать stdin как клавиши (headless)
+      --mount <L=path[:ro]>  Монтирование диска (объявлено, не обрабатывается)
+      --max-call-depth <N>   Лимит глубины CALL в BAT-файлах (1..=255) [default: 20]
+```
+
+Примечания:
+- `-s/--startdir` и `-w/--workdir` — параметры подкоманды `Run` (не глобальные).
+- Запуск `rusn_dos` без подкоманды (или с `Win`) сейчас ведёт в заглушку `run_window()` → возврат `Ok(())` (паника убрана, но команда не реализована, см. ERRORS.md #5).
+- `--mount` объявлен в CLI, но нигде не обрабатывается (см. ERRORS.md #20).
+
+Коды выхода:
+- `0` — успешное завершение программы (код выхода DOS-программы)
+- `1` — ошибка эмулятора (CLI, конфиг, путей, валидации `--max-call-depth`)
+- `код программы` — код выхода DOS-программы (процесс завершается через `process::exit`, коды 2/3 из старой документации больше не используются)
+- `101` — паника Rust
+
+## Документация
+
+- [Архитектура](docs/architecture.md)
+- [Список инструкций x86](docs/x86.md)
+- [Трейты и шина](docs/bus.md)
+- [DOS API reference](docs/dos-api.md)
+- [Сборка и настройка](docs/build.md)
+- [Портирование](docs/porting.md)
+- [Статус зрелости крейтов](ALFA.md)
+- [Цели и приоритеты](GOALS.md)
+- [План развития](TODO.md)
+- [Известные ошибки](ERRORS.md)
+- [Дизайн](DESIGN.md)
+- [Проектная память](MEMORIES.md)
+- [Памятка для агентов](AGENTS.md)
+
+## Тестирование
+
+```bash
+cargo test -p x86           # Тесты CPU (RUST_MIN_STACK=16777216 при stack overflow)
+./test.sh                   # Прогон целевых программ (build + run, disks C: и Z:)
+cargo run Run test/chain.bat --graphics hello
+cargo run Run test/fail.bat --graphics
+cargo run Run test/recurce.bat --graphics --max-call-depth 3   # проверка лимита глубины
+```
+
+## Лицензия
+
+MIT

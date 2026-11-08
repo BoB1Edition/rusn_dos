@@ -1,2 +1,10 @@
-pub mod system;
+// Ver: 1 File: ./crate/x86/src/instructions/mod.rs
+pub mod alu;
+pub mod bit;
+pub mod control;
+pub mod exchange;
+pub mod group;
 pub mod mov;
+pub mod shift;
+pub mod stack;
+pub mod system;

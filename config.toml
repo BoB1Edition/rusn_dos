@@ -1,8 +1,32 @@
 title = "Biing!"
+
 [resolution]
 width = 1024
 height = 768
 
+[machine]
+a20_enable = false
+ems = false
+dpmi = false
+#disable_change_flags = ["a20_enable", "ems"]
+
+[video]
+type = "vga"
+# Какие типы видеоадаптеров доступны для обнаружения программами. 
+# Если массив пуст, содержит "*" или "all" — доступны все реализованные в эмуляторе типы.
+available_types = ["vga", "svga"] 
+
+[environment]
+PATH = "C:\\;C:\\TASM\\BIN"
+COMSPEC = "C:\\COMMAND.COM"
+PROMPT = "$P$G"
+
+[sound]
+type = "pc_speaker"
+# Доступные звуковые устройства. PC Speaker доступен всегда, если явно не отключен.
+available_types = ["pc_speaker", "sb16"]
+
+# --- Диски ---
 [[drivers]]
 letter = "C"
 path = "./app"
@@ -12,13 +36,3 @@ read_only = false
 letter = "Z"
 path = "/tmp/mgk/"
 read_only = true
-
-[[cpus]]
-name = "486"
-type = "x86"
-feature = ["486", "mmx"]
-
-[[cpus]]
-name = "x86"
-type = "x86"
-feature = ["default"]

@@ -1,14 +1,15 @@
-// Ver: 1 File: crate/bus/src/peripheral.rs
+// Ver: 2 File: crate/bus/src/peripheral.rs
 
-/// Трейт для периферийных устройств (Keyboard, Video, PIC, Timer).
-/// Позволяет "Материнской плате" опрашивать устройства и передавать им данные.
 pub trait Peripheral {
-    /// Чтение из порта устройства (если оно поддерживает порты).
-    fn port_read(&mut self, port: u16) -> u8 { 0 }
-    
-    /// Запись в порт устройства.
-    fn port_write(&mut self, port: u16, val: u8) {}
-    
-    /// Тик синхронизации (например, для таймеров).
+    fn port_read(&mut self, _port: u16) -> u8 {
+        0
+    }
+
+    fn port_write(&mut self, _port: u16, _val: u8) {}
+    fn mem_read(&mut self, _addr: u32) -> u8 {
+        0
+    }
+
+    fn mem_write(&mut self, _addr: u32, _val: u8) {}
     fn tick(&mut self) {}
 }
