@@ -1,4 +1,4 @@
-// Ver: 1 File: crate/x86/src/fpu/convert.rs
+// Ver: 2 File: crate/x86/src/fpu/convert.rs
 //! Конверсии между F80 и целыми / двоичными float форматами.
 
 use super::arith::{ExceptionFlags, RoundingMode};

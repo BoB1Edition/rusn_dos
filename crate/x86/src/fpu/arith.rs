@@ -1,16 +1,13 @@
-// Ver: 1 File: crate/x86/src/fpu/arith.rs
-//! Точная арифметика 80-битного расширенного формата.
-//! Сложение/вычитание с корректным округлением во всех 4 режимах.
+// Ver: 4 File: crate/x86/src/fpu/arith.rs
 
 use super::f80::{EXP_BIAS, EXP_MAX, F80, F80Class};
 
-/// Режим округления (биты 10-11 контрольного слова).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RoundingMode {
-    NearestEven, // 00 — к ближайшему, ничья к чётному
-    Down,        // 01 — к -∞
-    Up,          // 10 — к +∞
-    TowardZero,  // 11 — усечение
+    NearestEven,
+    Down,
+    Up,
+    TowardZero,
 }
 
 impl RoundingMode {
@@ -24,28 +21,24 @@ impl RoundingMode {
     }
 }
 
-/// Флаги исключений (биты 0-5 статусного слова).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ExceptionFlags {
-    pub invalid: bool,   // IE
-    pub denormal: bool,  // DE
-    pub div_zero: bool,  // ZE
-    pub overflow: bool,  // OE
-    pub underflow: bool, // UE
-    pub precision: bool, // PE
+    pub invalid: bool,
+    pub denormal: bool,
+    pub div_zero: bool,
+    pub overflow: bool,
+    pub underflow: bool,
+    pub precision: bool,
 }
 
-/// Несмещённая экспонента минимального нормального числа (смещённая = 1).
-const MIN_NORMAL_EXP: i32 = 1 - EXP_BIAS as i32; // -16382
-/// Несмещённая экспонента максимального конечного числа (смещённая = 0x7FFE).
-const MAX_NORMAL_EXP: i32 = (EXP_MAX as i32 - 1) - EXP_BIAS as i32; // 16383
+const MIN_NORMAL_EXP: i32 = 1 - EXP_BIAS as i32;
+const MAX_NORMAL_EXP: i32 = (EXP_MAX as i32 - 1) - EXP_BIAS as i32;
 
-/// Внутреннее распакованное представление для точной арифметики.
 #[derive(Clone, Copy, Debug)]
 struct Unpacked {
     sign: bool,
-    exp: i32,  // несмещённая экспонента (для нормализованной мантиссы)
-    mant: u64, // нормализованная мантисса, бит 63 = 1 для ненулевых конечных
+    exp: i32,
+    mant: u64,
     kind: UnpackedKind,
 }
 
@@ -58,7 +51,6 @@ enum UnpackedKind {
     SNaN,
 }
 
-/// Распаковывает `F80` во внутреннее представление, нормализуя денормалы.
 fn unpack(f: &F80) -> Unpacked {
     let sign = f.sign();
     let biased_exp = f.biased_exp();
@@ -89,7 +81,6 @@ fn unpack(f: &F80) -> Unpacked {
             mant,
             kind: UnpackedKind::SNaN,
         },
-        // Normal, Subnormal, Unnormal, Denormal
         _ => {
             if mant == 0 {
                 return Unpacked {
@@ -99,7 +90,6 @@ fn unpack(f: &F80) -> Unpacked {
                     kind: UnpackedKind::Zero,
                 };
             }
-            // Нормализуем: сдвигаем влево до появления 1 в бите 63.
             let lz = mant.leading_zeros() as i32;
             let norm_mant = mant << lz;
             let base_exp = if biased_exp == 0 {
@@ -118,9 +108,6 @@ fn unpack(f: &F80) -> Unpacked {
     }
 }
 
-
-/// Сдвигает `sig` вправо на `shift`, возвращая (результат, sticky).
-/// sticky = true, если любой из отброшенных битов был 1.
 fn shift_right_sticky(sig: u128, shift: u32) -> (u128, bool) {
     if shift == 0 {
         return (sig, false);
@@ -132,8 +119,6 @@ fn shift_right_sticky(sig: u128, shift: u32) -> (u128, bool) {
     (sig >> shift, lost != 0)
 }
 
-/// Сдвиг вправо с возвратом (результат, guard, round, sticky).
-/// guard = бит (n-1), round = бит (n-2), sticky = OR битов 0..(n-3).
 fn shift_right_grs(sig: u128, n: u32) -> (u128, bool, bool, bool) {
     if n == 0 {
         return (sig, false, false, false);
@@ -156,9 +141,6 @@ fn shift_right_grs(sig: u128, n: u32) -> (u128, bool, bool, bool) {
     (result, guard, round, sticky)
 }
 
-/// Округляет и упаковывает результат.
-/// `sig` — ненормализованная мантисса в `u128` (целочисленный бит в бите 126),
-/// `exp` — экспонента до нормализации, `sticky` — потерянные при выравнивании биты.
 fn round_pack(
     sign: bool,
     mut exp: i32,
@@ -172,17 +154,12 @@ fn round_pack(
         return F80::zero(zero_sign);
     }
 
-    // Нормализация: старшая 1 в бит 127.
     let lz = sig.leading_zeros() as i32;
     sig <<= lz;
     exp -= lz;
 
-    // Целочисленный бит нормализованного sig в бите 127, а в 64-битной
-    // мантиссе (sig >> 64) он окажется в бите 63. Это даёт множитель 2,
-    // поэтому несмещённая экспонента F80 = exp + 1.
     let mut f80_exp = exp + 1;
 
-    // Значащие 64 бита: биты 64-127. Защитные: биты 0-63.
     let mut sig64 = (sig >> 64) as u64;
     let guard = ((sig >> 63) & 1) != 0;
     let round_bit = ((sig >> 62) & 1) != 0;
@@ -201,7 +178,7 @@ fn round_pack(
     if increment {
         if sig64 == u64::MAX {
             sig64 = 1 << 63;
-            f80_exp += 1; // перенос из округления
+            f80_exp += 1;
         } else {
             sig64 += 1;
         }
@@ -210,7 +187,6 @@ fn round_pack(
         flags.precision = true;
     }
 
-    // Переполнение.
     if f80_exp > MAX_NORMAL_EXP {
         flags.overflow = true;
         flags.precision = true;
@@ -227,14 +203,10 @@ fn round_pack(
         };
     }
 
-    // Исчезновение порядка (денормал или ноль).
     if f80_exp < MIN_NORMAL_EXP {
-        // Значение = sig * 2^(f80_exp - 127).
-        // Денормал: значение = m * 2^(MIN_NORMAL_EXP - 63), m < 2^63.
-        // m = sig >> shift, где shift = 64 + (MIN_NORMAL_EXP - f80_exp).
         let shift = (MIN_NORMAL_EXP - f80_exp) as u32 + 64;
         let (shifted, d_guard, d_round, d_sticky_bits) = shift_right_grs(sig, shift);
-        let mut denorm_mant = shifted as u64; // старшая 1 ниже бита 63
+        let mut denorm_mant = shifted as u64;
         let d_any_lost = d_guard || d_round || d_sticky_bits || sticky;
 
         let d_increment = match rm {
@@ -251,23 +223,20 @@ fn round_pack(
         }
         if d_any_lost {
             flags.precision = true;
+            flags.underflow = true;
         }
-        flags.underflow = true;
 
         return if denorm_mant & (1 << 63) != 0 {
-            // Округление подняло денормал до минимального нормального.
             F80::from_parts(sign, 1, denorm_mant)
         } else {
             F80::from_parts(sign, 0, denorm_mant)
         };
     }
 
-    // Нормальный результат.
     let biased = (f80_exp + EXP_BIAS as i32) as u16;
     F80::from_parts(sign, biased, sig64)
 }
 
-/// Округляет одно распакованное число (используется, когда второй операнд — ноль).
 fn round_single(u: &Unpacked, rm: RoundingMode, flags: &mut ExceptionFlags) -> F80 {
     if u.kind == UnpackedKind::Zero {
         return F80::zero(u.sign);
@@ -276,13 +245,11 @@ fn round_single(u: &Unpacked, rm: RoundingMode, flags: &mut ExceptionFlags) -> F
     round_pack(u.sign, u.exp, sig, false, rm, flags)
 }
 
-/// Сложение двух `F80`.
 pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let mut flags = ExceptionFlags::default();
     let ua = unpack(&a);
     let ub = unpack(&b);
 
-    // --- NaN ---
     let a_nan = matches!(ua.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     let b_nan = matches!(ub.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     if a_nan || b_nan {
@@ -292,11 +259,10 @@ pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
         return (F80::qnan(), flags);
     }
 
-    // --- Infinity ---
     match (ua.kind, ub.kind) {
         (UnpackedKind::Inf, UnpackedKind::Inf) => {
             if ua.sign != ub.sign {
-                flags.invalid = true; // ∞ + (-∞) = NaN
+                flags.invalid = true;
                 return (F80::qnan(), flags);
             }
             return (F80::infinity(ua.sign), flags);
@@ -306,7 +272,6 @@ pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
         _ => {}
     }
 
-    // --- Zero ---
     match (ua.kind, ub.kind) {
         (UnpackedKind::Zero, UnpackedKind::Zero) => {
             let sign = if rm == RoundingMode::Down {
@@ -331,12 +296,10 @@ pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
         _ => {}
     }
 
-    // Оба — нормальные конечные числа.
     if a.is_denormal() || b.is_denormal() {
         flags.denormal = true;
     }
 
-    // Расширяем мантиссы: целочисленный бит в бите 126 (запас для переноса в бит 127).
     let mut a_sig = (ua.mant as u128) << 63;
     let mut b_sig = (ub.mant as u128) << 63;
     let mut a_exp = ua.exp;
@@ -344,7 +307,6 @@ pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let mut a_sign = ua.sign;
     let mut b_sign = ub.sign;
 
-    // Выравнивание: сдвигаем мантиссу с меньшей экспонентой вправо.
     if a_exp < b_exp {
         std::mem::swap(&mut a_sig, &mut b_sig);
         std::mem::swap(&mut a_exp, &mut b_exp);
@@ -354,7 +316,6 @@ pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let (shifted, mut sticky) = shift_right_sticky(b_sig, d);
     b_sig = shifted;
 
-    // Сложение или вычитание мантисс.
     let (result_sign, result_sig) = if a_sign == b_sign {
         (a_sign, a_sig + b_sig)
     } else if a_sig >= b_sig {
@@ -372,23 +333,19 @@ pub fn add(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     (result, flags)
 }
 
-/// Инверсия знака.
 pub fn neg(f: F80) -> F80 {
     F80::from_parts(!f.sign(), f.biased_exp(), f.mant)
 }
 
-/// Вычитание двух `F80`.
 pub fn sub(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     add(a, neg(b), rm)
 }
 
-/// Умножение двух `F80`.
 pub fn mul(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let mut flags = ExceptionFlags::default();
     let ua = unpack(&a);
     let ub = unpack(&b);
 
-    // --- NaN ---
     let a_nan = matches!(ua.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     let b_nan = matches!(ub.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     if a_nan || b_nan {
@@ -398,41 +355,32 @@ pub fn mul(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
         return (F80::qnan(), flags);
     }
 
-    // --- Infinity и Zero ---
     match (ua.kind, ub.kind) {
-        // ∞ × 0 = NaN (invalid) — важное отличие от сложения
         (UnpackedKind::Inf, UnpackedKind::Zero) | (UnpackedKind::Zero, UnpackedKind::Inf) => {
             flags.invalid = true;
             return (F80::qnan(), flags);
         }
-        // ∞ × ненулевое = ∞, знак = XOR знаков
         (UnpackedKind::Inf, _) | (_, UnpackedKind::Inf) => {
             return (F80::infinity(ua.sign ^ ub.sign), flags);
         }
-        // 0 × конечное = 0, знак = XOR знаков
         (UnpackedKind::Zero, _) | (_, UnpackedKind::Zero) => {
             return (F80::zero(ua.sign ^ ub.sign), flags);
         }
         _ => {}
     }
 
-    // Оба — нормальные конечные числа.
     if a.is_denormal() || b.is_denormal() {
         flags.denormal = true;
     }
 
-    // Перемножение мантисс: 64 × 64 → 128 бит (без переполнения).
     let product = (ua.mant as u128) * (ub.mant as u128);
 
-    // Экспоненты складываются.
     let exp = ua.exp + ub.exp;
 
     let result = round_pack(ua.sign ^ ub.sign, exp, product, false, rm, &mut flags);
     (result, flags)
 }
 
-/// Возвращает первый бит дроби r/d и остаток для извлечения следующего бита.
-/// Предполагается r < d. Результат: (бит, новый_остаток).
 fn first_frac_bit(r: u128, d: u128) -> (bool, u128) {
     let twice = r << 1;
     if twice >= d {
@@ -442,13 +390,11 @@ fn first_frac_bit(r: u128, d: u128) -> (bool, u128) {
     }
 }
 
-/// Деление двух `F80`.
 pub fn div(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let mut flags = ExceptionFlags::default();
     let ua = unpack(&a);
     let ub = unpack(&b);
 
-    // --- NaN ---
     let a_nan = matches!(ua.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     let b_nan = matches!(ub.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     if a_nan || b_nan {
@@ -460,35 +406,28 @@ pub fn div(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
 
     let sign = ua.sign ^ ub.sign;
 
-    // --- ∞ / ∞ = NaN (invalid) ---
     if ua.kind == UnpackedKind::Inf && ub.kind == UnpackedKind::Inf {
         flags.invalid = true;
         return (F80::qnan(), flags);
     }
-    // --- ∞ / конечное = ∞ ---
     if ua.kind == UnpackedKind::Inf {
         return (F80::infinity(sign), flags);
     }
-    // --- конечное / ∞ = 0 ---
     if ub.kind == UnpackedKind::Inf {
         return (F80::zero(sign), flags);
     }
-    // --- 0 / 0 = NaN (invalid) ---
     if ua.kind == UnpackedKind::Zero && ub.kind == UnpackedKind::Zero {
         flags.invalid = true;
         return (F80::qnan(), flags);
     }
-    // --- ненулевое / 0 = ∞ (деление на ноль) ---
     if ub.kind == UnpackedKind::Zero {
         flags.div_zero = true;
         return (F80::infinity(sign), flags);
     }
-    // --- 0 / конечное = 0 ---
     if ua.kind == UnpackedKind::Zero {
         return (F80::zero(sign), flags);
     }
 
-    // Оба — нормальные конечные числа.
     if a.is_denormal() || b.is_denormal() {
         flags.denormal = true;
     }
@@ -496,36 +435,27 @@ pub fn div(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let dividend = ua.mant;
     let divisor = ub.mant;
 
-    // Делим мантиссы: обе имеют бит 63 = 1.
-    // q = (dividend / divisor) * 2^64, частное в (0.5, 2), значит q в (2^63, 2^65).
     let num = (dividend as u128) << 64;
     let q = num / (divisor as u128);
     let r = num % (divisor as u128);
 
     let (sig64, mut guard, exp_adjust) = if q >= (1u128 << 64) {
-        // частное >= 1: q 65 бит. Мантисса = q>>1, guard = младший бит q.
         ((q >> 1) as u64, (q & 1) != 0, 0i32)
     } else {
-        // частное < 1: q 64 бита = уже нормализованная мантисса, экспонента -1.
         (q as u64, false, -1i32)
     };
 
-    // Извлекаем недостающие биты (round, и иногда guard) из остатка r.
     let divisor128 = divisor as u128;
     let (round, sticky) = if exp_adjust == 0 {
-        // guard уже взят из q; из r нужен round + sticky.
         let (round_bit, rem) = first_frac_bit(r, divisor128);
         (round_bit, rem != 0)
     } else {
-        // guard берём из r, затем round + sticky.
         let (g, rem1) = first_frac_bit(r, divisor128);
         guard = g;
         let (round_bit, rem2) = first_frac_bit(rem1, divisor128);
         (round_bit, rem2 != 0)
     };
 
-    // Конструируем sig для round_pack: мантисса в битах 64-127,
-    // guard в 63, round в 62. Уже нормализован (бит 127 = 1).
     let sig = ((sig64 as u128) << 64) | ((guard as u128) << 63) | ((round as u128) << 62);
 
     let exp = ua.exp - ub.exp - 1 + exp_adjust;
@@ -534,8 +464,6 @@ pub fn div(a: F80, b: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     (result, flags)
 }
 
-/// Целочисленный квадратный корень из u128, результат в u64.
-/// Вход до 128 бит, корень до 64 бит. Побитовый алгоритм.
 fn isqrt_u128(n: u128) -> u64 {
     if n == 0 {
         return 0;
@@ -558,7 +486,6 @@ fn isqrt_u128(n: u128) -> u64 {
     result as u64
 }
 
-/// Квадратный корень `F80`.
 pub fn sqrt(a: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     let mut flags = ExceptionFlags::default();
     let ua = unpack(&a);
@@ -571,20 +498,17 @@ pub fn sqrt(a: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
         }
         UnpackedKind::Inf => {
             if ua.sign {
-                // sqrt(-∞) = NaN, invalid
                 flags.invalid = true;
                 return (F80::qnan(), flags);
             }
             return (F80::infinity(false), flags);
         }
         UnpackedKind::Zero => {
-            // sqrt(±0) = ±0
             return (F80::zero(ua.sign), flags);
         }
         UnpackedKind::Normal => {}
     }
 
-    // Отрицательное ненулевое → NaN, invalid
     if ua.sign {
         flags.invalid = true;
         return (F80::qnan(), flags);
@@ -594,33 +518,26 @@ pub fn sqrt(a: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
         flags.denormal = true;
     }
 
-    let mant = ua.mant; // бит 63 = 1
-    // значение = mant × 2^e, где e = ua.exp - 63
+    let mant = ua.mant;
     let e = ua.exp - 63;
 
-    // Делаем экспоненту чётной, чтобы после деления пополам получить
-    // нормализованную мантиссу. Расширяем мантиссу до 127/128 бит.
     let (n, mut result_exp) = if e & 1 == 0 {
-        // e чётное: result_mant = isqrt(mant << 64)
         ((mant as u128) << 64, e / 2 + 31)
     } else {
-        // e нечётное: result_mant = isqrt(mant << 63), экспонента на 1 меньше
         ((mant as u128) << 63, (e - 1) / 2 + 32)
     };
 
     let q = isqrt_u128(n);
     let q2 = (q as u128) * (q as u128);
-    let r = n - q2; // остаток: 0 → точный корень
+    let r = n - q2;
 
     let mut result_mant = q;
     if r > 0 {
         flags.precision = true;
-        // Точного совпадения с серединой (r = q + 0.25) для целого r не бывает,
-        // поэтому «ничья к чётному» не возникает — только ближайшее.
         let increment = match rm {
-            RoundingMode::NearestEven => r > (q as u128), // sqrt > q + 0.5
-            RoundingMode::Up => true,                     // любой остаток → вверх
-            RoundingMode::Down => false,                  // sqrt ≥ 0 → вниз = усечение
+            RoundingMode::NearestEven => r > (q as u128),
+            RoundingMode::Up => true,
+            RoundingMode::Down => false,
             RoundingMode::TowardZero => false,
         };
         if increment {
@@ -637,7 +554,6 @@ pub fn sqrt(a: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
     (F80::from_parts(false, biased, result_mant), flags)
 }
 
-/// Результат сравнения двух `F80`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CmpResult {
     Greater,
@@ -647,25 +563,21 @@ pub enum CmpResult {
 }
 
 impl CmpResult {
-    /// Биты C3, C2, C1, C0 для статусного слова FCOM/FCOMP/FCOMPP/FTST.
     #[inline]
     pub fn condition_codes(self) -> (bool, bool, bool, bool) {
         match self {
             CmpResult::Greater => (false, false, false, false),
             CmpResult::Less => (false, false, false, true),
             CmpResult::Equal => (true, false, false, false),
-            CmpResult::Unordered => (true, false, false, true),
+            CmpResult::Unordered => (true, true, false, true),
         }
     }
 }
 
-/// Сравнение двух `F80`.
 pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
     let mut flags = ExceptionFlags::default();
     let ua = unpack(&a);
     let ub = unpack(&b);
-
-    // --- NaN ---
     let a_nan = matches!(ua.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     let b_nan = matches!(ub.kind, UnpackedKind::QNaN | UnpackedKind::SNaN);
     if a_nan || b_nan {
@@ -674,8 +586,6 @@ pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
         }
         return (CmpResult::Unordered, flags);
     }
-
-    // --- Infinity ---
     match (ua.kind, ub.kind) {
         (UnpackedKind::Inf, UnpackedKind::Inf) => {
             if ua.sign == ub.sign {
@@ -713,15 +623,11 @@ pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
         }
         _ => {}
     }
-
-    // --- Zero ---
     match (ua.kind, ub.kind) {
         (UnpackedKind::Zero, UnpackedKind::Zero) => {
-            // +0 = -0 в x87
             return (CmpResult::Equal, flags);
         }
         (UnpackedKind::Zero, _) => {
-            // 0 vs b: если b > 0 → Less, если b < 0 → Greater
             return (
                 if ub.sign {
                     CmpResult::Greater
@@ -743,13 +649,9 @@ pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
         }
         _ => {}
     }
-
-    // Оба — нормальные конечные числа.
     if a.is_denormal() || b.is_denormal() {
         flags.denormal = true;
     }
-
-    // Разные знаки: положительный > отрицательный.
     if ua.sign != ub.sign {
         return (
             if ua.sign {
@@ -760,8 +662,6 @@ pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
             flags,
         );
     }
-
-    // Одинаковые знаки: сравниваем по абсолютной величине.
     let abs_cmp = if ua.exp != ub.exp {
         if ua.exp > ub.exp { 1 } else { -1 }
     } else if ua.mant != ub.mant {
@@ -771,7 +671,6 @@ pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
     };
 
     let result = if ua.sign {
-        // Оба отрицательные: инвертируем.
         match abs_cmp {
             1 => CmpResult::Less,
             -1 => CmpResult::Greater,
@@ -788,9 +687,89 @@ pub fn cmp(a: F80, b: F80) -> (CmpResult, ExceptionFlags) {
     (result, flags)
 }
 
-/// Сравнение `F80` с нулём (FTST).
 pub fn ftst(a: F80) -> (CmpResult, ExceptionFlags) {
     cmp(a, F80::zero(false))
+}
+
+pub fn round_to_integer(a: F80, rm: RoundingMode) -> (F80, ExceptionFlags) {
+    let mut flags = ExceptionFlags::default();
+    let ua = unpack(&a);
+
+    match ua.kind {
+        UnpackedKind::Zero => return (F80::zero(ua.sign), flags),
+        UnpackedKind::Inf => return (F80::infinity(ua.sign), flags),
+        UnpackedKind::QNaN => return (F80::qnan(), flags),
+        UnpackedKind::SNaN => {
+            flags.invalid = true;
+            return (F80::qnan(), flags);
+        }
+        UnpackedKind::Normal => {}
+    }
+
+    if a.is_denormal() {
+        flags.denormal = true;
+    }
+    if ua.exp >= 63 {
+        return (a, flags);
+    }
+
+    let shift = (63 - ua.exp) as u32;
+    if shift >= 64 {
+        let result = match rm {
+            RoundingMode::NearestEven => {
+                if ua.exp == -1 && ua.mant != (1u64 << 63) {
+                    F80::one(ua.sign)
+                } else {
+                    F80::zero(ua.sign)
+                }
+            }
+            RoundingMode::Down => {
+                if ua.sign {
+                    F80::one(true)
+                } else {
+                    F80::zero(ua.sign)
+                }
+            }
+            RoundingMode::Up => {
+                if ua.sign {
+                    F80::zero(ua.sign)
+                } else {
+                    F80::one(false)
+                }
+            }
+            RoundingMode::TowardZero => F80::zero(ua.sign),
+        };
+        flags.precision = true;
+        return (result, flags);
+    }
+
+    let (int_part, guard, round, sticky) = shift_right_grs(ua.mant as u128, shift);
+    let any_lost = guard || round || sticky;
+    if any_lost {
+        flags.precision = true;
+    }
+
+    let increment = match rm {
+        RoundingMode::NearestEven => guard && (round || sticky || (int_part & 1 != 0)),
+        RoundingMode::Down => ua.sign && any_lost,
+        RoundingMode::Up => !ua.sign && any_lost,
+        RoundingMode::TowardZero => false,
+    };
+
+    let mut int_val = int_part;
+    if increment {
+        int_val += 1;
+    }
+
+    if int_val == 0 {
+        return (F80::zero(ua.sign), flags);
+    }
+    let int_u64 = int_val as u64;
+    let lz = int_u64.leading_zeros() as i32;
+    let mant = int_u64 << lz;
+    let exp = 63 - lz;
+    let biased = EXP_BIAS as i32 + exp;
+    (F80::from_parts(ua.sign, biased as u16, mant), flags)
 }
 
 #[cfg(test)]
@@ -798,7 +777,6 @@ mod tests {
     use super::*;
 
     fn f64_to_f80(v: f64) -> F80 {
-        // Простейшая конверсия для тестов через биты.
         let bits = v.to_bits();
         let sign = (bits >> 63) & 1 != 0;
         let f64_exp = ((bits >> 52) & 0x7FF) as i32;
@@ -813,8 +791,6 @@ mod tests {
                 F80::qnan()
             };
         }
-        // Нормальное f64: значение = (1 + frac/2^52) * 2^(f64_exp - 1023)
-        // В 80-бит: мантисса = (2^52 + frac) << 11, целочисленный бит в бите 63.
         let mant = (0x0010_0000_0000_0000u64 | f64_frac) << 11;
         let exp = f64_exp - 1023;
         let biased = (exp + EXP_BIAS as i32) as u16;
@@ -905,7 +881,6 @@ mod tests {
 
     #[test]
     fn test_different_exponents() {
-        // 1.5 + 0.25 = 1.75
         let a = f64_to_f80(1.5);
         let b = f64_to_f80(0.25);
         let (result, _) = add(a, b, RoundingMode::NearestEven);
@@ -915,7 +890,6 @@ mod tests {
 
     #[test]
     fn test_subtraction_larger() {
-        // 2.0 - 1.0 = 1.0
         let two = f64_to_f80(2.0);
         let one = f64_to_f80(1.0);
         let (result, _) = sub(two, one, RoundingMode::NearestEven);
@@ -1149,9 +1123,7 @@ mod tests {
         let (r, flags) = sqrt(f64_to_f80(2.0), RoundingMode::NearestEven);
         assert_eq!(r.classify(), F80Class::Normal);
         assert!(!r.sign());
-        // sqrt(2) ∈ [1, 2) → несмещённая экспонента 0, смещённая 16383
         assert_eq!(r.biased_exp(), 16383);
-        // sqrt(2) иррационален → округление неточное
         assert!(flags.precision);
     }
 
@@ -1183,14 +1155,13 @@ mod tests {
         let pz = F80::zero(false);
         let nz = F80::zero(true);
         let (r, _) = cmp(pz, nz);
-        assert_eq!(r, CmpResult::Equal); // +0 == -0
+        assert_eq!(r, CmpResult::Equal);
     }
 
     #[test]
     fn test_cmp_neg_values() {
         let neg_one = neg(f64_to_f80(1.0));
         let neg_two = neg(f64_to_f80(2.0));
-        // -1 > -2
         let (r, _) = cmp(neg_one, neg_two);
         assert_eq!(r, CmpResult::Greater);
     }
@@ -1302,6 +1273,6 @@ mod tests {
         assert_eq!((c3, c2, c1, c0), (true, false, false, false));
 
         let (c3, c2, c1, c0) = CmpResult::Unordered.condition_codes();
-        assert_eq!((c3, c2, c1, c0), (true, false, false, true));
+        assert_eq!((c3, c2, c1, c0), (true, true, false, true));
     }
 }
