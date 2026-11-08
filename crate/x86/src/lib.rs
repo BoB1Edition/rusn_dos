@@ -6,4 +6,4 @@ pub mod modrm;
 pub mod instructions;
 pub mod executor;
 pub mod tracer;
-
+pub mod fpu;

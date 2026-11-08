@@ -1,4 +1,4 @@
-// Ver: 3 File: ./crate/x86/src/instructions/bit.rs
+// Ver: 1 File: ./crate/x86/src/instructions/bit.rs
 use crate::cpu::X86Cpu;
 use crate::modrm::ModRm;
 use bus::Machine;

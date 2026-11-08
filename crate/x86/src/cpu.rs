@@ -1,4 +1,5 @@
-// Ver: 2 File: ./crate/x86/src/cpu.rs
+// Ver: 1 File: ./crate/x86/src/cpu.rs
+use crate::fpu::FpuState;
 use crate::tracer::{FileTracer, Tracer};
 use crate::{registers::Registers, tracer::NullTracer};
 use bus::{Cpu, Machine};
@@ -31,10 +32,12 @@ pub struct X86Cpu {
     pub idtr_limit: u16,
     pub idtr_base: u32,
     pub cr0: u32,
+    pub fpu: FpuState,
     pub tracer: Box<dyn Tracer>,
     pub(crate) instruction_bytes: Vec<u8>,
     pub(crate) instruction_start_ip: u32,
     pub(crate) instruction_start_cs: u16,
+    
 }
 
 impl Default for X86Cpu {
@@ -57,6 +60,7 @@ impl X86Cpu {
             idtr_limit: 0,
             idtr_base: 0,
             cr0: 0,
+            fpu: FpuState::new(),
             tracer: Box::new(NullTracer),
             instruction_bytes: Vec::with_capacity(16),
             instruction_start_ip: 0,

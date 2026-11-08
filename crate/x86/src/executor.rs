@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/x86/src/executor.rs
+// Ver: 1 File: ./crate/x86/src/executor.rs
 use crate::cpu::X86Cpu;
 use crate::instructions::{alu, bit, control, exchange, group, mov, shift, stack, system};
 use bus::Machine;
@@ -308,6 +308,14 @@ pub fn execute(cpu: &mut X86Cpu, machine: &mut dyn Machine, opcode: u8) {
         0xD5 => system::aad(cpu, machine),
         0xD6 => system::salc(cpu, machine),
         0xD7 => system::xlat(cpu, machine),
+        0xD8 => crate::fpu::execute_esc(cpu, machine, 0xD8),
+        0xD9 => crate::fpu::execute_esc(cpu, machine, 0xD9),
+        0xDA => crate::fpu::execute_esc(cpu, machine, 0xDA),
+        0xDB => crate::fpu::execute_esc(cpu, machine, 0xDB),
+        0xDC => crate::fpu::execute_esc(cpu, machine, 0xDC),
+        0xDD => crate::fpu::execute_esc(cpu, machine, 0xDD),
+        0xDE => crate::fpu::execute_esc(cpu, machine, 0xDE),
+        0xDF => crate::fpu::execute_esc(cpu, machine, 0xDF),
         0xE4 => system::in_al_imm8(cpu, machine),
         0xE5 => system::in_ax_imm8(cpu, machine),
         0xE6 => system::out_imm8_al(cpu, machine),

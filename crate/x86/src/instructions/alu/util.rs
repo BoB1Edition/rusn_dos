@@ -1,3 +1,4 @@
+// Ver: 1 File: ./crate/x86/src/instructions/alu/util.rs
 use crate::cpu::X86Cpu;
 use crate::modrm::ModRm;
 use bus::Machine;

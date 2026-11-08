@@ -1,4 +1,4 @@
-// Ver: 2 File: ./crate/x86/src/flags.rs
+// Ver: 1 File: ./crate/x86/src/flags.rs
 
 pub const CF: u16 = 1 << 0;
 pub const PF: u16 = 1 << 2;
